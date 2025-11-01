@@ -1,0 +1,29 @@
+{
+  "base_path": "examples/",
+  "operations": [
+    {
+      "type": "AddStructField",
+      "struct_name": "User",
+      "field_def": "created_at: Option<chrono::DateTime<chrono::Utc>>",
+      "position": "Last"
+    },
+    {
+      "type": "AddStructField",
+      "struct_name": "User",
+      "field_def": "updated_at: Option<chrono::DateTime<chrono::Utc>>",
+      "position": "Last"
+    },
+    {
+      "type": "AddStructField",
+      "struct_name": "Post",
+      "field_def": "created_at: Option<chrono::DateTime<chrono::Utc>>",
+      "position": "Last"
+    },
+    {
+      "type": "AddStructField",
+      "struct_name": "Post",
+      "field_def": "updated_at: Option<chrono::DateTime<chrono::Utc>>",
+      "position": "Last"
+    }
+  ]
+}

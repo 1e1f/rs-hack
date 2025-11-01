@@ -1,0 +1,25 @@
+{
+  "base_path": "examples/",
+  "operations": [
+    {
+      "type": "AddEnumVariant",
+      "enum_name": "Status",
+      "variant_def": "Archived",
+      "position": "Last"
+    },
+    {
+      "type": "AddEnumVariant",
+      "enum_name": "Status",
+      "variant_def": "Pending",
+      "position": {
+        "Before": "Draft"
+      }
+    },
+    {
+      "type": "AddEnumVariant",
+      "enum_name": "MessageType",
+      "variant_def": "Video { url: String, duration_secs: u32 }",
+      "position": "Last"
+    }
+  ]
+}
