@@ -4,11 +4,13 @@
 use syn::visit::Visit;
 use syn::{*, spanned::Spanned};
 
+#[allow(dead_code)]
 pub struct NodeFinder {
     pub matches: Vec<NodeMatch>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum NodeMatch {
     Struct { name: String, span: proc_macro2::Span },
     Enum { name: String, span: proc_macro2::Span },
@@ -16,6 +18,7 @@ pub enum NodeMatch {
     MatchExpr { span: proc_macro2::Span },
 }
 
+#[allow(dead_code)]
 impl NodeFinder {
     pub fn new() -> Self {
         Self {

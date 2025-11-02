@@ -7,6 +7,7 @@ pub enum Operation {
     AddStructField(AddStructFieldOp),
     UpdateStructField(UpdateStructFieldOp),
     RemoveStructField(RemoveStructFieldOp),
+    AddStructLiteralField(AddStructLiteralFieldOp),
     AddEnumVariant(AddEnumVariantOp),
     UpdateEnumVariant(UpdateEnumVariantOp),
     RemoveEnumVariant(RemoveEnumVariantOp),
@@ -23,6 +24,8 @@ pub struct AddStructFieldOp {
     pub struct_name: String,
     pub field_def: String, // e.g., "new_field: Option<String>"
     pub position: InsertPosition,
+    #[serde(default)]
+    pub literal_default: Option<String>, // Optional: value for struct literals (e.g., "None", "vec![]", "0")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +38,13 @@ pub struct UpdateStructFieldOp {
 pub struct RemoveStructFieldOp {
     pub struct_name: String,
     pub field_name: String, // Name of the field to remove
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddStructLiteralFieldOp {
+    pub struct_name: String,
+    pub field_def: String, // e.g., "return_type: None"
+    pub position: InsertPosition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +71,9 @@ pub struct AddMatchArmOp {
     pub pattern: String, // e.g., "MyEnum::NewVariant"
     pub body: String,    // e.g., "todo!()"
     pub function_name: Option<String>, // Optional: specific function containing match
+    #[serde(default)]
+    pub auto_detect: bool, // Auto-detect missing enum variants
+    pub enum_name: Option<String>, // Enum name for auto-detection
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,10 +123,26 @@ pub struct BatchSpec {
     pub operations: Vec<Operation>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeLocation {
     pub line: usize,
     pub column: usize,
     pub end_line: usize,
     pub end_column: usize,
+}
+
+/// Backup of a single AST node before modification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupNode {
+    pub node_type: String,        // "ItemStruct", "ItemEnum", "ItemImpl", "ExprStruct", "ExprMatch"
+    pub identifier: String,        // "User", "Status::Draft", "process_event", etc.
+    pub original_content: String,  // Original AST node as formatted code
+    pub location: NodeLocation,
+}
+
+/// Result of applying an operation
+#[derive(Debug)]
+pub struct ModificationResult {
+    pub changed: bool,
+    pub modified_nodes: Vec<BackupNode>,
 }

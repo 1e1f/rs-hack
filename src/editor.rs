@@ -2,12 +2,13 @@ use anyhow::{Context, Result};
 use proc_macro2::{LineColumn, Span};
 use syn::{
     parse_str, File, Item, ItemEnum, ItemStruct,
-    Fields, Field, spanned::Spanned, Arm, ExprMatch,
-    visit_mut::VisitMut,
+    Fields, Field, spanned::Spanned, Arm, ExprMatch, ExprStruct,
+    visit_mut::VisitMut, Expr,
 };
 use quote::ToTokens;
 
 use crate::operations::*;
+use prettyplease;
 
 pub struct RustEditor {
     content: String,
@@ -64,11 +65,12 @@ impl RustEditor {
         offsets
     }
     
-    pub fn apply_operation(&mut self, op: &Operation) -> Result<bool> {
+    pub fn apply_operation(&mut self, op: &Operation) -> Result<ModificationResult> {
         match op {
             Operation::AddStructField(op) => self.add_struct_field(op),
             Operation::UpdateStructField(op) => self.update_struct_field(op),
             Operation::RemoveStructField(op) => self.remove_struct_field(op),
+            Operation::AddStructLiteralField(op) => self.add_struct_literal_field(op),
             Operation::AddEnumVariant(op) => self.add_enum_variant(op),
             Operation::UpdateEnumVariant(op) => self.update_enum_variant(op),
             Operation::RemoveEnumVariant(op) => self.remove_enum_variant(op),
@@ -81,7 +83,7 @@ impl RustEditor {
         }
     }
     
-    fn add_struct_field(&mut self, op: &AddStructFieldOp) -> Result<bool> {
+    pub(crate) fn add_struct_field(&mut self, op: &AddStructFieldOp) -> Result<ModificationResult> {
         // Find the struct and clone it to avoid borrowing issues
         let item_struct = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -94,7 +96,57 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
 
-        self.insert_struct_field(&item_struct, op)
+        // Create backup of original struct before modification
+        let backup_node = BackupNode {
+            node_type: "ItemStruct".to_string(),
+            identifier: op.struct_name.clone(),
+            original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
+            location: self.span_to_location(item_struct.span()),
+        };
+
+        // First, insert the field into the struct definition
+        let modified = self.insert_struct_field(&item_struct, op)
+            .context("Failed to add field to struct definition")?;
+
+        if !modified {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
+        }
+
+        let mut modified_nodes = vec![backup_node];
+
+        // If literal_default is provided and struct field was added, also update struct literals
+        if let Some(ref literal_default) = op.literal_default {
+            // Re-parse the content to update syntax_tree with the struct field changes
+            self.syntax_tree = syn::parse_str(&self.content)
+                .context("Failed to re-parse content after adding struct field")?;
+            self.line_offsets = Self::compute_line_offsets(&self.content);
+
+            // Extract field name from field_def (e.g., "return_type: Option<Type>" -> "return_type")
+            let field_name = op.field_def.split(':')
+                .next()
+                .map(|s| s.trim().to_string())
+                .context("Failed to extract field name from field definition")?;
+
+            // Create the AddStructLiteralFieldOp
+            let literal_op = AddStructLiteralFieldOp {
+                struct_name: op.struct_name.clone(),
+                field_def: format!("{}: {}", field_name, literal_default),
+                position: op.position.clone(),
+            };
+
+            // Update all struct literals
+            let literal_result = self.add_struct_literal_field(&literal_op)
+                .context("Failed to update struct literals")?;
+            modified_nodes.extend(literal_result.modified_nodes);
+        }
+
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes,
+        })
     }
     
     fn insert_struct_field(&mut self, item_struct: &ItemStruct, op: &AddStructFieldOp) -> Result<bool> {
@@ -177,7 +229,7 @@ impl RustEditor {
         anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
     }
 
-    fn update_struct_field(&mut self, op: &UpdateStructFieldOp) -> Result<bool> {
+    pub(crate) fn update_struct_field(&mut self, op: &UpdateStructFieldOp) -> Result<ModificationResult> {
         // Find the struct and clone it to avoid borrowing issues
         let item_struct = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -190,7 +242,20 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
 
-        self.replace_struct_field(&item_struct, op)
+        // Create backup of original struct before modification
+        let backup_node = BackupNode {
+            node_type: "ItemStruct".to_string(),
+            identifier: op.struct_name.clone(),
+            original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
+            location: self.span_to_location(item_struct.span()),
+        };
+
+        let modified = self.replace_struct_field(&item_struct, op)?;
+
+        Ok(ModificationResult {
+            changed: modified,
+            modified_nodes: if modified { vec![backup_node] } else { vec![] },
+        })
     }
 
     fn replace_struct_field(&mut self, item_struct: &ItemStruct, op: &UpdateStructFieldOp) -> Result<bool> {
@@ -234,7 +299,7 @@ impl RustEditor {
         anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
     }
 
-    fn remove_struct_field(&mut self, op: &RemoveStructFieldOp) -> Result<bool> {
+    pub(crate) fn remove_struct_field(&mut self, op: &RemoveStructFieldOp) -> Result<ModificationResult> {
         // Find the struct and clone it to avoid borrowing issues
         let item_struct = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -246,6 +311,14 @@ impl RustEditor {
                 None
             })
             .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
+
+        // Create backup of original struct before modification
+        let backup_node = BackupNode {
+            node_type: "ItemStruct".to_string(),
+            identifier: op.struct_name.clone(),
+            original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
+            location: self.span_to_location(item_struct.span()),
+        };
 
         if let Fields::Named(ref fields) = item_struct.fields {
             // Find the field to remove
@@ -293,13 +366,96 @@ impl RustEditor {
                 self.content.replace_range(start..end, "");
             }
 
-            return Ok(true);
+            return Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![backup_node],
+            });
         }
 
         anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
     }
 
-    fn add_enum_variant(&mut self, op: &AddEnumVariantOp) -> Result<bool> {
+    pub(crate) fn add_struct_literal_field(&mut self, op: &AddStructLiteralFieldOp) -> Result<ModificationResult> {
+        // Parse the field name from field_def (e.g., "return_type: None" -> "return_type")
+        let field_name = op.field_def.split(':')
+            .next()
+            .map(|s| s.trim().to_string())
+            .context("Field definition must contain ':'")?;
+
+        // Collect backups of all struct literal expressions that will be modified
+        let backup_nodes = self.collect_struct_literal_backups(&op.struct_name);
+
+        // Use a visitor to find and modify all struct literals
+        let mut visitor = StructLiteralFieldAdder {
+            struct_name: op.struct_name.clone(),
+            field_def: op.field_def.clone(),
+            field_name,
+            position: op.position.clone(),
+            modified: false,
+        };
+
+        visitor.visit_file_mut(&mut self.syntax_tree);
+
+        if visitor.modified {
+            // Reformat the entire file for struct literals
+            self.content = prettyplease::unparse(&self.syntax_tree);
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: backup_nodes,
+            })
+        } else {
+            Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            })
+        }
+    }
+
+    /// Collect backups of all struct literal expressions for a given struct name
+    fn collect_struct_literal_backups(&self, struct_name: &str) -> Vec<BackupNode> {
+        use syn::visit::Visit;
+
+        struct LiteralCollector {
+            struct_name: String,
+            backups: Vec<BackupNode>,
+            counter: usize,
+        }
+
+        impl<'ast> Visit<'ast> for LiteralCollector {
+            fn visit_expr(&mut self, node: &'ast Expr) {
+                if let Expr::Struct(expr_struct) = node {
+                    if let Some(last_seg) = expr_struct.path.segments.last() {
+                        if last_seg.ident.to_string() == self.struct_name {
+                            self.backups.push(BackupNode {
+                                node_type: "ExprStruct".to_string(),
+                                identifier: format!("{}#{}", self.struct_name, self.counter),
+                                original_content: expr_struct.to_token_stream().to_string(),
+                                location: NodeLocation {
+                                    line: 0, // We don't have precise location info in visitor
+                                    column: 0,
+                                    end_line: 0,
+                                    end_column: 0,
+                                },
+                            });
+                            self.counter += 1;
+                        }
+                    }
+                }
+                syn::visit::visit_expr(self, node);
+            }
+        }
+
+        let mut collector = LiteralCollector {
+            struct_name: struct_name.to_string(),
+            backups: Vec::new(),
+            counter: 0,
+        };
+
+        collector.visit_file(&self.syntax_tree);
+        collector.backups
+    }
+
+    pub(crate) fn add_enum_variant(&mut self, op: &AddEnumVariantOp) -> Result<ModificationResult> {
         // Find the enum and clone it to avoid borrowing issues
         let item_enum = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -312,7 +468,20 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Enum '{}' not found", op.enum_name))?;
 
-        self.insert_enum_variant(&item_enum, op)
+        // Create backup of original enum before modification
+        let backup_node = BackupNode {
+            node_type: "ItemEnum".to_string(),
+            identifier: op.enum_name.clone(),
+            original_content: self.unparse_item(&Item::Enum(item_enum.clone())),
+            location: self.span_to_location(item_enum.span()),
+        };
+
+        let modified = self.insert_enum_variant(&item_enum, op)?;
+
+        Ok(ModificationResult {
+            changed: modified,
+            modified_nodes: if modified { vec![backup_node] } else { vec![] },
+        })
     }
     
     fn insert_enum_variant(&mut self, item_enum: &ItemEnum, op: &AddEnumVariantOp) -> Result<bool> {
@@ -374,7 +543,7 @@ impl RustEditor {
         Ok(true)
     }
 
-    fn update_enum_variant(&mut self, op: &UpdateEnumVariantOp) -> Result<bool> {
+    fn update_enum_variant(&mut self, op: &UpdateEnumVariantOp) -> Result<ModificationResult> {
         // Find the enum and clone it
         let item_enum = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -386,6 +555,14 @@ impl RustEditor {
                 None
             })
             .ok_or_else(|| anyhow::anyhow!("Enum '{}' not found", op.enum_name))?;
+
+        // Create backup of original enum before modification
+        let backup_node = BackupNode {
+            node_type: "ItemEnum".to_string(),
+            identifier: op.enum_name.clone(),
+            original_content: self.unparse_item(&Item::Enum(item_enum.clone())),
+            location: self.span_to_location(item_enum.span()),
+        };
 
         // Parse the new variant to get its name
         let variant_code = format!("enum Dummy {{ {} }}", op.variant_def);
@@ -411,10 +588,13 @@ impl RustEditor {
         let variant_str = new_variant.to_token_stream().to_string();
         self.content.replace_range(start..end, &variant_str);
 
-        Ok(true)
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: vec![backup_node],
+        })
     }
 
-    fn remove_enum_variant(&mut self, op: &RemoveEnumVariantOp) -> Result<bool> {
+    pub(crate) fn remove_enum_variant(&mut self, op: &RemoveEnumVariantOp) -> Result<ModificationResult> {
         // Find the enum
         let item_enum = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -426,6 +606,14 @@ impl RustEditor {
                 None
             })
             .ok_or_else(|| anyhow::anyhow!("Enum '{}' not found", op.enum_name))?;
+
+        // Create backup of original enum before modification
+        let backup_node = BackupNode {
+            node_type: "ItemEnum".to_string(),
+            identifier: op.enum_name.clone(),
+            original_content: self.unparse_item(&Item::Enum(item_enum.clone())),
+            location: self.span_to_location(item_enum.span()),
+        };
 
         // Find the variant to remove
         let variant_to_remove = item_enum.variants.iter()
@@ -468,10 +656,23 @@ impl RustEditor {
             self.content.replace_range(start..end, "");
         }
 
-        Ok(true)
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: vec![backup_node],
+        })
     }
 
-    fn add_match_arm(&mut self, op: &AddMatchArmOp) -> Result<bool> {
+    pub(crate) fn add_match_arm(&mut self, op: &AddMatchArmOp) -> Result<ModificationResult> {
+        if op.auto_detect {
+            // Auto-detect mode: find all missing enum variants
+            self.add_missing_match_arms(op)
+        } else {
+            // Normal mode: add a single match arm
+            self.add_single_match_arm(op)
+        }
+    }
+
+    fn add_single_match_arm(&mut self, op: &AddMatchArmOp) -> Result<ModificationResult> {
         // Parse the pattern and body by creating a dummy match expression
         let dummy_match = format!("match () {{ {} => {}, }}", op.pattern, op.body);
         let expr: syn::Expr = parse_str(&dummy_match)
@@ -483,6 +684,25 @@ impl RustEditor {
                 .context("Failed to extract arm from dummy match")?
         } else {
             anyhow::bail!("Expected match expression");
+        };
+
+        // Collect backup of function before modification
+        let backup_node = if let Some(ref fn_name) = op.function_name {
+            self.get_function_backup(fn_name)?
+        } else {
+            // If no function specified, we'll backup all modified functions later
+            // For now, create a generic backup
+            BackupNode {
+                node_type: "Unknown".to_string(),
+                identifier: "match_expression".to_string(),
+                original_content: String::new(),
+                location: NodeLocation {
+                    line: 0,
+                    column: 0,
+                    end_line: 0,
+                    end_column: 0,
+                },
+            }
         };
 
         // Find and modify match expressions
@@ -499,13 +719,225 @@ impl RustEditor {
         if visitor.modified {
             // Replace just the modified function
             self.replace_modified_functions(&visitor.modified_function)?;
-            Ok(true)
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![backup_node],
+            })
         } else {
-            Ok(false)
+            Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            })
         }
     }
 
-    fn update_match_arm(&mut self, op: &UpdateMatchArmOp) -> Result<bool> {
+    /// Format a single item to string using prettyplease
+    fn unparse_item(&self, item: &Item) -> String {
+        let temp_file = syn::File {
+            shebang: None,
+            attrs: Vec::new(),
+            items: vec![item.clone()],
+        };
+        prettyplease::unparse(&temp_file).trim().to_string()
+    }
+
+    /// Get backup of a function before modification
+    fn get_function_backup(&self, fn_name: &str) -> Result<BackupNode> {
+        for item in &self.syntax_tree.items {
+            if let Item::Fn(f) = item {
+                if f.sig.ident == fn_name {
+                    return Ok(BackupNode {
+                        node_type: "ItemFn".to_string(),
+                        identifier: fn_name.to_string(),
+                        original_content: self.unparse_item(&Item::Fn(f.clone())),
+                        location: self.span_to_location(f.span()),
+                    });
+                }
+            }
+        }
+        anyhow::bail!("Function '{}' not found", fn_name)
+    }
+
+    fn add_missing_match_arms(&mut self, op: &AddMatchArmOp) -> Result<ModificationResult> {
+        // Get the enum name
+        let enum_name = op.enum_name.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("enum_name is required for auto-detect"))?;
+
+        // Find all enum variants
+        let enum_variants = self.find_enum_variants(enum_name)?;
+
+        if enum_variants.is_empty() {
+            anyhow::bail!("Enum '{}' not found or has no variants", enum_name);
+        }
+
+        // Find existing match arms
+        let existing_patterns = self.find_existing_match_patterns(&op.function_name);
+
+        // Determine missing variants
+        let mut missing_variants = Vec::new();
+        for variant in &enum_variants {
+            let pattern = format!("{}::{}", enum_name, variant);
+            let pattern_normalized = pattern.replace(" ", "");
+
+            let exists = existing_patterns.iter().any(|p| {
+                p.replace(" ", "") == pattern_normalized
+            });
+
+            if !exists {
+                missing_variants.push(variant.clone());
+            }
+        }
+
+        if missing_variants.is_empty() {
+            println!("All enum variants already covered in match expressions");
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
+        }
+
+        // Get backup of function before modification
+        let backup_node = if let Some(ref fn_name) = op.function_name {
+            self.get_function_backup(fn_name)?
+        } else {
+            BackupNode {
+                node_type: "Unknown".to_string(),
+                identifier: "match_expression".to_string(),
+                original_content: String::new(),
+                location: NodeLocation {
+                    line: 0,
+                    column: 0,
+                    end_line: 0,
+                    end_column: 0,
+                },
+            }
+        };
+
+        // Add ALL missing match arms in one pass using a visitor
+        let mut arms_to_add = Vec::new();
+        for variant in &missing_variants {
+            let pattern = format!("{}::{}", enum_name, variant);
+            let dummy_match = format!("match () {{ {} => {}, }}", pattern, op.body);
+            let expr: syn::Expr = parse_str(&dummy_match)
+                .with_context(|| format!("Failed to parse pattern/body: {} => {}", pattern, op.body))?;
+
+            if let syn::Expr::Match(match_expr) = expr {
+                if let Some(arm) = match_expr.arms.into_iter().next() {
+                    arms_to_add.push((pattern.clone(), arm));
+                }
+            }
+        }
+
+        // Find and modify match expressions with all arms at once
+        let mut visitor = MultiMatchArmAdder {
+            target_function: op.function_name.clone(),
+            arms_to_add,
+            modified: false,
+            current_function: None,
+            modified_function: None,
+        };
+
+        visitor.visit_file_mut(&mut self.syntax_tree);
+
+        if visitor.modified {
+            // Print what was added
+            for variant in &missing_variants {
+                println!("Added match arm for: {}::{}", enum_name, variant);
+            }
+
+            // Replace just the modified function
+            self.replace_modified_functions(&visitor.modified_function)?;
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![backup_node],
+            })
+        } else {
+            Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            })
+        }
+    }
+
+    fn find_enum_variants(&self, enum_name: &str) -> Result<Vec<String>> {
+        // Find the enum in the syntax tree
+        for item in &self.syntax_tree.items {
+            if let Item::Enum(e) = item {
+                if e.ident == enum_name {
+                    let variants: Vec<String> = e.variants.iter()
+                        .map(|v| v.ident.to_string())
+                        .collect();
+                    return Ok(variants);
+                }
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
+    fn find_existing_match_patterns(&self, function_name: &Option<String>) -> Vec<String> {
+        use syn::visit::Visit;
+
+        struct PatternCollector {
+            target_function: Option<String>,
+            current_function: Option<String>,
+            patterns: Vec<String>,
+        }
+
+        impl<'ast> Visit<'ast> for PatternCollector {
+            fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+                let prev_fn = self.current_function.clone();
+                self.current_function = Some(node.sig.ident.to_string());
+                syn::visit::visit_item_fn(self, node);
+                self.current_function = prev_fn;
+            }
+
+            fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
+                // Check if we're in the right function (if specified)
+                if let Some(ref target) = self.target_function {
+                    if self.current_function.as_ref() != Some(target) {
+                        syn::visit::visit_expr_match(self, node);
+                        return;
+                    }
+                }
+
+                // Collect all patterns
+                for arm in &node.arms {
+                    self.patterns.push(arm.pat.to_token_stream().to_string());
+                }
+
+                syn::visit::visit_expr_match(self, node);
+            }
+        }
+
+        let mut collector = PatternCollector {
+            target_function: function_name.clone(),
+            current_function: None,
+            patterns: Vec::new(),
+        };
+
+        collector.visit_file(&self.syntax_tree);
+        collector.patterns
+    }
+
+    pub(crate) fn update_match_arm(&mut self, op: &UpdateMatchArmOp) -> Result<ModificationResult> {
+        // Get backup of function before modification
+        let backup_node = if let Some(ref fn_name) = op.function_name {
+            self.get_function_backup(fn_name)?
+        } else {
+            BackupNode {
+                node_type: "Unknown".to_string(),
+                identifier: "match_expression".to_string(),
+                original_content: String::new(),
+                location: NodeLocation {
+                    line: 0,
+                    column: 0,
+                    end_line: 0,
+                    end_column: 0,
+                },
+            }
+        };
+
         // Parse the new body
         let new_body: syn::Expr = parse_str(&op.new_body)
             .with_context(|| format!("Failed to parse new body: {}", op.new_body))?;
@@ -525,13 +957,33 @@ impl RustEditor {
         if visitor.modified {
             // Replace just the modified function
             self.replace_modified_functions(&visitor.modified_function)?;
-            Ok(true)
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![backup_node],
+            })
         } else {
             anyhow::bail!("Pattern '{}' not found in any match expression", op.pattern)
         }
     }
 
-    fn remove_match_arm(&mut self, op: &RemoveMatchArmOp) -> Result<bool> {
+    pub(crate) fn remove_match_arm(&mut self, op: &RemoveMatchArmOp) -> Result<ModificationResult> {
+        // Get backup of function before modification
+        let backup_node = if let Some(ref fn_name) = op.function_name {
+            self.get_function_backup(fn_name)?
+        } else {
+            BackupNode {
+                node_type: "Unknown".to_string(),
+                identifier: "match_expression".to_string(),
+                original_content: String::new(),
+                location: NodeLocation {
+                    line: 0,
+                    column: 0,
+                    end_line: 0,
+                    end_column: 0,
+                },
+            }
+        };
+
         // Find and modify match expressions
         let mut visitor = MatchArmRemover {
             target_function: op.function_name.clone(),
@@ -546,13 +998,16 @@ impl RustEditor {
         if visitor.modified {
             // Replace just the modified function
             self.replace_modified_functions(&visitor.modified_function)?;
-            Ok(true)
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![backup_node],
+            })
         } else {
             anyhow::bail!("Pattern '{}' not found in any match expression", op.pattern)
         }
     }
 
-    fn add_impl_method(&mut self, op: &AddImplMethodOp) -> Result<bool> {
+    pub(crate) fn add_impl_method(&mut self, op: &AddImplMethodOp) -> Result<ModificationResult> {
         // Parse the method definition
         let method_code = format!("impl Dummy {{ {} }}", op.method_def);
         let dummy: syn::ItemImpl = parse_str(&method_code)
@@ -596,8 +1051,19 @@ impl RustEditor {
         });
 
         if method_exists {
-            return Ok(false);
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
         }
+
+        // Create backup of original impl block before modification
+        let backup_node = BackupNode {
+            node_type: "ItemImpl".to_string(),
+            identifier: op.target.clone(),
+            original_content: self.unparse_item(&self.syntax_tree.items[impl_index].clone()),
+            location: self.span_to_location(impl_block.span()),
+        };
 
         // Get the span before modification
         let impl_span = impl_block.span();
@@ -641,10 +1107,13 @@ impl RustEditor {
         // Use prettyplease to format just this impl block
         self.replace_formatted_item(impl_index, impl_span)?;
 
-        Ok(true)
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: vec![backup_node],
+        })
     }
 
-    fn add_use_statement(&mut self, op: &AddUseStatementOp) -> Result<bool> {
+    pub(crate) fn add_use_statement(&mut self, op: &AddUseStatementOp) -> Result<ModificationResult> {
         // Parse the use statement
         let use_code = format!("use {};", op.use_path);
         let use_item: syn::ItemUse = parse_str(&use_code)
@@ -662,8 +1131,24 @@ impl RustEditor {
         });
 
         if use_exists {
-            return Ok(false);
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
         }
+
+        // Create a simple backup for use statements (track by line position)
+        let backup_node = BackupNode {
+            node_type: "ItemUse".to_string(),
+            identifier: op.use_path.clone(),
+            original_content: format!("use {};", op.use_path),
+            location: NodeLocation {
+                line: 0,
+                column: 0,
+                end_line: 0,
+                end_column: 0,
+            },
+        };
 
         // Find the position to insert the use statement
         let insert_index = match &op.position {
@@ -733,10 +1218,13 @@ impl RustEditor {
         // Insert the use statement
         self.content.insert_str(insert_line_pos, &use_str);
 
-        Ok(true)
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: vec![backup_node],
+        })
     }
 
-    fn add_derive(&mut self, op: &AddDeriveOp) -> Result<bool> {
+    pub(crate) fn add_derive(&mut self, op: &AddDeriveOp) -> Result<ModificationResult> {
         // Find the target item (struct or enum)
         let item_index = self.syntax_tree.items.iter().position(|item| {
             match (&op.target_type as &str, item) {
@@ -753,6 +1241,14 @@ impl RustEditor {
             _ => (Vec::new(), proc_macro2::Span::call_site()),
         };
 
+        // Create backup of original item before modification
+        let backup_node = BackupNode {
+            node_type: if op.target_type == "struct" { "ItemStruct" } else { "ItemEnum" }.to_string(),
+            identifier: op.target_name.clone(),
+            original_content: self.unparse_item(&self.syntax_tree.items[item_index].clone()),
+            location: self.span_to_location(item_span),
+        };
+
         // Filter out derives that already exist (idempotent)
         let new_derives: Vec<String> = op.derives.iter()
             .filter(|d| !existing_derives.contains(&d.to_string()))
@@ -761,7 +1257,10 @@ impl RustEditor {
 
         if new_derives.is_empty() {
             // All derives already exist
-            return Ok(false);
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
         }
 
         // Combine existing and new derives
@@ -785,7 +1284,10 @@ impl RustEditor {
         // Use prettyplease to format just this item
         self.replace_formatted_item(item_index, item_span)?;
 
-        Ok(true)
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: vec![backup_node],
+        })
     }
 
     /// Replace an item in the content with a formatted version
@@ -882,70 +1384,6 @@ impl RustEditor {
             // Add new derive attribute at the beginning
             attrs.insert(0, new_attr);
         }
-
-        Ok(())
-    }
-
-    /// Replace the attributes section of an item in the source
-    fn replace_item_attrs(&mut self, item_span: Span, new_attrs: &[syn::Attribute]) -> Result<()> {
-        // Get the position where the actual item starts (pub struct/enum keyword)
-        let item_def_start = self.span_to_byte_offset(item_span.start());
-
-        // Find the beginning of the line where the item definition starts
-        let mut def_line_start = item_def_start;
-        while def_line_start > 0 && self.content.as_bytes()[def_line_start - 1] != b'\n' {
-            def_line_start -= 1;
-        }
-
-        // Search backwards for attribute lines (lines starting with #[)
-        let mut attrs_region_start = def_line_start;
-        let mut temp_pos = def_line_start;
-
-        while temp_pos > 0 {
-            // Move to start of previous line
-            temp_pos = temp_pos.saturating_sub(1);
-            let mut prev_line_start = temp_pos;
-            while prev_line_start > 0 && self.content.as_bytes()[prev_line_start - 1] != b'\n' {
-                prev_line_start -= 1;
-            }
-
-            // Get the line content
-            let line = if temp_pos < self.content.len() {
-                &self.content[prev_line_start..temp_pos + 1]
-            } else {
-                &self.content[prev_line_start..]
-            };
-            let trimmed = line.trim();
-
-            if trimmed.starts_with("#[") {
-                // Found an attribute line, extend the region
-                attrs_region_start = prev_line_start;
-                temp_pos = prev_line_start;
-            } else if trimmed.is_empty() {
-                // Empty line, continue searching
-                temp_pos = prev_line_start;
-            } else {
-                // Hit a non-attribute, non-empty line - stop
-                break;
-            }
-
-            if prev_line_start == 0 {
-                break;
-            }
-        }
-
-        // Build the new attributes string with proper formatting
-        let attrs_str = if new_attrs.is_empty() {
-            String::new()
-        } else {
-            new_attrs.iter()
-                .map(|a| format!("{}", a.to_token_stream()))
-                .collect::<Vec<_>>()
-                .join("\n") + "\n"
-        };
-
-        // Replace the entire attributes region
-        self.content.replace_range(attrs_region_start..def_line_start, &attrs_str);
 
         Ok(())
     }
@@ -1063,7 +1501,57 @@ impl RustEditor {
     pub fn to_string(&self) -> String {
         self.content.clone()
     }
-    
+
+    /// Find the index of an item by type and name
+    #[allow(dead_code)]
+    pub(crate) fn find_item_index(&self, node_type: &str, name: &str) -> Result<usize> {
+        for (index, item) in self.syntax_tree.items.iter().enumerate() {
+            match (node_type, item) {
+                ("struct", Item::Struct(s)) if s.ident == name => {
+                    return Ok(index);
+                }
+                ("enum", Item::Enum(e)) if e.ident == name => {
+                    return Ok(index);
+                }
+                ("fn", Item::Fn(f)) if f.sig.ident == name => {
+                    return Ok(index);
+                }
+                ("impl", Item::Impl(impl_block)) => {
+                    // For impl blocks, match on the self_ty
+                    if let syn::Type::Path(type_path) = &*impl_block.self_ty {
+                        if let Some(segment) = type_path.path.segments.last() {
+                            if segment.ident == name {
+                                return Ok(index);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        anyhow::bail!("Item '{}' of type '{}' not found", name, node_type)
+    }
+
+    /// Replace an item at a specific index with a new item
+    #[allow(dead_code)]
+    pub(crate) fn replace_item_at_index(&mut self, index: usize, new_item: Item) -> Result<()> {
+        if index >= self.syntax_tree.items.len() {
+            anyhow::bail!("Index {} out of bounds", index);
+        }
+
+        // Replace the item in the syntax tree
+        self.syntax_tree.items[index] = new_item;
+
+        // Reformat the entire file using prettyplease
+        self.content = prettyplease::unparse(&self.syntax_tree);
+
+        // Recompute line offsets
+        self.line_offsets = Self::compute_line_offsets(&self.content);
+
+        Ok(())
+    }
+
     pub fn find_node(&self, node_type: &str, name: &str) -> Result<Vec<NodeLocation>> {
         let mut locations = Vec::new();
         
@@ -1247,5 +1735,121 @@ impl VisitMut for MatchArmRemover {
         }
 
         syn::visit_mut::visit_expr_match_mut(self, node);
+    }
+}
+
+// Visitor for adding multiple match arms at once (for auto-detect)
+struct MultiMatchArmAdder {
+    target_function: Option<String>,
+    arms_to_add: Vec<(String, Arm)>,  // (pattern_string, arm)
+    modified: bool,
+    current_function: Option<String>,
+    modified_function: Option<String>,
+}
+
+impl VisitMut for MultiMatchArmAdder {
+    fn visit_item_fn_mut(&mut self, node: &mut syn::ItemFn) {
+        let prev_fn = self.current_function.clone();
+        self.current_function = Some(node.sig.ident.to_string());
+
+        syn::visit_mut::visit_item_fn_mut(self, node);
+
+        self.current_function = prev_fn;
+    }
+
+    fn visit_expr_match_mut(&mut self, node: &mut ExprMatch) {
+        // Check if we're in the right function (if specified)
+        if let Some(ref target) = self.target_function {
+            if self.current_function.as_ref() != Some(target) {
+                syn::visit_mut::visit_expr_match_mut(self, node);
+                return;
+            }
+        }
+
+        // Add all missing arms
+        for (pattern_str, arm) in &self.arms_to_add {
+            // Check if the pattern already exists (idempotent)
+            let already_exists = node.arms.iter().any(|existing_arm| {
+                existing_arm.pat.to_token_stream().to_string() == *pattern_str
+            });
+
+            if !already_exists {
+                node.arms.push(arm.clone());
+                self.modified = true;
+                self.modified_function = self.current_function.clone();
+            }
+        }
+
+        syn::visit_mut::visit_expr_match_mut(self, node);
+    }
+}
+
+// Visitor for adding fields to struct literal expressions
+struct StructLiteralFieldAdder {
+    struct_name: String,
+    field_def: String,
+    field_name: String,
+    position: InsertPosition,
+    modified: bool,
+}
+
+impl VisitMut for StructLiteralFieldAdder {
+    fn visit_expr_mut(&mut self, node: &mut Expr) {
+        // Check if this is a struct literal expression
+        if let Expr::Struct(expr_struct) = node {
+            // Get the struct name (last segment of the path)
+            let struct_name = expr_struct.path.segments.last()
+                .map(|seg| seg.ident.to_string());
+
+            if struct_name.as_ref() == Some(&self.struct_name) {
+                // Check if field already exists (idempotent)
+                let field_exists = expr_struct.fields.iter().any(|fv| {
+                    fv.member.to_token_stream().to_string() == self.field_name
+                });
+
+                if !field_exists {
+                    // Parse the field value from field_def
+                    // field_def is like "return_type: None"
+                    let field_value_code = format!("{{ {} }}", self.field_def);
+                    if let Ok(expr) = parse_str::<ExprStruct>(&format!("Dummy {}", field_value_code)) {
+                        if let Some(new_fv) = expr.fields.first() {
+                            // Determine where to insert
+                            match &self.position {
+                                InsertPosition::First => {
+                                    expr_struct.fields.insert(0, new_fv.clone());
+                                    self.modified = true;
+                                }
+                                InsertPosition::Last => {
+                                    expr_struct.fields.push(new_fv.clone());
+                                    self.modified = true;
+                                }
+                                InsertPosition::After(after_field) => {
+                                    // Find the position of the field to insert after
+                                    if let Some(pos) = expr_struct.fields.iter().position(|fv| {
+                                        fv.member.to_token_stream().to_string() == *after_field
+                                    }) {
+                                        expr_struct.fields.insert(pos + 1, new_fv.clone());
+                                        self.modified = true;
+                                    }
+                                }
+                                InsertPosition::Before(before_field) => {
+                                    // Find the position of the field to insert before
+                                    if let Some(pos) = expr_struct.fields.iter().position(|fv| {
+                                        fv.member.to_token_stream().to_string() == *before_field
+                                    }) {
+                                        expr_struct.fields.insert(pos, new_fv.clone());
+                                        self.modified = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // IMPORTANT: Visit children AFTER processing this node
+        // This ensures we traverse into nested expressions
+        syn::visit_mut::visit_expr_mut(self, node);
     }
 }

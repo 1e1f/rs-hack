@@ -10,6 +10,10 @@ keywords = ["ast", "refactoring", "code-generation", "ai", "automation"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 
+[lib]
+name = "rs_hack"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rs-hack"
 path = "src/main.rs"
@@ -24,3 +28,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 walkdir = "2.4"
 prettyplease = "0.2"
+glob = "0.3"
+blake3 = "1.5"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "5.0"
+similar = "2.3"
+
+[dev-dependencies]
+tempfile = "3.8"
