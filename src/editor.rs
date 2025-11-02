@@ -1666,6 +1666,326 @@ impl RustEditor {
                     syn::visit::visit_item(&mut visitor, item);
                 }
             }
+            "match-arm" => {
+                // Find all match arms
+                struct MatchArmVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    pattern_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for MatchArmVisitor<'a> {
+                    fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
+                        // Iterate through all arms in this match expression
+                        for arm in &node.arms {
+                            // Convert pattern to string for matching
+                            let pat = &arm.pat;
+                            let pattern_str = quote::quote!(#pat).to_string();
+
+                            // Apply pattern filter if specified
+                            if let Some(filter) = self.pattern_filter {
+                                // Normalize both for comparison (remove spaces)
+                                let normalized_pattern = pattern_str.replace(" ", "");
+                                let normalized_filter = filter.replace(" ", "");
+
+                                if !normalized_pattern.contains(&normalized_filter) {
+                                    continue;
+                                }
+                            }
+
+                            // Format the match arm (pattern => body)
+                            let snippet = self.editor.format_match_arm(arm);
+                            let location = self.editor.span_to_location(arm.span());
+
+                            self.results.push(InspectResult {
+                                file_path: String::new(), // Will be filled in by caller
+                                node_type: "MatchArm".to_string(),
+                                identifier: pattern_str.replace(" ", ""),
+                                location,
+                                snippet,
+                            });
+                        }
+
+                        // Continue visiting nested expressions
+                        syn::visit::visit_expr_match(self, node);
+                    }
+                }
+
+                let mut visitor = MatchArmVisitor {
+                    results: &mut results,
+                    pattern_filter: name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "enum-usage" => {
+                // Find all enum variant usages (paths like Operator::Error)
+                struct EnumUsageVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    path_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for EnumUsageVisitor<'a> {
+                    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+                        // Convert path to string
+                        let path = &node.path;
+                        let path_str = quote::quote!(#path).to_string();
+
+                        // Apply path filter if specified
+                        if let Some(filter) = self.path_filter {
+                            // Normalize both for comparison (remove spaces)
+                            let normalized_path = path_str.replace(" ", "");
+                            let normalized_filter = filter.replace(" ", "");
+
+                            if !normalized_path.contains(&normalized_filter) {
+                                syn::visit::visit_expr_path(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the path expression
+                        let snippet = self.editor.format_expr_path(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "ExprPath".to_string(),
+                            identifier: path_str.replace(" ", ""),
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting nested expressions
+                        syn::visit::visit_expr_path(self, node);
+                    }
+                }
+
+                let mut visitor = EnumUsageVisitor {
+                    results: &mut results,
+                    path_filter: name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "function-call" => {
+                // Find all function call expressions
+                struct FunctionCallVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for FunctionCallVisitor<'a> {
+                    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+                        // Extract function name from the call expression
+                        let func_name = if let syn::Expr::Path(expr_path) = &*node.func {
+                            // Get the last segment of the path as the function name
+                            expr_path.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                                .unwrap_or_default()
+                        } else {
+                            // For other expression types, use quote to convert to string
+                            quote::quote!(#node.func).to_string()
+                        };
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if func_name != filter {
+                                syn::visit::visit_expr_call(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the function call
+                        let snippet = self.editor.format_expr_call(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "ExprCall".to_string(),
+                            identifier: func_name,
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting nested expressions
+                        syn::visit::visit_expr_call(self, node);
+                    }
+                }
+
+                let mut visitor = FunctionCallVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "method-call" => {
+                // Find all method call expressions
+                struct MethodCallVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for MethodCallVisitor<'a> {
+                    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+                        // Extract method name
+                        let method_name = node.method.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if method_name != filter {
+                                syn::visit::visit_expr_method_call(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the method call
+                        let snippet = self.editor.format_expr_method_call(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "ExprMethodCall".to_string(),
+                            identifier: method_name,
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting nested expressions
+                        syn::visit::visit_expr_method_call(self, node);
+                    }
+                }
+
+                let mut visitor = MethodCallVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "identifier" => {
+                // Find all identifier references
+                struct IdentifierVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for IdentifierVisitor<'a> {
+                    fn visit_ident(&mut self, node: &'ast syn::Ident) {
+                        // Extract identifier name
+                        let ident_name = node.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if ident_name != filter {
+                                syn::visit::visit_ident(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the identifier
+                        let snippet = self.editor.format_ident(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "Ident".to_string(),
+                            identifier: ident_name,
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting
+                        syn::visit::visit_ident(self, node);
+                    }
+                }
+
+                let mut visitor = IdentifierVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "type-ref" => {
+                // Find all type path usages
+                struct TypeRefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for TypeRefVisitor<'a> {
+                    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+                        // Extract type name (last segment of path)
+                        let type_name = node.path.segments.last()
+                            .map(|seg| seg.ident.to_string())
+                            .unwrap_or_default();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if type_name != filter {
+                                syn::visit::visit_type_path(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the type path
+                        let snippet = self.editor.format_type_path(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Get full path for identifier
+                        let path = &node.path;
+                        let path_str = quote::quote!(#path).to_string();
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "TypePath".to_string(),
+                            identifier: path_str.replace(" ", ""),
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting
+                        syn::visit::visit_type_path(self, node);
+                    }
+                }
+
+                let mut visitor = TypeRefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
             _ => anyhow::bail!("Unsupported node type: {}", node_type),
         }
 
@@ -1677,6 +1997,76 @@ impl RustEditor {
         // Extract the original source code from the file content using the span
         let start = self.span_to_byte_offset(expr.span().start());
         let end = self.span_to_byte_offset(expr.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format a match arm as a string - extracts original source
+    fn format_match_arm(&self, arm: &syn::Arm) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(arm.span().start());
+        let end = self.span_to_byte_offset(arm.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format an ExprPath node as a string - extracts original source
+    fn format_expr_path(&self, expr: &syn::ExprPath) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(expr.span().start());
+        let end = self.span_to_byte_offset(expr.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format an ExprCall node as a string - extracts original source
+    fn format_expr_call(&self, expr: &syn::ExprCall) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(expr.span().start());
+        let end = self.span_to_byte_offset(expr.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format an ExprMethodCall node as a string - extracts original source
+    fn format_expr_method_call(&self, expr: &syn::ExprMethodCall) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(expr.span().start());
+        let end = self.span_to_byte_offset(expr.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format an Ident node as a string - just return the identifier
+    fn format_ident(&self, ident: &syn::Ident) -> String {
+        ident.to_string()
+    }
+
+    /// Format a TypePath node as a string - extracts original source
+    fn format_type_path(&self, ty: &syn::TypePath) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(ty.span().start());
+        let end = self.span_to_byte_offset(ty.span().end());
 
         // Get the original text and collapse to single line
         let original = &self.content[start..end];

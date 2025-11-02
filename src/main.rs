@@ -323,11 +323,11 @@ enum Commands {
         #[arg(short, long)]
         path: PathBuf,
 
-        /// Type of node: "struct-literal", "enum-literal", "match-expr"
+        /// Type of node: "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "identifier", "type-ref"
         #[arg(short = 't', long)]
         node_type: String,
 
-        /// Filter by name (e.g., struct name "Shadow")
+        /// Filter by name (e.g., "Shadow", "Operator::Error", "unwrap", "handle_error", "Vec")
         #[arg(short, long)]
         name: Option<String>,
 

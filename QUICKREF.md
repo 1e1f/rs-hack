@@ -94,6 +94,30 @@ rs-hack find --path FILE --node-type struct --name User
 rs-hack inspect --path "tests/*.rs" --node-type struct-literal \
   --name Shadow [--format snippets|locations|json]
 
+# Inspect match arms (find enum variant handling)
+rs-hack inspect --path "src/**/*.rs" --node-type match-arm \
+  --name "Operator::AssertSome" [--format snippets|locations|json]
+
+# Inspect enum usages (find ALL references to enum variants)
+rs-hack inspect --path "src/**/*.rs" --node-type enum-usage \
+  --name "Operator::PropagateError" [--format snippets|locations|json]
+
+# Inspect function calls
+rs-hack inspect --path "src/**/*.rs" --node-type function-call \
+  --name "handle_error" [--format snippets|locations|json]
+
+# Inspect method calls (great for auditing .unwrap())
+rs-hack inspect --path "src/**/*.rs" --node-type method-call \
+  --name "unwrap" [--format snippets|locations|json]
+
+# Inspect identifier references
+rs-hack inspect --path "src/**/*.rs" --node-type identifier \
+  --name "config" [--format snippets|locations|json]
+
+# Inspect type usages
+rs-hack inspect --path "src/**/*.rs" --node-type type-ref \
+  --name "Vec" [--format snippets|locations|json]
+
 # Output formats:
 # snippets  - Full code on single line (default)
 # locations - file:line:col (grep-like)

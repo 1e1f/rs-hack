@@ -485,7 +485,99 @@ rs-hack inspect \
   --path "src/models.rs" \
   --node-type struct-literal \
   --format snippets
+
+# Find match arms for specific enum variant (better than grep!)
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type match-arm \
+  --name "Operator::AssertSome" \
+  --format snippets
+
+# Output:
+# // src/format/print.rs:766:12 - Operator::AssertSome
+# Operator::AssertSome => write!(f, "!_"),
+#
+# // src/eval.rs:45:12 - Operator::AssertSome
+# Operator::AssertSome => self.unwrap_or_panic(value),
+
+# Find ALL match arms in a file
+rs-hack inspect \
+  --path "src/handler.rs" \
+  --node-type match-arm \
+  --format locations
+
+# Find enum variant usages (better than grep!)
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type enum-usage \
+  --name "Operator::PropagateError" \
+  --format snippets
+
+# Output:
+# // src/format/print.rs:763:12 - Operator::PropagateError
+# Operator::PropagateError
+#
+# // src/eval.rs:120:25 - Operator::PropagateError
+# Operator::PropagateError
+
+# Find ALL usages of any Operator variant
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type enum-usage \
+  --name "Operator::" \
+  --format locations | wc -l
+
+# Find all calls to a specific function
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type function-call \
+  --name "handle_error" \
+  --format snippets
+
+# Output:
+# // src/error.rs:42:4 - handle_error
+# handle_error()
+#
+# // src/parser.rs:156:8 - handle_error
+# handle_error(err)
+
+# Find all .unwrap() calls (great for auditing!)
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type method-call \
+  --name "unwrap" \
+  --format locations
+
+# Find all references to a variable/identifier
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type identifier \
+  --name "config" \
+  --format snippets
+
+# Find all usages of a type
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type type-ref \
+  --name "Vec" \
+  --format snippets
+
+# Output:
+# // src/lib.rs:15:18 - Vec<String>
+# Vec<String>
+#
+# // src/lib.rs:42:11 - Vec<i32>
+# Vec<i32>
 ```
+
+**Supported Node Types:**
+- `struct-literal` - Struct initialization expressions
+- `match-arm` - Match expression arms
+- `enum-usage` - Enum variant references/usages anywhere in code
+- `function-call` - Function invocations
+- `method-call` - Method calls
+- `identifier` - Any identifier reference
+- `type-ref` - Type usages
 
 **Output Formats:**
 - `snippets` (default): Shows file location + formatted code on single line
@@ -493,10 +585,16 @@ rs-hack inspect \
 - `json`: Structured data with full location info and code snippets
 
 **Use Cases:**
-- **Better than grep**: Find struct literals without false positives from comments/strings
+- **Better than grep**: Find code without false positives from comments/strings
 - **Multi-file search**: Use glob patterns to search across many files
-- **Extract code chunks**: Get full struct literal content, not just the first line
+- **Extract code chunks**: Get full struct literal/match arm/path content, not just the first line
 - **Prepare for refactoring**: Inspect before bulk modifications
+- **Find enum usage**: Locate all places where a specific enum variant is used (matches, returns, comparisons, etc.)
+- **Track variant usage**: See everywhere `Status::Active` or `Operator::Error` appears in your codebase
+- **Audit function calls**: Find all calls to specific functions (e.g., `handle_error`, `format_operator`)
+- **Audit method calls**: Find all `.unwrap()`, `.clone()`, or `.to_string()` calls
+- **Track identifiers**: Find all references to variables, constants, or parameters
+- **Type usage analysis**: See where types like `Vec`, `Option`, or `Result` are used
 
 ### Batch Operations
 
@@ -932,7 +1030,9 @@ See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to
   - OR logic support: `--where "derives_trait:Clone,Debug"`
   - Works on all struct/enum operations + `add-derive`
 - **`inspect` command**: AST-aware search and inspection
-  - List struct literals, enum literals, match expressions across files
+  - List struct literals, match arms, and enum variant usages across files
+  - Find all match arms handling a specific enum variant
+  - Find all places where an enum variant is referenced (complete grep replacement!)
   - Three output formats: `snippets`, `locations`, `json`
   - Glob pattern support for multi-file inspection
   - Better than grep: no false positives, extracts full code chunks
