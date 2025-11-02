@@ -1,154 +1,167 @@
-# rust-ast-edit Quick Reference
+# rs-hack Quick Reference
 
 Ultra-concise command reference for AI agents.
 
 ## Command Format
 
 ```bash
-rust-ast-edit <COMMAND> [OPTIONS] --apply
+rs-hack <COMMAND> [OPTIONS] --apply
 ```
 
 **Note:** Omit `--apply` for dry-run (preview only).
 
+## Global Flags
+
+```bash
+--path "pattern"       # File, dir, or glob: "src/**/*.rs"
+--where "filter"       # Filter: "derives_trait:Clone" or "derives_trait:Clone,Debug"
+--format diff          # Preview as git diff
+--apply                # Actually modify (default is dry-run)
+```
+
 ## Struct Commands
 
 ```bash
-# Add field (skips if exists)
-rust-ast-edit add-struct-field \
-  --path FILE --struct-name NAME --field "name: Type" [--position POS] --apply
+# Add field (idempotent)
+rs-hack add-struct-field --path FILE --struct-name NAME \
+  --field "name: Type" [--position POS] [--literal-default "value"] \
+  [--where "derives_trait:Clone"] --apply
 
-# Update field (must exist)
-rust-ast-edit update-struct-field \
-  --path FILE --struct-name NAME --field "name: NewType" --apply
+# Update field
+rs-hack update-struct-field --path FILE --struct-name NAME \
+  --field "name: NewType" [--where "filter"] --apply
 
 # Remove field
-rust-ast-edit remove-struct-field \
-  --path FILE --struct-name NAME --field-name name --apply
+rs-hack remove-struct-field --path FILE --struct-name NAME \
+  --field-name name [--where "filter"] --apply
+
+# Add to struct literals only
+rs-hack add-struct-literal-field --path FILE --struct-name NAME \
+  --field "name: value" [--position POS] --apply
 ```
 
 ## Enum Commands
 
 ```bash
-# Add variant (skips if exists)
-rust-ast-edit add-enum-variant \
-  --path FILE --enum-name NAME --variant "Variant" [--position POS] --apply
+# Add variant (idempotent)
+rs-hack add-enum-variant --path FILE --enum-name NAME \
+  --variant "Variant" [--position POS] [--where "filter"] --apply
 
-# Update variant (must exist)
-rust-ast-edit update-enum-variant \
-  --path FILE --enum-name NAME --variant "Variant { field: Type }" --apply
+# Update variant
+rs-hack update-enum-variant --path FILE --enum-name NAME \
+  --variant "Variant { field: Type }" [--where "filter"] --apply
 
 # Remove variant
-rust-ast-edit remove-enum-variant \
-  --path FILE --enum-name NAME --variant-name Variant --apply
+rs-hack remove-enum-variant --path FILE --enum-name NAME \
+  --variant-name Variant [--where "filter"] --apply
 ```
 
-## Match Arm Commands
+## Match Commands
 
 ```bash
-# Add match arm (skips if exists)
-rust-ast-edit add-match-arm \
-  --path FILE --pattern "Enum::Variant" --body "expr" [--function NAME] --apply
+# Add match arm (idempotent)
+rs-hack add-match-arm --path FILE --pattern "Enum::Variant" \
+  --body "expr" [--function NAME] --apply
 
-# Update match arm (must exist)
-rust-ast-edit update-match-arm \
-  --path FILE --pattern "Enum::Variant" --body "new_expr" [--function NAME] --apply
+# Auto-detect missing arms
+rs-hack add-match-arm --path FILE --auto-detect --enum-name NAME \
+  --body "todo!()" [--function NAME] --apply
+
+# Update match arm
+rs-hack update-match-arm --path FILE --pattern "Enum::Variant" \
+  --body "new_expr" [--function NAME] --apply
 
 # Remove match arm
-rust-ast-edit remove-match-arm \
-  --path FILE --pattern "Enum::Variant" [--function NAME] --apply
+rs-hack remove-match-arm --path FILE --pattern "Enum::Variant" \
+  [--function NAME] --apply
 ```
 
-**Note:** Match operations regenerate code, which may alter formatting. Run `rustfmt` afterward.
-
-## Common Options
+## Derive Commands
 
 ```bash
---path FILE|DIR        # Target file or directory
---output FILE          # Write to different file (non-destructive)
---position POS         # first | last | after:name | before:name
---apply                # Actually modify (default is dry-run)
+# Add derives (idempotent)
+rs-hack add-derive --path FILE --target-type struct --name NAME \
+  --derives "Clone,Debug" [--where "derives_trait:Serialize"] --apply
 ```
 
-## Field Type Examples
+## Inspection Commands
 
-```rust
-// Primitives
-field: u32, field: i64, field: bool, field: f64
+```bash
+# Find definition location
+rs-hack find --path FILE --node-type struct --name User
 
-// Strings
-name: String, label: &str, text: &'static str
+# Inspect struct literals (better than grep)
+rs-hack inspect --path "tests/*.rs" --node-type struct-literal \
+  --name Shadow [--format snippets|locations|json]
 
-// Optional
-email: Option<String>, age: Option<u32>
-
-// Collections
-tags: Vec<String>, meta: HashMap<String, Value>
-
-// Result
-result: Result<T, E>
-
-// Smart pointers
-data: Arc<Mutex<State>>, cache: Box<HashMap<K, V>>
-
-// Visibility
-field: Type              // private
-pub field: Type          // public
-pub(crate) field: Type   // crate-visible
+# Output formats:
+# snippets  - Full code on single line (default)
+# locations - file:line:col (grep-like)
+# json      - Structured data
 ```
 
-## Variant Examples
+## State Commands
 
-```rust
-// Unit
-Pending
+```bash
+rs-hack history [--limit 10]           # Show recent runs
+rs-hack revert <run-id> [--force]      # Undo changes
+rs-hack clean [--keep-days 30]         # Clean old state
+```
 
-// Tuple
-Error(String), Value(i32, String)
+## Common Patterns
 
-// Struct
-User { id: u64, name: String }
-Complete { timestamp: u64, data: Vec<u8> }
+```bash
+# Glob patterns
+--path "src/**/*.rs"        # All .rs files recursively
+--path "src/models/*.rs"    # Files in specific dir
+--path "tests/shadow_*.rs"  # Wildcard matching
+
+# Filter by traits (OR logic)
+--where "derives_trait:Clone"           # Has Clone
+--where "derives_trait:Clone,Debug"     # Has Clone OR Debug
+
+# Preview before applying
+--format diff               # Show git-style diff
+--apply                     # Then apply when ready
+
+# Combine for power
+rs-hack add-struct-field \
+  --path "src/**/*.rs" \
+  --struct-name Config \
+  --field "version: u32" \
+  --where "derives_trait:Serialize" \
+  --format diff
+```
+
+## Position Options
+
+```
+first           # Start of list
+last            # End of list (default)
+after:name      # After specific field/variant/method
+before:name     # Before specific field/variant/method
 ```
 
 ## Common Workflows
 
 ```bash
-# Add field
-rust-ast-edit add-struct-field --path src/user.rs --struct-name User \
-  --field "email: String" --apply
+# 1. Inspect first
+rs-hack inspect --path "tests/*.rs" --node-type struct-literal \
+  --name Shadow --format snippets
 
-# Make field public
-rust-ast-edit update-struct-field --path src/user.rs --struct-name User \
-  --field "pub email: String" --apply
-
-# Make field optional
-rust-ast-edit update-struct-field --path src/user.rs --struct-name User \
-  --field "email: Option<String>" --apply
-
-# Remove field
-rust-ast-edit remove-struct-field --path src/user.rs --struct-name User \
-  --field-name email --apply
-
-# Add enum variant
-rust-ast-edit add-enum-variant --path src/types.rs --enum-name Status \
-  --variant "Archived" --apply
-
-# Add fields to variant
-rust-ast-edit update-enum-variant --path src/types.rs --enum-name Status \
-  --variant "Draft { created_at: u64 }" --apply
-```
-
-## Testing Pattern
-
-```bash
-# 1. Preview
-rust-ast-edit COMMAND [options]
-
-# 2. Test on copy
-rust-ast-edit COMMAND [options] --output /tmp/test.rs --apply
+# 2. Preview changes
+rs-hack add-struct-literal-field --path "tests/*.rs" \
+  --struct-name Shadow --field "mode: None" --format diff
 
 # 3. Apply
-rust-ast-edit COMMAND [options] --apply
+rs-hack add-struct-literal-field --path "tests/*.rs" \
+  --struct-name Shadow --field "mode: None" --apply
+
+# 4. Check history
+rs-hack history
+
+# 5. Revert if needed
+rs-hack revert <run-id>
 ```
 
 ## Operation Semantics
@@ -159,22 +172,28 @@ rust-ast-edit COMMAND [options] --apply
 | `update-*` | Update (OK) | Error |
 | `remove-*` | Remove (OK) | Error |
 
-## Exit Codes
+## Field/Variant Examples
 
-- `0` - Success
-- `Non-zero` - Error (check stderr)
+```rust
+// Fields
+field: u32
+pub field: String
+email: Option<String>
+tags: Vec<String>
+pub(crate) data: Arc<Mutex<T>>
 
-## Files
+// Enum variants
+Pending
+Error(String)
+User { id: u64, name: String }
+```
 
-- `README.md` - Full documentation
-- `PATTERNS.md` - Rust patterns guide (for learning)
-- `QUICKREF.md` - This file (for quick lookup)
-- `tests/integration_test.sh` - Test suite
+## Remember
 
----
-
-**Remember:**
 - Default is **dry-run** (safe)
-- Use `--apply` to actually modify
-- Use `--output` to test first
-- `add-*` operations are idempotent (safe to retry)
+- Use `--apply` to modify
+- Use `--format diff` to preview
+- `add-*` operations are **idempotent**
+- `--where` enables **pattern-based filtering**
+- `inspect` is **better than grep** (AST-aware)
+- State is tracked for `revert`

@@ -26,18 +26,24 @@ pub struct AddStructFieldOp {
     pub position: InsertPosition,
     #[serde(default)]
     pub literal_default: Option<String>, // Optional: value for struct literals (e.g., "None", "vec![]", "0")
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStructFieldOp {
     pub struct_name: String,
     pub field_def: String, // e.g., "field_name: NewType" (field name is parsed from this)
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoveStructFieldOp {
     pub struct_name: String,
     pub field_name: String, // Name of the field to remove
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,18 +58,24 @@ pub struct AddEnumVariantOp {
     pub enum_name: String,
     pub variant_def: String, // e.g., "NewVariant" or "NewVariant { x: i32 }"
     pub position: InsertPosition,
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEnumVariantOp {
     pub enum_name: String,
     pub variant_def: String, // e.g., "UpdatedVariant { new_field: Type }" (variant name parsed from this)
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoveEnumVariantOp {
     pub enum_name: String,
     pub variant_name: String, // Name of the variant to remove
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +119,8 @@ pub struct AddDeriveOp {
     pub target_name: String, // Name of struct or enum
     pub target_type: String, // "struct" or "enum"
     pub derives: Vec<String>, // e.g., ["Clone", "Debug", "Serialize"]
+    #[serde(default)]
+    pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,4 +159,14 @@ pub struct BackupNode {
 pub struct ModificationResult {
     pub changed: bool,
     pub modified_nodes: Vec<BackupNode>,
+}
+
+/// Result of inspecting/listing AST nodes
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InspectResult {
+    pub file_path: String,
+    pub node_type: String,      // "ExprStruct", "ExprMatch", etc.
+    pub identifier: String,      // "Shadow", "Config", etc.
+    pub location: NodeLocation,
+    pub snippet: String,         // Formatted code snippet
 }

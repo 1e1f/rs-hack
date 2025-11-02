@@ -96,6 +96,17 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
 
+        // Check if the struct matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(&item_struct.attrs, where_filter)? {
+                // Struct doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
+
         // Create backup of original struct before modification
         let backup_node = BackupNode {
             node_type: "ItemStruct".to_string(),
@@ -242,6 +253,17 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
 
+        // Check if the struct matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(&item_struct.attrs, where_filter)? {
+                // Struct doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
+
         // Create backup of original struct before modification
         let backup_node = BackupNode {
             node_type: "ItemStruct".to_string(),
@@ -311,6 +333,17 @@ impl RustEditor {
                 None
             })
             .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
+
+        // Check if the struct matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(&item_struct.attrs, where_filter)? {
+                // Struct doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
 
         // Create backup of original struct before modification
         let backup_node = BackupNode {
@@ -468,6 +501,17 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Enum '{}' not found", op.enum_name))?;
 
+        // Check if the enum matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(&item_enum.attrs, where_filter)? {
+                // Enum doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
+
         // Create backup of original enum before modification
         let backup_node = BackupNode {
             node_type: "ItemEnum".to_string(),
@@ -556,6 +600,17 @@ impl RustEditor {
             })
             .ok_or_else(|| anyhow::anyhow!("Enum '{}' not found", op.enum_name))?;
 
+        // Check if the enum matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(&item_enum.attrs, where_filter)? {
+                // Enum doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
+
         // Create backup of original enum before modification
         let backup_node = BackupNode {
             node_type: "ItemEnum".to_string(),
@@ -606,6 +661,17 @@ impl RustEditor {
                 None
             })
             .ok_or_else(|| anyhow::anyhow!("Enum '{}' not found", op.enum_name))?;
+
+        // Check if the enum matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(&item_enum.attrs, where_filter)? {
+                // Enum doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
 
         // Create backup of original enum before modification
         let backup_node = BackupNode {
@@ -1235,11 +1301,22 @@ impl RustEditor {
         }).ok_or_else(|| anyhow::anyhow!("{} '{}' not found", op.target_type, op.target_name))?;
 
         // Get the item and check for existing derives
-        let (existing_derives, item_span) = match &self.syntax_tree.items[item_index] {
-            Item::Struct(s) => (Self::extract_derives(&s.attrs), s.span()),
-            Item::Enum(e) => (Self::extract_derives(&e.attrs), e.span()),
-            _ => (Vec::new(), proc_macro2::Span::call_site()),
+        let (existing_derives, item_span, item_attrs) = match &self.syntax_tree.items[item_index] {
+            Item::Struct(s) => (Self::extract_derives(&s.attrs), s.span(), &s.attrs),
+            Item::Enum(e) => (Self::extract_derives(&e.attrs), e.span(), &e.attrs),
+            _ => (Vec::new(), proc_macro2::Span::call_site(), &Vec::new() as &Vec<syn::Attribute>),
         };
+
+        // Check if the item matches the where filter (if specified)
+        if let Some(ref where_filter) = op.where_filter {
+            if !self.matches_where_filter(item_attrs, where_filter)? {
+                // Item doesn't match filter - skip without error
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+        }
 
         // Create backup of original item before modification
         let backup_node = BackupNode {
@@ -1362,6 +1439,29 @@ impl RustEditor {
             }
         }
         Vec::new()
+    }
+
+    /// Check if an item matches the where filter criteria
+    /// Supports filters like:
+    /// - "derives_trait:Clone" - matches if item derives Clone
+    /// - "derives_trait:Clone,Debug" - matches if item derives Clone OR Debug
+    fn matches_where_filter(&self, attrs: &[syn::Attribute], where_filter: &str) -> Result<bool> {
+        // Parse the filter: "derives_trait:Clone,Debug"
+        if let Some(filter_value) = where_filter.strip_prefix("derives_trait:") {
+            let required_traits: Vec<&str> = filter_value.split(',').map(|s| s.trim()).collect();
+            let existing_derives = Self::extract_derives(attrs);
+
+            // Check if ANY of the required traits are present
+            for required_trait in required_traits {
+                if existing_derives.iter().any(|d| d == required_trait) {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+
+        // Unknown filter type - default to match (don't break existing behavior)
+        Ok(true)
     }
 
     /// Update or create derive attribute in the attribute list
@@ -1500,6 +1600,89 @@ impl RustEditor {
     
     pub fn to_string(&self) -> String {
         self.content.clone()
+    }
+
+    /// Inspect and list AST nodes (e.g., struct literals) in the file
+    pub(crate) fn inspect(&self, node_type: &str, name_filter: Option<&str>) -> Result<Vec<crate::operations::InspectResult>> {
+        use syn::visit::Visit;
+        use crate::operations::InspectResult;
+
+        let mut results = Vec::new();
+
+        match node_type {
+            "struct-literal" => {
+                // Find all struct literal expressions
+                struct StructLiteralVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for StructLiteralVisitor<'a> {
+                    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+                        // Extract the struct name from the path
+                        let struct_name = if let Some(ident) = node.path.get_ident() {
+                            ident.to_string()
+                        } else {
+                            // Handle paths like "module::StructName"
+                            node.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                                .unwrap_or_default()
+                        };
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if struct_name != filter {
+                                syn::visit::visit_expr_struct(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the struct literal
+                        let snippet = self.editor.format_expr_struct(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "ExprStruct".to_string(),
+                            identifier: struct_name,
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting nested expressions
+                        syn::visit::visit_expr_struct(self, node);
+                    }
+                }
+
+                let mut visitor = StructLiteralVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            _ => anyhow::bail!("Unsupported node type: {}", node_type),
+        }
+
+        Ok(results)
+    }
+
+    /// Format an ExprStruct node as a string - extracts original source
+    fn format_expr_struct(&self, expr: &syn::ExprStruct) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(expr.span().start());
+        let end = self.span_to_byte_offset(expr.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     /// Find the index of an item by type and name

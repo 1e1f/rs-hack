@@ -66,7 +66,7 @@ rs-hack add-use --path src/lib.rs \
   --use-path "serde::Serialize" --apply
 ```
 
-## Supported Operations (19 commands)
+## Supported Operations (20 commands)
 
 ### Struct Operations (4)
 - ✅ **add-struct-field**: Add fields to definitions (with optional `--literal-default`)
@@ -82,17 +82,25 @@ rs-hack add-use --path src/lib.rs \
 - ✅ **update-match-arm**, **remove-match-arm**
 
 ### Code Organization (3)
-- ✅ **add-derive**: Derive macros
+- ✅ **add-derive**: Derive macros (with `--where` filter support)
 - ✅ **add-impl-method**: Methods to impl blocks
 - ✅ **add-use**: Use statements
 
-### State & Utilities (6)
+### Inspection & Search (2)
+- ✅ **find**: Locate AST node definitions (structs, enums, functions)
+- ✅ **inspect**: List and view AST nodes (struct literals, etc.) with glob support
+
+### State & Utilities (5)
 - ✅ **history**: View past operations
 - ✅ **revert**: Undo specific changes
 - ✅ **clean**: Remove old state
 - ✅ **batch**: Run multiple operations from JSON
-- ✅ **find**: Locate AST nodes
 - ✅ `--format diff`: Generate git-compatible patches
+
+### Pattern-Based Filtering (NEW!)
+- ✅ **`--where`**: Filter targets by traits or attributes
+  - Supported on: `add-struct-field`, `update-struct-field`, `remove-struct-field`, `add-enum-variant`, `update-enum-variant`, `remove-enum-variant`, `add-derive`
+  - Example: `--where "derives_trait:Clone"` or `--where "derives_trait:Clone,Debug"`
 
 ## Usage
 
@@ -123,6 +131,59 @@ rs-hack add-match-arm --path "src/handlers/*.rs" \
 - Perform bulk operations across your codebase
 - Target specific directories or file patterns
 - Ideal for migrations and refactoring tasks
+
+### Pattern-Based Filtering with `--where`
+
+Filter which structs/enums to modify based on their traits or attributes:
+
+```bash
+# Add field only to structs that derive Clone
+rs-hack add-struct-field \
+  --path "src/**/*.rs" \
+  --struct-name Config \
+  --field "version: u32" \
+  --where "derives_trait:Clone" \
+  --apply
+
+# Add Serialize to all types that already derive Clone OR Debug
+rs-hack add-derive \
+  --path "src/**/*.rs" \
+  --target-type struct \
+  --name User \
+  --derives "Serialize" \
+  --where "derives_trait:Clone,Debug" \
+  --apply
+
+# Update field only in Debug-enabled structs
+rs-hack update-struct-field \
+  --path "src/**/*.rs" \
+  --struct-name Config \
+  --field "port: u32" \
+  --where "derives_trait:Debug" \
+  --apply
+
+# Remove variant only from enums with Clone
+rs-hack remove-enum-variant \
+  --path "src/**/*.rs" \
+  --enum-name Status \
+  --variant-name Deprecated \
+  --where "derives_trait:Clone" \
+  --apply
+```
+
+**Filter Syntax:**
+- `derives_trait:Clone` - Matches if type derives Clone
+- `derives_trait:Clone,Debug` - Matches if type derives Clone OR Debug (OR logic)
+
+**Supported Operations:**
+- All struct operations: `add-struct-field`, `update-struct-field`, `remove-struct-field`
+- All enum operations: `add-enum-variant`, `update-enum-variant`, `remove-enum-variant`
+- Derive operations: `add-derive`
+
+**Benefits:**
+- **Selective refactoring**: Only modify types that meet specific criteria
+- **Safe migrations**: Add fields only to serializable types, etc.
+- **Powerful combinations**: Combine with glob patterns for precise bulk operations
 
 ### Struct Operations
 
@@ -357,14 +418,22 @@ rs-hack add-use \
 
 ### Find AST Nodes
 
+Locate definitions (structs, enums, functions) in a single file:
+
 ```bash
-# Find struct location
+# Find struct definition location
 rs-hack find \
   --path src/models.rs \
   --node-type struct \
   --name User
 
-# Output:
+# Find enum definition
+rs-hack find \
+  --path src/types.rs \
+  --node-type enum \
+  --name Status
+
+# Output (JSON):
 # [{
 #   "line": 10,
 #   "column": 0,
@@ -372,6 +441,62 @@ rs-hack find \
 #   "end_column": 1
 # }]
 ```
+
+### Inspect AST Nodes
+
+List and view AST nodes (struct literals, etc.) across multiple files with glob support:
+
+```bash
+# List all Shadow struct initializations
+rs-hack inspect \
+  --path "tests/shadow_*.rs" \
+  --node-type struct-literal \
+  --name Shadow \
+  --format snippets
+
+# Output:
+# // tests/shadow_bold.rs:42:18 - Shadow
+# Shadow { offset: Vec2::new(2.0, 2.0), blur: 4.0, color: Color32::BLACK, }
+#
+# // tests/shadow_test.rs:15:20 - Shadow
+# Shadow { offset: Vec2::ZERO, blur: 0.0, color: Color32::WHITE, }
+
+# Get locations only (like grep -n but AST-aware)
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type struct-literal \
+  --name Config \
+  --format locations
+
+# Output:
+# src/app.rs:25:18
+# src/config.rs:45:12
+# src/main.rs:10:21
+
+# Get structured JSON output
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type struct-literal \
+  --name User \
+  --format json
+
+# List ALL struct literals (no name filter)
+rs-hack inspect \
+  --path "src/models.rs" \
+  --node-type struct-literal \
+  --format snippets
+```
+
+**Output Formats:**
+- `snippets` (default): Shows file location + formatted code on single line
+- `locations`: File:line:column format (great for piping to other tools)
+- `json`: Structured data with full location info and code snippets
+
+**Use Cases:**
+- **Better than grep**: Find struct literals without false positives from comments/strings
+- **Multi-file search**: Use glob patterns to search across many files
+- **Extract code chunks**: Get full struct literal content, not just the first line
+- **Prepare for refactoring**: Inspect before bulk modifications
 
 ### Batch Operations
 
@@ -800,6 +925,18 @@ rs-hack add-struct-field \
 See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to crates.io.
 
 ## Features by Version
+
+### v0.4.0 - Pattern-Based Filtering & Inspection (Current)
+- **`--where` filter**: Pattern-based filtering for selective refactoring
+  - `--where "derives_trait:Clone"` - Filter by derived traits
+  - OR logic support: `--where "derives_trait:Clone,Debug"`
+  - Works on all struct/enum operations + `add-derive`
+- **`inspect` command**: AST-aware search and inspection
+  - List struct literals, enum literals, match expressions across files
+  - Three output formats: `snippets`, `locations`, `json`
+  - Glob pattern support for multi-file inspection
+  - Better than grep: no false positives, extracts full code chunks
+- **Enhanced `find`**: Improved documentation for locating definitions
 
 ### v0.3.0 - State Storage, Revert & Diff Output
 - **State tracking**: Every operation recorded with unique run ID

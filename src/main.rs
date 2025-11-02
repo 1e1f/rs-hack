@@ -34,6 +34,10 @@ struct Cli {
     #[arg(long, global = true)]
     summary: bool,
 
+    /// Filter targets based on traits or attributes (e.g., "derives_trait:Clone", "derives_trait:Serialize,Debug")
+    #[arg(long, global = true)]
+    r#where: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -313,6 +317,25 @@ enum Commands {
         name: String,
     },
 
+    /// Inspect and list AST nodes with full content (supports glob patterns)
+    Inspect {
+        /// Path to Rust file(s) - supports glob patterns (e.g., "tests/*.rs")
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Type of node: "struct-literal", "enum-literal", "match-expr"
+        #[arg(short = 't', long)]
+        node_type: String,
+
+        /// Filter by name (e.g., struct name "Shadow")
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Output format: "json", "locations", "snippets"
+        #[arg(short = 'f', long, default_value = "snippets")]
+        format: String,
+    },
+
     /// Add derive macros to a struct or enum
     AddDerive {
         /// Path to the Rust file or directory
@@ -414,6 +437,7 @@ fn main() -> Result<()> {
                 field_def: field.clone(),
                 position: parse_position(&position)?,
                 literal_default,
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
@@ -424,6 +448,7 @@ fn main() -> Result<()> {
             let op = Operation::UpdateStructField(UpdateStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
@@ -434,6 +459,7 @@ fn main() -> Result<()> {
             let op = Operation::RemoveStructField(RemoveStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_name: field_name.clone(),
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
@@ -456,6 +482,7 @@ fn main() -> Result<()> {
                 enum_name: enum_name.clone(),
                 variant_def: variant.clone(),
                 position: parse_position(&position)?,
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
@@ -466,6 +493,7 @@ fn main() -> Result<()> {
             let op = Operation::UpdateEnumVariant(UpdateEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_def: variant.clone(),
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
@@ -476,6 +504,7 @@ fn main() -> Result<()> {
             let op = Operation::RemoveEnumVariant(RemoveEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_name: variant_name.clone(),
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
@@ -544,6 +573,53 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&locations)?);
         }
 
+        Commands::Inspect { path, node_type, name, format } => {
+            use operations::InspectResult;
+
+            let files = collect_rust_files(&path)?;
+            let mut all_results: Vec<InspectResult> = Vec::new();
+
+            for file in files {
+                let content = std::fs::read_to_string(&file)
+                    .context(format!("Failed to read file: {:?}", file))?;
+
+                let editor = RustEditor::new(&content)?;
+                let mut results = editor.inspect(&node_type, name.as_deref())?;
+
+                // Fill in file paths
+                for result in &mut results {
+                    result.file_path = file.to_string_lossy().to_string();
+                }
+
+                all_results.extend(results);
+            }
+
+            // Format output based on format flag
+            match format.as_str() {
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&all_results)?);
+                }
+                "locations" => {
+                    for result in &all_results {
+                        println!("{}:{}:{}", result.file_path, result.location.line, result.location.column);
+                    }
+                }
+                "snippets" => {
+                    for result in &all_results {
+                        println!("// {}:{}:{} - {}",
+                            result.file_path,
+                            result.location.line,
+                            result.location.column,
+                            result.identifier);
+                        println!("{}\n", result.snippet);
+                    }
+                }
+                _ => {
+                    anyhow::bail!("Unknown format: {}. Use 'json', 'locations', or 'snippets'", format);
+                }
+            }
+        }
+
         Commands::AddDerive { path, target_type, name, derives, apply } => {
             let files = collect_rust_files(&path)?;
             let derive_vec: Vec<String> = derives
@@ -555,6 +631,7 @@ fn main() -> Result<()> {
                 target_name: name.clone(),
                 target_type: target_type.clone(),
                 derives: derive_vec,
+                where_filter: cli.r#where.clone(),
             });
 
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
