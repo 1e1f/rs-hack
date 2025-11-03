@@ -84,6 +84,31 @@ rs-hack add-derive --path FILE --target-type struct --name NAME \
   --derives "Clone,Debug" [--where "derives_trait:Serialize"] --apply
 ```
 
+## Transform - Generic Find & Modify ⭐ NEW
+
+```bash
+# Comment out matching nodes
+rs-hack transform --path "src/**/*.rs" --node-type macro-call \
+  --name eprintln --content-filter "[SHADOW RENDER]" \
+  --action comment --apply
+
+# Remove matching nodes
+rs-hack transform --path "src/**/*.rs" --node-type method-call \
+  --name unwrap --action remove --apply
+
+# Replace matching nodes
+rs-hack transform --path "src/**/*.rs" --node-type function-call \
+  --name old_handler --action replace --with "new_handler()" --apply
+
+# Actions:
+# comment  - Wrap in // comment
+# remove   - Delete entirely
+# replace  - Replace with provided code (requires --with)
+
+# Node types: macro-call, method-call, function-call, enum-usage,
+#             struct-literal, match-arm, identifier, type-ref
+```
+
 ## Inspection Commands
 
 ```bash
@@ -110,6 +135,10 @@ rs-hack inspect --path "src/**/*.rs" --node-type function-call \
 rs-hack inspect --path "src/**/*.rs" --node-type method-call \
   --name "unwrap" [--format snippets|locations|json]
 
+# Inspect macro calls ⭐ NEW
+rs-hack inspect --path "src/**/*.rs" --node-type macro-call \
+  --name "eprintln" [--content-filter "[DEBUG]"] [--format snippets|locations|json]
+
 # Inspect identifier references
 rs-hack inspect --path "src/**/*.rs" --node-type identifier \
   --name "config" [--format snippets|locations|json]
@@ -122,6 +151,9 @@ rs-hack inspect --path "src/**/*.rs" --node-type type-ref \
 # snippets  - Full code on single line (default)
 # locations - file:line:col (grep-like)
 # json      - Structured data
+
+# Content filter (NEW):
+# --content-filter "text"  - Only show nodes containing this text
 ```
 
 ## State Commands
@@ -169,6 +201,24 @@ before:name     # Before specific field/variant/method
 ## Common Workflows
 
 ```bash
+# Workflow 1: Inspect + Transform (NEW!)
+# 1. Find what you want to change
+rs-hack inspect --path "src/**/*.rs" --node-type macro-call \
+  --name eprintln --content-filter "[DEBUG]" --format locations
+
+# 2. Preview transformation
+rs-hack transform --path "src/**/*.rs" --node-type macro-call \
+  --name eprintln --content-filter "[DEBUG]" --action comment
+
+# 3. Apply
+rs-hack transform --path "src/**/*.rs" --node-type macro-call \
+  --name eprintln --content-filter "[DEBUG]" --action comment --apply
+
+# 4. Revert if needed
+rs-hack history
+rs-hack revert <run-id>
+
+# Workflow 2: Struct field modification
 # 1. Inspect first
 rs-hack inspect --path "tests/*.rs" --node-type struct-literal \
   --name Shadow --format snippets
@@ -220,4 +270,7 @@ User { id: u64, name: String }
 - `add-*` operations are **idempotent**
 - `--where` enables **pattern-based filtering**
 - `inspect` is **better than grep** (AST-aware)
+- **`transform`** is the **generic find-and-modify** command (⭐ NEW)
+- `--content-filter` for **precise targeting** (⭐ NEW)
 - State is tracked for `revert`
+- **Workflow:** `inspect` → preview → `transform --apply`

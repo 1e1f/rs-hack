@@ -1213,7 +1213,24 @@ See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to
 
 ## Features by Version
 
-### v0.3.2 - Pattern-Based Filtering & Inspection (Current)
+### v0.4.0 - Generic Transform & Macro Support (Current) ⭐
+- **`transform` command**: Generic find-and-modify operation for ANY AST nodes
+  - Single command replaces need for dozens of specialized operations
+  - Actions: `comment`, `remove`, `replace`
+  - Works with all node types from `inspect`
+  - Perfect for AI agents: one pattern to learn
+  - Content filtering for precise targeting
+- **Macro call support**: Find and modify macro invocations
+  - New `macro-call` node type in `inspect` and `transform`
+  - Great for cleaning up debug logs: `eprintln!`, `println!`, `todo!`, `dbg!`
+  - Content filtering: target specific debug categories
+- **Enhanced `inspect`**: Added `--content-filter` flag
+  - Filter nodes by their source code content
+  - Combine name and content filters for surgical precision
+- **Integration tests**: 6 new tests for transform and inspect features (33 tests total)
+- **Documentation**: Comprehensive examples and workflow guides
+
+### v0.3.2 - Pattern-Based Filtering & Inspection
 - **`--where` filter**: Pattern-based filtering for selective refactoring
   - `--where "derives_trait:Clone"` - Filter by derived traits
   - OR logic support: `--where "derives_trait:Clone,Debug"`

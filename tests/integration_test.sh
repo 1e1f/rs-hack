@@ -1,6 +1,6 @@
 #!/bin/bash
-# Integration test for rs-hack v0.3.0
-# Tests all 16 operations + state management + advanced features
+# Integration test for rs-hack v0.4.0
+# Tests all operations + state management + advanced features + transform/inspect
 
 set -e
 
@@ -40,7 +40,7 @@ cd "$PROJECT_DIR" && cargo build 2>&1 | grep -v "warning:" || true
 
 echo ""
 echo "======================================"
-echo "   rs-hack v0.3.0 Integration Tests  "
+echo "   rs-hack v0.4.0 Integration Tests  "
 echo "======================================"
 echo ""
 

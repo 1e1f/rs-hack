@@ -1,9 +1,9 @@
 [package]
 name = "rs-hack"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2021"
 authors = ["Leif Shackelford<structuresound@gmail.com>"]
-description = "Rust refactor tool for AI agents"
+description = "AST-aware Rust refactoring tool for AI agents - now with generic transform & macro support"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/1e1f/rs-hack"
 keywords = ["ast", "refactoring", "code-generation", "ai", "automation"]
