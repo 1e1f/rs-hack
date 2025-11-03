@@ -35,6 +35,7 @@ impl User {
             field_def: "email: String".to_string(),
             position: InsertPosition::Last,
             literal_default: None,
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -53,6 +54,7 @@ impl User {
             field_def: "name: String".to_string(), // Already exists
             position: InsertPosition::Last,
             literal_default: None,
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -66,6 +68,7 @@ impl User {
         let op = UpdateStructFieldOp {
             struct_name: "User".to_string(),
             field_def: "id: i64".to_string(), // Change type from u64 to i64
+            where_filter: None,
         };
 
         let result = editor.update_struct_field(&op);
@@ -83,6 +86,7 @@ impl User {
         let op = RemoveStructFieldOp {
             struct_name: "User".to_string(),
             field_name: "name".to_string(),
+            where_filter: None,
         };
 
         let result = editor.remove_struct_field(&op);
@@ -100,6 +104,7 @@ impl User {
             enum_name: "Status".to_string(),
             variant_def: "Archived".to_string(),
             position: InsertPosition::Last,
+            where_filter: None,
         };
 
         let result = editor.add_enum_variant(&op);
@@ -117,6 +122,7 @@ impl User {
             enum_name: "Status".to_string(),
             variant_def: "Draft".to_string(), // Already exists
             position: InsertPosition::Last,
+            where_filter: None,
         };
 
         let result = editor.add_enum_variant(&op);
@@ -130,6 +136,7 @@ impl User {
         let op = RemoveEnumVariantOp {
             enum_name: "Status".to_string(),
             variant_name: "Draft".to_string(),
+            where_filter: None,
         };
 
         let result = editor.remove_enum_variant(&op);
@@ -148,6 +155,7 @@ impl User {
             target_name: "User".to_string(),
             target_type: "struct".to_string(),
             derives: vec!["Clone".to_string(), "Serialize".to_string()],
+            where_filter: None,
         };
 
         let result = editor.add_derive(&op);
@@ -167,6 +175,7 @@ impl User {
             target_name: "User".to_string(),
             target_type: "struct".to_string(),
             derives: vec!["Debug".to_string()], // Already has Debug
+            where_filter: None,
         };
 
         let result = editor.add_derive(&op);
@@ -427,6 +436,7 @@ pub fn handle_status(status: Status) -> String {
             field_def: "created_at: u64".to_string(),
             position: InsertPosition::First,
             literal_default: None,
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -448,6 +458,7 @@ pub fn handle_status(status: Status) -> String {
             field_def: "email: String".to_string(),
             position: InsertPosition::After("id".to_string()),
             literal_default: None,
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -469,6 +480,7 @@ pub fn handle_status(status: Status) -> String {
             enum_name: "Status".to_string(),
             variant_def: "Error { code: i32, message: String }".to_string(),
             position: InsertPosition::Last,
+            where_filter: None,
         };
 
         let result = editor.add_enum_variant(&op);
@@ -489,6 +501,7 @@ pub fn handle_status(status: Status) -> String {
             field_def: "field: String".to_string(),
             position: InsertPosition::Last,
             literal_default: None,
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -503,6 +516,7 @@ pub fn handle_status(status: Status) -> String {
             enum_name: "NonExistent".to_string(),
             variant_def: "Variant".to_string(),
             position: InsertPosition::Last,
+            where_filter: None,
         };
 
         let result = editor.add_enum_variant(&op);
@@ -711,6 +725,7 @@ fn new_ctx() -> IRCtx {
             field_def: "return_type: Option<Type>".to_string(),
             position: InsertPosition::After("current_function_frame".to_string()),
             literal_default: Some("None".to_string()),
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -755,6 +770,7 @@ fn default_config() -> Config {
             field_def: "timeout: u32".to_string(), // Already exists
             position: InsertPosition::Last,
             literal_default: Some("30".to_string()),
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -788,6 +804,7 @@ fn new_user() -> User {
             field_def: "email: String".to_string(),
             position: InsertPosition::Last,
             literal_default: None, // No literal default
+            where_filter: None,
         };
 
         let result = editor.add_struct_field(&op);
@@ -815,5 +832,240 @@ fn new_user() -> User {
         // Count occurrences of "email" - should only be in struct definition, not in literal
         assert_eq!(output.matches("email").count(), 1); // Only in struct def
         assert!(!literal_block.contains("email"));
+    }
+
+    // ========== Tests for --where filter ==========
+
+    #[test]
+    fn test_where_filter_derives_trait_match() {
+        let code = r#"
+#[derive(Clone, Debug)]
+pub struct User {
+    id: u64,
+}
+
+#[derive(Debug)]
+pub struct Config {
+    port: u16,
+}
+"#;
+        let mut editor = RustEditor::new(code).unwrap();
+
+        // Should add field to User (has Clone)
+        let op = AddStructFieldOp {
+            struct_name: "User".to_string(),
+            field_def: "name: String".to_string(),
+            position: InsertPosition::Last,
+            literal_default: None,
+            where_filter: Some("derives_trait:Clone".to_string()),
+        };
+
+        let result = editor.add_struct_field(&op).unwrap();
+        assert!(result.changed);
+        assert!(editor.to_string().contains("name: String"));
+    }
+
+    #[test]
+    fn test_where_filter_derives_trait_no_match() {
+        let code = r#"
+#[derive(Debug)]
+pub struct Config {
+    port: u16,
+}
+"#;
+        let mut editor = RustEditor::new(code).unwrap();
+
+        // Should NOT add field to Config (doesn't have Clone)
+        let op = AddStructFieldOp {
+            struct_name: "Config".to_string(),
+            field_def: "name: String".to_string(),
+            position: InsertPosition::Last,
+            literal_default: None,
+            where_filter: Some("derives_trait:Clone".to_string()),
+        };
+
+        let result = editor.add_struct_field(&op).unwrap();
+        assert!(!result.changed);
+        assert!(!editor.to_string().contains("name: String"));
+    }
+
+    #[test]
+    fn test_where_filter_or_logic() {
+        let code = r#"
+#[derive(Debug)]
+pub struct Config {
+    port: u16,
+}
+"#;
+        let mut editor = RustEditor::new(code).unwrap();
+
+        // Should add field to Config (has Debug, which matches Clone OR Debug)
+        let op = AddStructFieldOp {
+            struct_name: "Config".to_string(),
+            field_def: "name: String".to_string(),
+            position: InsertPosition::Last,
+            literal_default: None,
+            where_filter: Some("derives_trait:Clone,Debug".to_string()),
+        };
+
+        let result = editor.add_struct_field(&op).unwrap();
+        assert!(result.changed);
+        assert!(editor.to_string().contains("name: String"));
+    }
+
+    // ========== Tests for inspect command ==========
+
+    #[test]
+    fn test_inspect_struct_literal() {
+        let code = r#"
+fn main() {
+    let user = User {
+        id: 1,
+        name: "Alice".to_string(),
+    };
+
+    let another = User {
+        id: 2,
+        name: "Bob".to_string(),
+    };
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("struct-literal", Some("User")).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].identifier, "User");
+        assert!(results[0].snippet.contains("User"));
+    }
+
+    #[test]
+    fn test_inspect_match_arm() {
+        let code = r#"
+fn handle(op: Operator) {
+    match op {
+        Operator::Add => println!("add"),
+        Operator::Subtract => println!("subtract"),
+        Operator::Error => println!("error"),
+    }
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("match-arm", Some("Error")).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].identifier.contains("Error"));
+        assert!(results[0].snippet.contains("Operator::Error"));
+    }
+
+    #[test]
+    fn test_inspect_enum_usage() {
+        let code = r#"
+fn format(op: Operator) -> &'static str {
+    match op {
+        Operator::Error => "!",
+        _ => "",
+    }
+}
+
+fn check() -> Operator {
+    Operator::Error
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("enum-usage", Some("Operator::Error")).unwrap();
+
+        // Should find both: in match arm and in return
+        assert!(results.len() >= 2);
+        assert!(results.iter().any(|r| r.identifier.contains("Error")));
+    }
+
+    #[test]
+    fn test_inspect_function_call() {
+        let code = r#"
+fn main() {
+    handle_error();
+    process_data();
+    handle_error();
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("function-call", Some("handle_error")).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(results[0].snippet.contains("handle_error"));
+    }
+
+    #[test]
+    fn test_inspect_method_call() {
+        let code = r#"
+fn main() {
+    value.unwrap();
+    data.clone();
+    result.unwrap();
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("method-call", Some("unwrap")).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(results[0].snippet.contains("unwrap"));
+    }
+
+    #[test]
+    fn test_inspect_identifier() {
+        let code = r#"
+fn main() {
+    let config = Config::new();
+    println!("{}", config);
+    process(config);
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("identifier", Some("config")).unwrap();
+
+        // Should find: let binding, println argument, process argument
+        // Note: May find more instances as identifiers appear in various contexts
+        assert!(results.len() >= 1);
+        assert!(results.iter().all(|r| r.identifier == "config"));
+    }
+
+    #[test]
+    fn test_inspect_type_ref() {
+        let code = r#"
+fn process(items: Vec<String>) -> Option<i32> {
+    let data: Vec<i32> = vec![];
+    None
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("type-ref", Some("Vec")).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.identifier.contains("Vec")));
+    }
+
+    #[test]
+    fn test_inspect_no_filter() {
+        let code = r#"
+fn main() {
+    let user = User { id: 1 };
+    let config = Config { port: 8080 };
+}
+"#;
+        let editor = RustEditor::new(code).unwrap();
+        let results = editor.inspect("struct-literal", None).unwrap();
+
+        // Should find both User and Config
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_inspect_invalid_node_type() {
+        let code = "fn main() {}";
+        let editor = RustEditor::new(code).unwrap();
+        let result = editor.inspect("invalid-type", None);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported node type"));
     }
 }
