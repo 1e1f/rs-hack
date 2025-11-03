@@ -6,8 +6,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/.."
+WORKSPACE_ROOT="$(cd "$PROJECT_DIR/../../.." && pwd)"
+BINARY="$WORKSPACE_ROOT/target/release/rs-hack"
 # BINARY="cargo run --release --quiet --"
-BINARY="rs-hack"
+# BINARY="rs-hack"
 INPUT="$PROJECT_DIR/examples/sample.rs"
 TEMP_DIR="$PROJECT_DIR/target/test-output"
 STATE_DIR="$TEMP_DIR/.rs-hack"  # State in test output directory
@@ -360,6 +362,90 @@ run_test "batch-operations" \
     "true"
 
 # ============================================================================
+section "INSPECT & TRANSFORM OPERATIONS (NEW)"
+# ============================================================================
+
+# Test 28: Inspect macro-call (NEW FEATURE)
+cat > "$TEMP_DIR/inspect_macro_test.rs" << 'EOF'
+fn main() {
+    println!("Hello");
+    eprintln!("[DEBUG] Some debug message");
+    eprintln!("[SHADOW RENDER] Drawing shadow");
+    eprintln!("[SHADOW RENDER] Shadow blur");
+    todo!("Implement this");
+}
+EOF
+
+run_test "inspect-macro-call" \
+    "$BINARY inspect --path $TEMP_DIR/inspect_macro_test.rs --node-type macro-call --name eprintln --format locations" \
+    "grep -q 'inspect_macro_test.rs:3:4' $TEMP_DIR/cmd_output.txt && grep -q 'inspect_macro_test.rs:4:4' $TEMP_DIR/cmd_output.txt && grep -q 'inspect_macro_test.rs:5:4' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test 29: Inspect with content filter (NEW FEATURE)
+run_test "inspect-content-filter" \
+    "$BINARY inspect --path $TEMP_DIR/inspect_macro_test.rs --node-type macro-call --name eprintln --content-filter '[SHADOW RENDER]' --format locations" \
+    "grep -q 'inspect_macro_test.rs:4:4' $TEMP_DIR/cmd_output.txt && grep -q 'inspect_macro_test.rs:5:4' $TEMP_DIR/cmd_output.txt && ! grep -q 'inspect_macro_test.rs:3:4' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test 30: Transform comment action (NEW FEATURE)
+cat > "$TEMP_DIR/transform_comment_test.rs" << 'EOF'
+fn main() {
+    eprintln!("[DEBUG] Debug message");
+    eprintln!("[SHADOW RENDER] Shadow 1");
+    println!("Keep this");
+    eprintln!("[SHADOW RENDER] Shadow 2");
+}
+EOF
+
+run_test "transform-comment-action" \
+    "$BINARY transform --path $TEMP_DIR/transform_comment_test.rs --node-type macro-call --name eprintln --content-filter '[SHADOW RENDER]' --action comment --apply" \
+    "grep -q '// eprintln!.*SHADOW RENDER' $TEMP_DIR/transform_comment_test.rs && grep -q 'eprintln!.*DEBUG' $TEMP_DIR/transform_comment_test.rs && ! grep -q '// eprintln!.*DEBUG' $TEMP_DIR/transform_comment_test.rs" \
+    "true"
+
+# Test 31: Transform remove action (NEW FEATURE)
+cat > "$TEMP_DIR/transform_remove_test.rs" << 'EOF'
+fn main() {
+    eprintln!("[DEBUG] Debug message");
+    eprintln!("[SHADOW RENDER] Shadow 1");
+    println!("Keep this");
+    eprintln!("[SHADOW RENDER] Shadow 2");
+}
+EOF
+
+run_test "transform-remove-action" \
+    "$BINARY transform --path $TEMP_DIR/transform_remove_test.rs --node-type macro-call --name eprintln --content-filter '[SHADOW RENDER]' --action remove --apply" \
+    "! grep -q '\[SHADOW RENDER\]' $TEMP_DIR/transform_remove_test.rs && grep -q '\[DEBUG\]' $TEMP_DIR/transform_remove_test.rs" \
+    "true"
+
+# Test 32: Transform replace action (NEW FEATURE)
+cat > "$TEMP_DIR/transform_replace_test.rs" << 'EOF'
+fn process() {
+    old_function();
+    old_function();
+    some_other_function();
+}
+EOF
+
+run_test "transform-replace-action" \
+    "$BINARY transform --path $TEMP_DIR/transform_replace_test.rs --node-type function-call --name old_function --action replace --with 'new_function()' --apply" \
+    "grep -q 'new_function()' $TEMP_DIR/transform_replace_test.rs && ! grep -q 'old_function()' $TEMP_DIR/transform_replace_test.rs && grep -q 'some_other_function()' $TEMP_DIR/transform_replace_test.rs" \
+    "true"
+
+# Test 33: Transform with method-call node type (NEW FEATURE)
+cat > "$TEMP_DIR/transform_method_test.rs" << 'EOF'
+fn risky_code() {
+    let x = maybe_value.unwrap();
+    let y = safe_value.clone();
+    let z = another_value.unwrap();
+}
+EOF
+
+run_test "transform-method-call-comment" \
+    "$BINARY transform --path $TEMP_DIR/transform_method_test.rs --node-type method-call --name unwrap --action comment --apply" \
+    "grep -q '// .*unwrap()' $TEMP_DIR/transform_method_test.rs && ! grep -q '// .*clone()' $TEMP_DIR/transform_method_test.rs" \
+    "true"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 
@@ -386,8 +472,9 @@ if [ $FAILED -eq 0 ]; then
     echo "  ✅ 1 Position control test"
     echo "  ✅ 1 Glob pattern test"
     echo "  ✅ 2 Utility operations (find, batch)"
+    echo "  ✅ 6 Inspect & Transform operations (inspect, filter, comment, remove, replace, method-call) ⭐ NEW"
     echo ""
-    printf "Total: %b27 tests%b\n" "$BLUE" "$NC"
+    printf "Total: %b33 tests%b\n" "$BLUE" "$NC"
 
     # STATE AUDIT
     section "STATE AUDIT"

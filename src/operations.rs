@@ -17,6 +17,7 @@ pub enum Operation {
     AddImplMethod(AddImplMethodOp),
     AddUseStatement(AddUseStatementOp),
     AddDerive(AddDeriveOp),
+    Transform(TransformOp),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,4 +170,22 @@ pub struct InspectResult {
     pub identifier: String,      // "Shadow", "Config", etc.
     pub location: NodeLocation,
     pub snippet: String,         // Formatted code snippet
+}
+
+/// Generic transformation operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransformOp {
+    pub node_type: String,           // "macro-call", "method-call", etc.
+    pub name_filter: Option<String>, // Filter by name (e.g., "eprintln")
+    pub content_filter: Option<String>, // Filter by content (e.g., "[SHADOW RENDER]")
+    pub action: TransformAction,     // What to do with matching nodes
+}
+
+/// Actions that can be performed on AST nodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum TransformAction {
+    Comment,                    // Wrap in // comment
+    Remove,                     // Delete the node entirely
+    Replace { with: String },   // Replace with provided code
 }

@@ -42,6 +42,15 @@ The binary will be installed to `~/.cargo/bin/rs-hack`.
 ## Quick Start
 
 ```bash
+# Comment out all eprintln! macros containing "[SHADOW RENDER]"
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[SHADOW RENDER]" \
+  --action comment \
+  --apply
+
 # Add derive macros with glob pattern
 rs-hack add-derive --path "src/**/*.rs" \
   --target-type struct --name User \
@@ -66,7 +75,13 @@ rs-hack add-use --path src/lib.rs \
   --use-path "serde::Serialize" --apply
 ```
 
-## Supported Operations (20 commands)
+## Supported Operations (21 commands)
+
+### Generic Transform (1) ⭐ NEW
+- ✅ **transform**: Find and modify any AST nodes (comment, remove, or replace)
+  - Works with all node types from `inspect`
+  - Content filtering for precise targeting
+  - Single command replaces many specialized operations
 
 ### Struct Operations (4)
 - ✅ **add-struct-field**: Add fields to definitions (with optional `--literal-default`)
@@ -88,7 +103,7 @@ rs-hack add-use --path src/lib.rs \
 
 ### Inspection & Search (2)
 - ✅ **find**: Locate AST node definitions (structs, enums, functions)
-- ✅ **inspect**: List and view AST nodes (struct literals, etc.) with glob support
+- ✅ **inspect**: List and view AST nodes with glob support (now includes macro-call)
 
 ### State & Utilities (5)
 - ✅ **history**: View past operations
@@ -568,6 +583,21 @@ rs-hack inspect \
 #
 # // src/lib.rs:42:11 - Vec<i32>
 # Vec<i32>
+
+# Find all eprintln! macros (NEW!)
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name "eprintln" \
+  --format snippets
+
+# Find eprintln! macros with specific content (NEW!)
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name "eprintln" \
+  --content-filter "[SHADOW RENDER]" \
+  --format locations
 ```
 
 **Supported Node Types:**
@@ -576,6 +606,7 @@ rs-hack inspect \
 - `enum-usage` - Enum variant references/usages anywhere in code
 - `function-call` - Function invocations
 - `method-call` - Method calls
+- `macro-call` - Macro invocations (e.g., `println!`, `eprintln!`, `todo!`) ⭐ NEW
 - `identifier` - Any identifier reference
 - `type-ref` - Type usages
 
@@ -595,6 +626,164 @@ rs-hack inspect \
 - **Audit method calls**: Find all `.unwrap()`, `.clone()`, or `.to_string()` calls
 - **Track identifiers**: Find all references to variables, constants, or parameters
 - **Type usage analysis**: See where types like `Vec`, `Option`, or `Result` are used
+
+### Transform - Generic Find and Modify ⭐ NEW
+
+The `transform` command provides a generic way to find and modify any AST nodes. It combines the power of `inspect` with mutation capabilities, keeping the API surface small while offering maximum flexibility.
+
+**Perfect for AI agents**: One command to learn instead of dozens of specialized operations.
+
+#### Basic Usage
+
+```bash
+# Comment out all eprintln! macros containing "[SHADOW RENDER]"
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[SHADOW RENDER]" \
+  --action comment \
+  --apply
+
+# Remove all .unwrap() calls in renderer code
+rs-hack transform \
+  --path "src/renderer/**/*.rs" \
+  --node-type method-call \
+  --name unwrap \
+  --action remove \
+  --apply
+
+# Comment out all todo!() macros
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name todo \
+  --action comment \
+  --apply
+
+# Replace specific function calls
+rs-hack transform \
+  --path "src/handlers/*.rs" \
+  --node-type function-call \
+  --name old_handler \
+  --action replace \
+  --with "new_handler" \
+  --apply
+```
+
+#### Supported Actions
+
+- **`comment`**: Wraps matched nodes in `// ...` comments
+- **`remove`**: Deletes matched nodes entirely
+- **`replace`**: Replaces with provided code (via `--with` flag)
+
+#### Supported Node Types
+
+Works with all node types from `inspect`:
+- `macro-call` - Macro invocations (e.g., `println!`, `eprintln!`, `todo!`)
+- `method-call` - Method calls (e.g., `.unwrap()`, `.clone()`)
+- `function-call` - Function invocations
+- `enum-usage` - Enum variant references
+- `struct-literal` - Struct initialization expressions
+- `match-arm` - Match expression arms
+- `identifier` - Any identifier reference
+- `type-ref` - Type usages
+
+#### Filtering Options
+
+**Name Filter** (`--name`): Filter by the name of the node
+```bash
+# Only eprintln! macros, not println!
+--name eprintln
+```
+
+**Content Filter** (`--content-filter`): Filter by source code content
+```bash
+# Only macros containing specific text
+--content-filter "[SHADOW RENDER]"
+```
+
+**Combined Filters**: Use both for precise targeting
+```bash
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[DEBUG]" \
+  --action comment \
+  --apply
+```
+
+#### Real-World Examples
+
+**Clean up debug logs:**
+```bash
+# Comment out all debug eprintln! statements
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[DEBUG]" \
+  --action comment \
+  --apply
+```
+
+**Remove dangerous unwrap calls:**
+```bash
+# Remove all .unwrap() calls (review first!)
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type method-call \
+  --name unwrap \
+  --action comment \
+  --apply
+```
+
+**Migrate from old to new API:**
+```bash
+# Replace old function calls
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type function-call \
+  --name legacy_init \
+  --action replace \
+  --with "modern_init" \
+  --apply
+```
+
+**Workflow**: Use `inspect` first to see what matches, then `transform` to modify:
+```bash
+# 1. See what will be affected
+rs-hack inspect \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[SHADOW RENDER]"
+
+# 2. Apply transformation (dry-run first!)
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[SHADOW RENDER]" \
+  --action comment
+
+# 3. Apply for real
+rs-hack transform \
+  --path "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --content-filter "[SHADOW RENDER]" \
+  --action comment \
+  --apply
+```
+
+**Why Transform is Better than Specialized Commands:**
+- ✅ Single command for AI agents to learn
+- ✅ Works with any AST node type
+- ✅ Content filtering for precise targeting
+- ✅ Composable with all inspect node types
+- ✅ Fewer commands = smaller API surface
 
 ### Batch Operations
 
@@ -1024,7 +1213,7 @@ See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to
 
 ## Features by Version
 
-### v0.4.0 - Pattern-Based Filtering & Inspection (Current)
+### v0.3.2 - Pattern-Based Filtering & Inspection (Current)
 - **`--where` filter**: Pattern-based filtering for selective refactoring
   - `--where "derives_trait:Clone"` - Filter by derived traits
   - OR logic support: `--where "derives_trait:Clone,Debug"`

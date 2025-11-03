@@ -80,6 +80,7 @@ impl RustEditor {
             Operation::AddImplMethod(op) => self.add_impl_method(op),
             Operation::AddUseStatement(op) => self.add_use_statement(op),
             Operation::AddDerive(op) => self.add_derive(op),
+            Operation::Transform(op) => self.transform(op),
         }
     }
     
@@ -1986,6 +1987,89 @@ impl RustEditor {
                     syn::visit::visit_item(&mut visitor, item);
                 }
             }
+            "macro-call" => {
+                // Find all macro call expressions
+                struct MacroCallVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for MacroCallVisitor<'a> {
+                    fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+                        // Extract macro name from the path
+                        let macro_name = node.mac.path.segments.last()
+                            .map(|seg| seg.ident.to_string())
+                            .unwrap_or_default();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if macro_name != filter {
+                                syn::visit::visit_expr_macro(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the macro call
+                        let snippet = self.editor.format_expr_macro(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(), // Will be filled in by caller
+                            node_type: "ExprMacro".to_string(),
+                            identifier: macro_name,
+                            location,
+                            snippet,
+                        });
+
+                        // Continue visiting nested expressions
+                        syn::visit::visit_expr_macro(self, node);
+                    }
+
+                    fn visit_stmt(&mut self, node: &'ast syn::Stmt) {
+                        // Also catch macro calls at statement level (e.g., println! as statement)
+                        if let syn::Stmt::Macro(macro_stmt) = node {
+                            let macro_name = macro_stmt.mac.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                                .unwrap_or_default();
+
+                            // Apply name filter if specified
+                            if let Some(filter) = self.name_filter {
+                                if macro_name != filter {
+                                    syn::visit::visit_stmt(self, node);
+                                    return;
+                                }
+                            }
+
+                            // Format the macro call
+                            let snippet = self.editor.format_stmt_macro(macro_stmt);
+                            let location = self.editor.span_to_location(macro_stmt.span());
+
+                            self.results.push(InspectResult {
+                                file_path: String::new(), // Will be filled in by caller
+                                node_type: "StmtMacro".to_string(),
+                                identifier: macro_name,
+                                location,
+                                snippet,
+                            });
+                        }
+
+                        // Continue visiting
+                        syn::visit::visit_stmt(self, node);
+                    }
+                }
+
+                let mut visitor = MacroCallVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                };
+
+                // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
             _ => anyhow::bail!("Unsupported node type: {}", node_type),
         }
 
@@ -2067,6 +2151,32 @@ impl RustEditor {
         // Extract the original source code from the file content using the span
         let start = self.span_to_byte_offset(ty.span().start());
         let end = self.span_to_byte_offset(ty.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format an ExprMacro node as a string - extracts original source
+    fn format_expr_macro(&self, expr: &syn::ExprMacro) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(expr.span().start());
+        let end = self.span_to_byte_offset(expr.span().end());
+
+        // Get the original text and collapse to single line
+        let original = &self.content[start..end];
+
+        // Replace multiple whitespace/newlines with single space for single-line format
+        original.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Format a StmtMacro node as a string - extracts original source
+    fn format_stmt_macro(&self, stmt: &syn::StmtMacro) -> String {
+        // Extract the original source code from the file content using the span
+        let start = self.span_to_byte_offset(stmt.span().start());
+        let end = self.span_to_byte_offset(stmt.span().end());
 
         // Get the original text and collapse to single line
         let original = &self.content[start..end];
@@ -2160,6 +2270,109 @@ impl RustEditor {
             end_line: end.line,
             end_column: end.column,
         }
+    }
+
+    /// Generic transform operation - find matching nodes and apply action
+    pub(crate) fn transform(&mut self, op: &crate::operations::TransformOp) -> Result<ModificationResult> {
+        use crate::operations::{InspectResult, TransformAction};
+
+        // First, use inspect to find all matching nodes
+        let matches = self.inspect(&op.node_type, op.name_filter.as_deref())?;
+
+        // Apply content filter if specified
+        let filtered_matches: Vec<InspectResult> = if let Some(ref content_filter) = op.content_filter {
+            matches.into_iter()
+                .filter(|m| m.snippet.contains(content_filter))
+                .collect()
+        } else {
+            matches
+        };
+
+        if filtered_matches.is_empty() {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
+        }
+
+        // Now apply the transformation action to each match
+        // We need to work backwards through the file to avoid offset issues
+        let mut sorted_matches = filtered_matches;
+        sorted_matches.sort_by(|a, b| {
+            b.location.line.cmp(&a.location.line)
+                .then(b.location.column.cmp(&a.location.column))
+        });
+
+        let mut modified_nodes = Vec::new();
+
+        for match_result in &sorted_matches {
+            // Create backup node
+            let backup_node = BackupNode {
+                node_type: match_result.node_type.clone(),
+                identifier: match_result.identifier.clone(),
+                original_content: match_result.snippet.clone(),
+                location: match_result.location.clone(),
+            };
+
+            // Find the byte offsets for this node
+            let start_offset = self.line_column_to_byte_offset(
+                match_result.location.line,
+                match_result.location.column
+            )?;
+            let end_offset = self.line_column_to_byte_offset(
+                match_result.location.end_line,
+                match_result.location.end_column
+            )?;
+
+            // Extract the original text
+            let original_text = &self.content[start_offset..end_offset];
+
+            // Apply the action
+            let replacement = match &op.action {
+                TransformAction::Comment => {
+                    // Comment out the code
+                    format!("// {}", original_text.replace("\n", "\n// "))
+                }
+                TransformAction::Remove => {
+                    // Remove the entire node
+                    String::new()
+                }
+                TransformAction::Replace { with } => {
+                    // Replace with provided code
+                    with.clone()
+                }
+            };
+
+            // Replace in content
+            self.content.replace_range(start_offset..end_offset, &replacement);
+
+            // Recompute line offsets after each change
+            self.line_offsets = Self::compute_line_offsets(&self.content);
+
+            modified_nodes.push(backup_node);
+        }
+
+        // Re-parse the content if we made changes
+        if !modified_nodes.is_empty() {
+            // Don't reparse for now - we're doing text-level operations
+            // self.syntax_tree = syn::parse_str(&self.content)
+            //     .context("Failed to re-parse content after transformation")?;
+        }
+
+        Ok(ModificationResult {
+            changed: !modified_nodes.is_empty(),
+            modified_nodes,
+        })
+    }
+
+    /// Convert line/column to byte offset
+    fn line_column_to_byte_offset(&self, line: usize, column: usize) -> Result<usize> {
+        if line == 0 || line > self.line_offsets.len() {
+            anyhow::bail!("Line {} out of range", line);
+        }
+
+        let line_start = self.line_offsets[line - 1];
+        Ok(line_start + column)
     }
 }
 

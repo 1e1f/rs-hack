@@ -323,13 +323,17 @@ enum Commands {
         #[arg(short, long)]
         path: PathBuf,
 
-        /// Type of node: "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "identifier", "type-ref"
+        /// Type of node: "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref"
         #[arg(short = 't', long)]
         node_type: String,
 
-        /// Filter by name (e.g., "Shadow", "Operator::Error", "unwrap", "handle_error", "Vec")
+        /// Filter by name (e.g., "Shadow", "Operator::Error", "unwrap", "eprintln", "Vec")
         #[arg(short, long)]
         name: Option<String>,
+
+        /// Filter by content - only show nodes whose source contains this string (e.g., "[SHADOW RENDER]")
+        #[arg(short = 'c', long)]
+        content_filter: Option<String>,
 
         /// Output format: "json", "locations", "snippets"
         #[arg(short = 'f', long, default_value = "snippets")]
@@ -423,6 +427,37 @@ enum Commands {
         /// Keep runs from last N days
         #[arg(long, default_value = "30")]
         keep_days: u32,
+    },
+
+    /// Transform AST nodes (generic find-and-transform operation)
+    Transform {
+        /// Path to Rust file(s) - supports glob patterns (e.g., "src/**/*.rs")
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Type of node: "macro-call", "method-call", "function-call", etc.
+        #[arg(short = 't', long)]
+        node_type: String,
+
+        /// Filter by name (e.g., "eprintln", "unwrap")
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Filter by content - only transform nodes containing this string
+        #[arg(short = 'c', long)]
+        content_filter: Option<String>,
+
+        /// Action to perform: "comment", "remove", or "replace"
+        #[arg(short, long)]
+        action: String,
+
+        /// Replacement code (required if action is "replace")
+        #[arg(short = 'w', long)]
+        with: Option<String>,
+
+        /// Apply changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
     },
 }
 
@@ -573,7 +608,7 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&locations)?);
         }
 
-        Commands::Inspect { path, node_type, name, format } => {
+        Commands::Inspect { path, node_type, name, content_filter, format } => {
             use operations::InspectResult;
 
             let files = collect_rust_files(&path)?;
@@ -589,6 +624,11 @@ fn main() -> Result<()> {
                 // Fill in file paths
                 for result in &mut results {
                     result.file_path = file.to_string_lossy().to_string();
+                }
+
+                // Apply content filter if specified
+                if let Some(ref filter) = content_filter {
+                    results.retain(|r| r.snippet.contains(filter));
                 }
 
                 all_results.extend(results);
@@ -673,6 +713,31 @@ fn main() -> Result<()> {
         Commands::Clean { keep_days } => {
             let state_dir = get_state_dir(cli.local_state)?;
             clean_old_state(keep_days, &state_dir)?;
+        }
+
+        Commands::Transform { path, node_type, name, content_filter, action, with, apply } => {
+            use operations::{TransformOp, TransformAction};
+
+            // Parse the action
+            let transform_action = match action.as_str() {
+                "comment" => TransformAction::Comment,
+                "remove" => TransformAction::Remove,
+                "replace" => {
+                    let replacement = with.ok_or_else(|| anyhow::anyhow!("--with is required when action is 'replace'"))?;
+                    TransformAction::Replace { with: replacement }
+                }
+                _ => anyhow::bail!("Invalid action: {}. Use 'comment', 'remove', or 'replace'", action),
+            };
+
+            let files = collect_rust_files(&path)?;
+            let op = Operation::Transform(TransformOp {
+                node_type: node_type.clone(),
+                name_filter: name,
+                content_filter,
+                action: transform_action,
+            });
+
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
         }
     }
 
@@ -854,6 +919,7 @@ fn execute_operation_with_state(
         Operation::AddImplMethod(_) => "AddImplMethod",
         Operation::AddUseStatement(_) => "AddUseStatement",
         Operation::AddDerive(_) => "AddDerive",
+        Operation::Transform(_) => "Transform",
     };
 
     // First pass: collect changes and backup files
