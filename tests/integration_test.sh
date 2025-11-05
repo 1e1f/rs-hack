@@ -133,9 +133,9 @@ fn create_origin() -> Point {
 }
 EOF
 
-run_test "add-struct-literal-field" \
-    "$BINARY add-struct-literal-field --path $TEMP_DIR/literal_test.rs --struct-name Point --field 'w: 0' --apply" \
-    "grep -q 'w: 0' $TEMP_DIR/literal_test.rs" \
+run_test "add-struct-field-literal-only" \
+    "$BINARY add-struct-field --path $TEMP_DIR/literal_test.rs --struct-name Point --field 'w' --literal-default '0' --apply" \
+    "grep -q 'w: 0' $TEMP_DIR/literal_test.rs && ! (grep -A 5 'pub struct Point' $TEMP_DIR/literal_test.rs | grep -q 'w:')" \
     "true"
 
 # ============================================================================
@@ -446,6 +446,78 @@ run_test "transform-method-call-comment" \
     "true"
 
 # ============================================================================
+section "PATTERN MATCHING FOR STRUCT LITERALS (NEW)"
+# ============================================================================
+
+# Test 34: Pattern matching - pure struct literal only (no ::)
+cat > "$TEMP_DIR/pattern_pure_struct.rs" << 'EOF'
+struct Rectangle { width: f32, height: f32 }
+
+enum View {
+    Rectangle { width: f32, height: f32 },
+    Circle { radius: f32 },
+}
+
+fn test() {
+    let rect = Rectangle { width: 10.0, height: 20.0 };
+    let view = View::Rectangle { width: 30.0, height: 40.0 };
+}
+EOF
+
+run_test "pattern-pure-struct-literal" \
+    "$BINARY add-struct-literal-field --path $TEMP_DIR/pattern_pure_struct.rs --struct-name Rectangle --field 'layer: 0' --apply" \
+    "grep -A 5 'let rect = Rectangle' $TEMP_DIR/pattern_pure_struct.rs | grep -q 'layer: 0' && ! grep -A 5 'View::Rectangle' $TEMP_DIR/pattern_pure_struct.rs | grep -q 'layer'" \
+    "true"
+
+# Test 35: Pattern matching - wildcard (*::Rectangle matches all)
+cat > "$TEMP_DIR/pattern_wildcard.rs" << 'EOF'
+struct Rectangle { width: f32, height: f32 }
+
+enum View {
+    Rectangle { width: f32, height: f32 },
+}
+
+enum ViewType {
+    Rectangle { width: f32, height: f32 },
+}
+
+fn test() {
+    let rect = Rectangle { width: 10.0, height: 20.0 };
+    let view = View::Rectangle { width: 30.0, height: 40.0 };
+    let vtype = ViewType::Rectangle { width: 50.0, height: 60.0 };
+}
+EOF
+
+run_test "pattern-wildcard-match" \
+    "$BINARY add-struct-literal-field --path $TEMP_DIR/pattern_wildcard.rs --struct-name '*::Rectangle' --field 'layer: 0' --apply" \
+    "grep -A 5 'let rect = Rectangle' $TEMP_DIR/pattern_wildcard.rs | grep -q 'layer: 0' && grep -A 5 'let view = View::Rectangle' $TEMP_DIR/pattern_wildcard.rs | grep -q 'layer: 0' && grep -A 5 'let vtype = ViewType::Rectangle' $TEMP_DIR/pattern_wildcard.rs | grep -q 'layer: 0'" \
+    "true"
+
+# Test 36: Pattern matching - exact path (View::Rectangle only)
+cat > "$TEMP_DIR/pattern_exact.rs" << 'EOF'
+struct Rectangle { width: f32, height: f32 }
+
+enum View {
+    Rectangle { width: f32, height: f32 },
+}
+
+enum ViewType {
+    Rectangle { width: f32, height: f32 },
+}
+
+fn test() {
+    let rect = Rectangle { width: 10.0, height: 20.0 };
+    let view = View::Rectangle { width: 30.0, height: 40.0 };
+    let vtype = ViewType::Rectangle { width: 50.0, height: 60.0 };
+}
+EOF
+
+run_test "pattern-exact-path-match" \
+    "$BINARY add-struct-literal-field --path $TEMP_DIR/pattern_exact.rs --struct-name 'View::Rectangle' --field 'layer: 0' --apply" \
+    "! (grep -A 5 'let rect = Rectangle' $TEMP_DIR/pattern_exact.rs | grep -q 'layer') && grep -A 5 'let view = View::Rectangle' $TEMP_DIR/pattern_exact.rs | grep -q 'layer: 0' && ! (grep -A 5 'let vtype = ViewType::Rectangle' $TEMP_DIR/pattern_exact.rs | grep -q 'layer')" \
+    "true"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 
@@ -473,8 +545,9 @@ if [ $FAILED -eq 0 ]; then
     echo "  ✅ 1 Glob pattern test"
     echo "  ✅ 2 Utility operations (find, batch)"
     echo "  ✅ 6 Inspect & Transform operations (inspect, filter, comment, remove, replace, method-call) ⭐ NEW"
+    echo "  ✅ 3 Pattern matching tests (pure, wildcard, exact) ⭐ NEW"
     echo ""
-    printf "Total: %b33 tests%b\n" "$BLUE" "$NC"
+    printf "Total: %b36 tests%b\n" "$BLUE" "$NC"
 
     # STATE AUDIT
     section "STATE AUDIT"

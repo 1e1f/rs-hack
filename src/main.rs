@@ -44,7 +44,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Add a field to a struct (skips if field already exists)
+    /// Add a field to a struct (idempotent - skips if field already exists)
     AddStructField {
         /// Path to the Rust file or directory
         #[arg(short, long)]
@@ -54,7 +54,7 @@ enum Commands {
         #[arg(short, long)]
         struct_name: String,
 
-        /// Field to add (e.g., "field_name: Type" or "field_name: Option<Type>")
+        /// Field to add (e.g., "field_name: Type" or just "field_name" if using --literal-default)
         #[arg(short, long)]
         field: String,
 
@@ -62,8 +62,10 @@ enum Commands {
         #[arg(short = 'P', long, default_value = "last")]
         position: String,
 
-        /// Optional: default value for struct literals (e.g., "None", "vec![]", "0")
-        /// If provided, also updates all struct initialization expressions
+        /// Default value for struct literals (e.g., "None", "vec![]", "0")
+        /// - If provided: tries to add to definition (idempotent), always adds to literals
+        /// - If omitted: only adds to definition
+        /// Common case: field already exists in struct, you just want to add it to all literals
         #[arg(long)]
         literal_default: Option<String>,
 
@@ -122,7 +124,9 @@ enum Commands {
         apply: bool,
     },
 
+    /// DEPRECATED: Use add-struct-field --literal-only instead
     /// Add a field to struct literal expressions (initialization)
+    #[deprecated]
     AddStructLiteralField {
         /// Path to the Rust file or directory (supports glob patterns)
         #[arg(short, long)]
@@ -471,7 +475,7 @@ fn main() -> Result<()> {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
                 position: parse_position(&position)?,
-                literal_default,
+                literal_default: literal_default.clone(),
                 where_filter: cli.r#where.clone(),
             });
 

@@ -75,7 +75,7 @@ rs-hack add-use --path src/lib.rs \
   --use-path "serde::Serialize" --apply
 ```
 
-## Supported Operations (21 commands)
+## Supported Operations (20 commands)
 
 ### Generic Transform (1) ⭐ NEW
 - ✅ **transform**: Find and modify any AST nodes (comment, remove, or replace)
@@ -83,9 +83,11 @@ rs-hack add-use --path src/lib.rs \
   - Content filtering for precise targeting
   - Single command replaces many specialized operations
 
-### Struct Operations (4)
-- ✅ **add-struct-field**: Add fields to definitions (with optional `--literal-default`)
-- ✅ **add-struct-literal-field**: Add fields to literal expressions only
+### Struct Operations (3) ⭐ CONSOLIDATED
+- ✅ **add-struct-field**: Add fields to definitions, literals, or both
+  - (default) → definition only
+  - `--literal-default VALUE` → definition + literals
+  - `--literal-only` → literals only (replaces old `add-struct-literal-field`)
 - ✅ **update-struct-field**: Update field types/visibility
 - ✅ **remove-struct-field**: Remove fields
 
@@ -248,21 +250,76 @@ rs-hack add-struct-field \
 
 #### Add Field to Struct Literal Expressions Only
 ```bash
-# Add field to ALL struct initialization expressions (idempotent)
-# Use this when the field already exists in the struct definition
-rs-hack add-struct-literal-field \
+# Common case: field already exists in definition, just add to all literals
+# Simply omit the type (:Type) and provide --literal-default
+rs-hack add-struct-field \
   --path "src/**/*.rs" \
   --struct-name IRCtx \
-  --field "return_type: None" \
+  --field "return_type" \
+  --literal-default "None" \
   --position "after:current_function_frame" \
   --apply
 
 # This modifies initialization expressions like:
-# IRCtx { stack: vec![], current_function_frame: None, ... }
+# IRCtx { stack: vec![], current_function_frame: None, return_type: None }
 #
 # NOT the struct definition:
-# pub struct IRCtx { ... }
+# pub struct IRCtx { /* no change */ }
+
+# How it works:
+# - No ':' in --field means "literals only" (definition is skipped)
+# - With ':' in --field, it tries definition (idempotent) + literals
+
+# OLD (deprecated): add-struct-literal-field command
 ```
+
+**Pattern Matching for `--struct-name`** (v0.4.0+):
+
+The `--struct-name` parameter supports pattern matching to distinguish between struct literals and enum variant constructors:
+
+```bash
+# Match ONLY pure struct literals (no :: prefix)
+--struct-name "Rectangle"
+# Matches:   Rectangle { ... }
+# Ignores:   View::Rectangle { ... }
+# Ignores:   ViewType::Rectangle { ... }
+
+# Match ANY path ending with Rectangle (wildcard)
+--struct-name "*::Rectangle"
+# Matches:   View::Rectangle { ... }
+# Matches:   ViewType::Rectangle { ... }
+# Matches:   Rectangle { ... }
+
+# Match EXACT path only
+--struct-name "View::Rectangle"
+# Matches:   View::Rectangle { ... }
+# Ignores:   ViewType::Rectangle { ... }
+# Ignores:   Rectangle { ... }
+```
+
+**Why This Matters:**
+
+Without explicit patterns, `View::Rectangle { ... }` is an **enum variant constructor**, not a struct literal:
+
+```rust
+// Enum definition
+enum View {
+    Rectangle { width: f32, height: f32 },  // ← Enum variant with named fields
+    Circle { radius: f32 },
+}
+
+// Struct definition
+struct Rectangle {
+    width: f32,
+    height: f32,
+}
+
+// Usage:
+let view = View::Rectangle { width: 100.0, height: 50.0 };  // ← Enum variant constructor
+let rect = Rectangle { width: 100.0, height: 50.0 };         // ← Struct literal
+```
+
+The pattern matching prevents accidental modification of enum variants when you meant to target struct literals.
 
 #### Update Field
 ```bash
@@ -1227,7 +1284,19 @@ See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to
 - **Enhanced `inspect`**: Added `--content-filter` flag
   - Filter nodes by their source code content
   - Combine name and content filters for surgical precision
-- **Integration tests**: 6 new tests for transform and inspect features (33 tests total)
+- **Pattern matching for struct literals**: Distinguish between struct literals and enum variants
+  - `--struct-name "Rectangle"` → only pure struct literals `Rectangle { ... }`
+  - `--struct-name "*::Rectangle"` → any enum variant ending with `Rectangle` (e.g., `View::Rectangle { ... }`)
+  - `--struct-name "View::Rectangle"` → exact path match only
+  - Prevents accidental modification of enum variant constructors
+- **Simplified struct field commands**: `add-struct-field` now handles all cases intelligently
+  - No `--literal-default` → definition only
+  - `--literal-default` with type (`field: Type`) → tries definition (idempotent) + always adds to literals
+  - `--literal-default` without type (`field`) → literals only (skips definition)
+  - Common case: field exists, just use `--field "name" --literal-default "value"`
+  - Eliminates confusing dual-command footgun, natural API
+- **State migration**: Automatic handling of incompatible state from previous versions
+- **Integration tests**: 36 tests including transform, pattern matching, and literal-only mode
 - **Documentation**: Comprehensive examples and workflow guides
 
 ### v0.3.2 - Pattern-Based Filtering & Inspection

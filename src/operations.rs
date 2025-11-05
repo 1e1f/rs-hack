@@ -23,10 +23,10 @@ pub enum Operation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddStructFieldOp {
     pub struct_name: String,
-    pub field_def: String, // e.g., "new_field: Option<String>"
+    pub field_def: String, // e.g., "new_field: Option<String>" or just "new_field" if literal_default is provided
     pub position: InsertPosition,
     #[serde(default)]
-    pub literal_default: Option<String>, // Optional: value for struct literals (e.g., "None", "vec![]", "0")
+    pub literal_default: Option<String>, // If provided: tries to add to definition (idempotent), always updates literals
     #[serde(default)]
     pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }

@@ -98,9 +98,35 @@ impl RunsIndex {
 
         let content = fs::read_to_string(&index_path)
             .context("Failed to read runs index")?;
+
         let index: RunsIndex = serde_json::from_str(&content)
-            .context("Failed to parse runs index")?;
+            .map_err(|e| {
+                if e.to_string().contains("missing field") {
+                    eprintln!("⚠️  Incompatible state format detected from previous rs-hack version.");
+                    eprintln!("   The state directory will be reset.");
+                    eprintln!("   Location: {}", state_dir.display());
+                }
+                anyhow::anyhow!("Failed to parse runs index: {}", e)
+            })?;
         Ok(index)
+    }
+
+    /// Load index, or reset state if incompatible format detected
+    pub fn load_or_reset(state_dir: &Path) -> Result<Self> {
+        match Self::load(state_dir) {
+            Ok(index) => Ok(index),
+            Err(e) if e.to_string().contains("missing field") => {
+                eprintln!("🔄 Resetting incompatible state format...");
+                // Delete the old state directory
+                if state_dir.exists() {
+                    fs::remove_dir_all(state_dir)
+                        .context("Failed to remove old state directory")?;
+                }
+                eprintln!("✓ State directory cleared");
+                Ok(Self::default())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub fn save(&self, state_dir: &Path) -> Result<()> {
@@ -385,7 +411,7 @@ pub fn revert_run(run_id: &str, force: bool, state_dir: &Path) -> Result<()> {
     }
 
     // Mark run as reverted
-    let mut index = RunsIndex::load(state_dir)?;
+    let mut index = RunsIndex::load_or_reset(state_dir)?;
     if let Some(run_meta) = index.get_run_mut(run_id) {
         run_meta.status = RunStatus::Reverted;
         run_meta.can_revert = false;
@@ -404,7 +430,7 @@ pub fn revert_run(run_id: &str, force: bool, state_dir: &Path) -> Result<()> {
 
 /// Display run history
 pub fn show_history(limit: usize, state_dir: &Path) -> Result<()> {
-    let index = RunsIndex::load(state_dir)?;
+    let index = RunsIndex::load_or_reset(state_dir)?;
     let runs = index.get_sorted_runs();
 
     if runs.is_empty() {
@@ -441,7 +467,7 @@ pub fn show_history(limit: usize, state_dir: &Path) -> Result<()> {
 
 /// Clean old state data
 pub fn clean_old_state(keep_days: u32, state_dir: &Path) -> Result<()> {
-    let index = RunsIndex::load(state_dir)?;
+    let index = RunsIndex::load_or_reset(state_dir)?;
     let cutoff = Utc::now() - Duration::days(keep_days as i64);
 
     let mut cleaned = 0;

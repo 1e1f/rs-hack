@@ -35,9 +35,19 @@ rs-hack update-struct-field --path FILE --struct-name NAME \
 rs-hack remove-struct-field --path FILE --struct-name NAME \
   --field-name name [--where "filter"] --apply
 
-# Add to struct literals only
-rs-hack add-struct-literal-field --path FILE --struct-name NAME \
-  --field "name: value" [--position POS] --apply
+# Add to struct literals only (v0.4.0+)
+# Simply omit the type - no ':' means literals only
+rs-hack add-struct-field --path FILE --struct-name NAME \
+  --field "name" --literal-default "value" [--position POS] --apply
+
+# With type: tries definition (idempotent) + always adds to literals
+rs-hack add-struct-field --path FILE --struct-name NAME \
+  --field "name: Type" --literal-default "value" [--position POS] --apply
+
+# Pattern matching for --struct-name (v0.4.0+):
+# "Rectangle"         → Only Rectangle { ... } (pure struct literals)
+# "*::Rectangle"      → Any path ending with Rectangle (enum variants too)
+# "View::Rectangle"   → Exact match only View::Rectangle { ... }
 ```
 
 ## Enum Commands

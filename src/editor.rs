@@ -85,6 +85,8 @@ impl RustEditor {
     }
     
     pub(crate) fn add_struct_field(&mut self, op: &AddStructFieldOp) -> Result<ModificationResult> {
+        let mut modified_nodes = Vec::new();
+
         // Find the struct and clone it to avoid borrowing issues
         let item_struct = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -108,52 +110,83 @@ impl RustEditor {
             }
         }
 
-        // Create backup of original struct before modification
-        let backup_node = BackupNode {
-            node_type: "ItemStruct".to_string(),
-            identifier: op.struct_name.clone(),
-            original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
-            location: self.span_to_location(item_struct.span()),
-        };
+        // If literal_default is NOT provided, only modify the definition
+        if op.literal_default.is_none() {
+            // Create backup of original struct before modification
+            let backup_node = BackupNode {
+                node_type: "ItemStruct".to_string(),
+                identifier: op.struct_name.clone(),
+                original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
+                location: self.span_to_location(item_struct.span()),
+            };
 
-        // First, insert the field into the struct definition
-        let modified = self.insert_struct_field(&item_struct, op)
-            .context("Failed to add field to struct definition")?;
+            // Insert the field into the struct definition
+            let modified = self.insert_struct_field(&item_struct, op)
+                .context("Failed to add field to struct definition")?;
 
-        if !modified {
+            if !modified {
+                return Ok(ModificationResult {
+                    changed: false,
+                    modified_nodes: vec![],
+                });
+            }
+
             return Ok(ModificationResult {
-                changed: false,
-                modified_nodes: vec![],
+                changed: true,
+                modified_nodes: vec![backup_node],
             });
         }
 
-        let mut modified_nodes = vec![backup_node];
+        // If literal_default IS provided:
+        // 1. Try to add to definition (idempotent - silently skips if field exists OR if field_def is incomplete)
+        // 2. Always update literals
+        let literal_default = op.literal_default.as_ref().unwrap();
 
-        // If literal_default is provided and struct field was added, also update struct literals
-        if let Some(ref literal_default) = op.literal_default {
-            // Re-parse the content to update syntax_tree with the struct field changes
-            self.syntax_tree = syn::parse_str(&self.content)
-                .context("Failed to re-parse content after adding struct field")?;
-            self.line_offsets = Self::compute_line_offsets(&self.content);
+        // Check if field_def contains a type (has ':')
+        // If it doesn't, skip definition modification (literals-only mode)
+        let has_type = op.field_def.contains(':');
 
-            // Extract field name from field_def (e.g., "return_type: Option<Type>" -> "return_type")
-            let field_name = op.field_def.split(':')
-                .next()
-                .map(|s| s.trim().to_string())
-                .context("Failed to extract field name from field definition")?;
-
-            // Create the AddStructLiteralFieldOp
-            let literal_op = AddStructLiteralFieldOp {
-                struct_name: op.struct_name.clone(),
-                field_def: format!("{}: {}", field_name, literal_default),
-                position: op.position.clone(),
+        let mut def_modified = false;
+        if has_type {
+            // Create backup before any modifications
+            let backup_node = BackupNode {
+                node_type: "ItemStruct".to_string(),
+                identifier: op.struct_name.clone(),
+                original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
+                location: self.span_to_location(item_struct.span()),
             };
 
-            // Update all struct literals
-            let literal_result = self.add_struct_literal_field(&literal_op)
-                .context("Failed to update struct literals")?;
-            modified_nodes.extend(literal_result.modified_nodes);
+            // Try to insert field into definition (idempotent - returns false if already exists)
+            def_modified = self.insert_struct_field(&item_struct, op)
+                .context("Failed to add field to struct definition")?;
+
+            if def_modified {
+                modified_nodes.push(backup_node);
+                // Re-parse the content to update syntax_tree with the struct field changes
+                self.syntax_tree = syn::parse_str(&self.content)
+                    .context("Failed to re-parse content after adding struct field")?;
+                self.line_offsets = Self::compute_line_offsets(&self.content);
+            }
         }
+
+        // Always update literals when literal_default is provided
+        // Extract field name from field_def (e.g., "return_type: Option<Type>" -> "return_type" or just "return_type")
+        let field_name = op.field_def.split(':')
+            .next()
+            .map(|s| s.trim().to_string())
+            .context("Failed to extract field name from field definition")?;
+
+        // Create the AddStructLiteralFieldOp
+        let literal_op = AddStructLiteralFieldOp {
+            struct_name: op.struct_name.clone(),
+            field_def: format!("{}: {}", field_name, literal_default),
+            position: op.position.clone(),
+        };
+
+        // Update all struct literals
+        let literal_result = self.add_struct_literal_field(&literal_op)
+            .context("Failed to update struct literals")?;
+        modified_nodes.extend(literal_result.modified_nodes);
 
         Ok(ModificationResult {
             changed: true,
@@ -458,21 +491,48 @@ impl RustEditor {
         impl<'ast> Visit<'ast> for LiteralCollector {
             fn visit_expr(&mut self, node: &'ast Expr) {
                 if let Expr::Struct(expr_struct) = node {
-                    if let Some(last_seg) = expr_struct.path.segments.last() {
-                        if last_seg.ident.to_string() == self.struct_name {
-                            self.backups.push(BackupNode {
-                                node_type: "ExprStruct".to_string(),
-                                identifier: format!("{}#{}", self.struct_name, self.counter),
-                                original_content: expr_struct.to_token_stream().to_string(),
-                                location: NodeLocation {
-                                    line: 0, // We don't have precise location info in visitor
-                                    column: 0,
-                                    end_line: 0,
-                                    end_column: 0,
-                                },
-                            });
-                            self.counter += 1;
+                    // Match based on pattern:
+                    // - "Rectangle" → only Rectangle { ... } (no :: prefix)
+                    // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
+                    // - "View::Rectangle" → exact match only View::Rectangle
+
+                    let matches = if self.struct_name.contains("::") {
+                        // Pattern contains :: - check for exact or wildcard match
+                        if self.struct_name.starts_with("*::") {
+                            // Wildcard: *::Rectangle matches any path ending with Rectangle
+                            let target_name = &self.struct_name[3..]; // Skip "*::"
+                            expr_struct.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == target_name)
+                                .unwrap_or(false)
+                        } else {
+                            // Exact path match: View::Rectangle
+                            let path_str = expr_struct.path.segments.iter()
+                                .map(|seg| seg.ident.to_string())
+                                .collect::<Vec<_>>()
+                                .join("::");
+                            path_str == self.struct_name
                         }
+                    } else {
+                        // No :: in pattern - only match pure struct literals (no path qualifier)
+                        expr_struct.path.segments.len() == 1
+                            && expr_struct.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == self.struct_name)
+                                .unwrap_or(false)
+                    };
+
+                    if matches {
+                        self.backups.push(BackupNode {
+                            node_type: "ExprStruct".to_string(),
+                            identifier: format!("{}#{}", self.struct_name, self.counter),
+                            original_content: expr_struct.to_token_stream().to_string(),
+                            location: NodeLocation {
+                                line: 0, // We don't have precise location info in visitor
+                                column: 0,
+                                end_line: 0,
+                                end_column: 0,
+                            },
+                        });
+                        self.counter += 1;
                     }
                 }
                 syn::visit::visit_expr(self, node);
@@ -1621,23 +1681,68 @@ impl RustEditor {
 
                 impl<'ast, 'a> Visit<'ast> for StructLiteralVisitor<'a> {
                     fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
-                        // Extract the struct name from the path
-                        let struct_name = if let Some(ident) = node.path.get_ident() {
-                            ident.to_string()
-                        } else {
-                            // Handle paths like "module::StructName"
-                            node.path.segments.last()
-                                .map(|seg| seg.ident.to_string())
-                                .unwrap_or_default()
-                        };
+                        // Match based on pattern:
+                        // - "Rectangle" → only Rectangle { ... } (no :: prefix)
+                        // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
+                        // - "View::Rectangle" → exact match only View::Rectangle
 
-                        // Apply name filter if specified
-                        if let Some(filter) = self.name_filter {
-                            if struct_name != filter {
+                        let filter = match self.name_filter {
+                            Some(f) => f,
+                            None => {
+                                // No filter - match anything
+                                let struct_name = node.path.segments.last()
+                                    .map(|seg| seg.ident.to_string())
+                                    .unwrap_or_default();
+
+                                let snippet = self.editor.format_expr_struct(node);
+                                let location = self.editor.span_to_location(node.span());
+
+                                self.results.push(InspectResult {
+                                    file_path: String::new(),
+                                    node_type: "ExprStruct".to_string(),
+                                    identifier: struct_name,
+                                    location,
+                                    snippet,
+                                });
+
                                 syn::visit::visit_expr_struct(self, node);
                                 return;
                             }
+                        };
+
+                        // Check if this struct literal matches the filter pattern
+                        let matches = if filter.contains("::") {
+                            // Pattern contains :: - check for exact or wildcard match
+                            if filter.starts_with("*::") {
+                                // Wildcard: *::Rectangle matches any path ending with Rectangle
+                                let target_name = &filter[3..]; // Skip "*::"
+                                node.path.segments.last()
+                                    .map(|seg| seg.ident.to_string() == target_name)
+                                    .unwrap_or(false)
+                            } else {
+                                // Exact path match: View::Rectangle
+                                let path_str = node.path.segments.iter()
+                                    .map(|seg| seg.ident.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("::");
+                                path_str == filter
+                            }
+                        } else {
+                            // No :: in pattern - only match pure struct literals (no path qualifier)
+                            node.path.get_ident()
+                                .map(|ident| ident.to_string() == filter)
+                                .unwrap_or(false)
+                        };
+
+                        if !matches {
+                            syn::visit::visit_expr_struct(self, node);
+                            return;
                         }
+
+                        // Get the struct name for the identifier
+                        let struct_name = node.path.segments.last()
+                            .map(|seg| seg.ident.to_string())
+                            .unwrap_or_default();
 
                         // Format the struct literal
                         let snippet = self.editor.format_expr_struct(node);
@@ -2583,11 +2688,36 @@ impl VisitMut for StructLiteralFieldAdder {
     fn visit_expr_mut(&mut self, node: &mut Expr) {
         // Check if this is a struct literal expression
         if let Expr::Struct(expr_struct) = node {
-            // Get the struct name (last segment of the path)
-            let struct_name = expr_struct.path.segments.last()
-                .map(|seg| seg.ident.to_string());
+            // Match based on pattern:
+            // - "Rectangle" → only Rectangle { ... } (no :: prefix)
+            // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
+            // - "View::Rectangle" → exact match only View::Rectangle
 
-            if struct_name.as_ref() == Some(&self.struct_name) {
+            let is_match = if self.struct_name.contains("::") {
+                // Pattern contains :: - check for exact or wildcard match
+                if self.struct_name.starts_with("*::") {
+                    // Wildcard: *::Rectangle matches any path ending with Rectangle
+                    let target_name = &self.struct_name[3..]; // Skip "*::"
+                    expr_struct.path.segments.last()
+                        .map(|seg| seg.ident.to_string() == target_name)
+                        .unwrap_or(false)
+                } else {
+                    // Exact path match: View::Rectangle
+                    let path_str = expr_struct.path.segments.iter()
+                        .map(|seg| seg.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    path_str == self.struct_name
+                }
+            } else {
+                // No :: in pattern - only match pure struct literals (no path qualifier)
+                expr_struct.path.segments.len() == 1
+                    && expr_struct.path.segments.last()
+                        .map(|seg| seg.ident.to_string())
+                        .as_ref() == Some(&self.struct_name)
+            };
+
+            if is_match {
                 // Check if field already exists (idempotent)
                 let field_exists = expr_struct.fields.iter().any(|fv| {
                     fv.member.to_token_stream().to_string() == self.field_name
