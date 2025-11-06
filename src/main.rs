@@ -19,8 +19,9 @@ use state::{*, save_backup_nodes};
 use diff::{print_diff, DiffStats};
 
 #[derive(Parser)]
-#[command(name = "rust-ast-edit")]
+#[command(name = "rs-hack")]
 #[command(about = "AST-aware Rust code editing tool for AI agents", long_about = None)]
+#[command(version)]
 struct Cli {
     /// Use project-local state directory (.rs-hack) instead of ~/.rs-hack
     #[arg(long, global = true)]
@@ -46,9 +47,9 @@ struct Cli {
 enum Commands {
     /// Add a field to a struct (idempotent - skips if field already exists)
     AddStructField {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the struct to modify
         #[arg(short, long)]
@@ -80,9 +81,9 @@ enum Commands {
 
     /// Update an existing struct field (changes type/visibility)
     UpdateStructField {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the struct to modify
         #[arg(short, long)]
@@ -103,9 +104,9 @@ enum Commands {
 
     /// Remove a field from a struct
     RemoveStructField {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the struct to modify
         #[arg(short, long)]
@@ -128,9 +129,9 @@ enum Commands {
     /// Add a field to struct literal expressions (initialization)
     #[deprecated]
     AddStructLiteralField {
-        /// Path to the Rust file or directory (supports glob patterns)
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the struct to target
         #[arg(short, long)]
@@ -151,9 +152,9 @@ enum Commands {
 
     /// Add a variant to an enum (skips if variant already exists)
     AddEnumVariant {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the enum to modify
         #[arg(short, long)]
@@ -178,9 +179,9 @@ enum Commands {
 
     /// Update an existing enum variant
     UpdateEnumVariant {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the enum to modify
         #[arg(short, long)]
@@ -201,9 +202,9 @@ enum Commands {
 
     /// Remove a variant from an enum
     RemoveEnumVariant {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the enum to modify
         #[arg(short, long)]
@@ -224,9 +225,9 @@ enum Commands {
 
     /// Add a match arm for a specific pattern
     AddMatchArm {
-        /// Path to the Rust file or directory (supports glob patterns)
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Pattern to match (e.g., "MyEnum::NewVariant"). Not required with --auto-detect
         #[arg(short = 'P', long)]
@@ -255,9 +256,9 @@ enum Commands {
 
     /// Update an existing match arm
     UpdateMatchArm {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Pattern to match (e.g., "MyEnum::Variant")
         #[arg(short = 'P', long)]
@@ -278,9 +279,9 @@ enum Commands {
 
     /// Remove a match arm
     RemoveMatchArm {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Pattern to remove (e.g., "MyEnum::Variant")
         #[arg(short = 'P', long)]
@@ -308,9 +309,9 @@ enum Commands {
     
     /// Find locations of AST nodes (for debugging/inspection)
     Find {
-        /// Path to the Rust file
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Type of node: "struct", "enum", "fn", "impl"
         #[arg(short = 't', long)]
@@ -323,9 +324,9 @@ enum Commands {
 
     /// Inspect and list AST nodes with full content (supports glob patterns)
     Inspect {
-        /// Path to Rust file(s) - supports glob patterns (e.g., "tests/*.rs")
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to Rust file(s) - supports multiple paths and glob patterns (e.g., "tests/*.rs")
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Type of node: "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref"
         #[arg(short = 't', long)]
@@ -346,9 +347,9 @@ enum Commands {
 
     /// Add derive macros to a struct or enum
     AddDerive {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Type of target: "struct" or "enum"
         #[arg(short = 't', long)]
@@ -369,9 +370,9 @@ enum Commands {
 
     /// Add a method to an impl block
     AddImplMethod {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Name of the type (struct/enum) that the impl is for
         #[arg(short = 't', long)]
@@ -392,9 +393,9 @@ enum Commands {
 
     /// Add a use statement
     AddUse {
-        /// Path to the Rust file or directory
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Use path (e.g., "std::collections::HashMap" or "serde::Serialize")
         #[arg(short = 'u', long)]
@@ -435,9 +436,9 @@ enum Commands {
 
     /// Transform AST nodes (generic find-and-transform operation)
     Transform {
-        /// Path to Rust file(s) - supports glob patterns (e.g., "src/**/*.rs")
-        #[arg(short, long)]
-        path: PathBuf,
+        /// Path to Rust file(s) - supports multiple paths and glob patterns (e.g., "src/**/*.rs")
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
 
         /// Type of node: "macro-call", "method-call", "function-call", etc.
         #[arg(short = 't', long)]
@@ -469,8 +470,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::AddStructField { path, struct_name, field, position, literal_default, output, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::AddStructField { paths, struct_name, field, position, literal_default, output, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::AddStructField(AddStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
@@ -482,8 +483,8 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::UpdateStructField { path, struct_name, field, output, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::UpdateStructField { paths, struct_name, field, output, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::UpdateStructField(UpdateStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
@@ -493,8 +494,8 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::RemoveStructField { path, struct_name, field_name, output, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::RemoveStructField { paths, struct_name, field_name, output, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::RemoveStructField(RemoveStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_name: field_name.clone(),
@@ -504,8 +505,8 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::AddStructLiteralField { path, struct_name, field, position, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::AddStructLiteralField { paths, struct_name, field, position, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::AddStructLiteralField(AddStructLiteralFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
@@ -515,8 +516,8 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::AddEnumVariant { path, enum_name, variant, position, output, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::AddEnumVariant { paths, enum_name, variant, position, output, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::AddEnumVariant(AddEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_def: variant.clone(),
@@ -527,8 +528,8 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::UpdateEnumVariant { path, enum_name, variant, output, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::UpdateEnumVariant { paths, enum_name, variant, output, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::UpdateEnumVariant(UpdateEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_def: variant.clone(),
@@ -538,8 +539,8 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::RemoveEnumVariant { path, enum_name, variant_name, output, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::RemoveEnumVariant { paths, enum_name, variant_name, output, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::RemoveEnumVariant(RemoveEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_name: variant_name.clone(),
@@ -549,7 +550,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::AddMatchArm { path, pattern, body, function, auto_detect, enum_name, apply } => {
+        Commands::AddMatchArm { paths, pattern, body, function, auto_detect, enum_name, apply } => {
             // Validate auto_detect requires enum_name
             if auto_detect && enum_name.is_none() {
                 anyhow::bail!("--enum-name is required when using --auto-detect");
@@ -560,7 +561,7 @@ fn main() -> Result<()> {
                 anyhow::bail!("--pattern is required when not using --auto-detect");
             }
 
-            let files = collect_rust_files(&path)?;
+            let files = collect_rust_files(&paths)?;
             let op = Operation::AddMatchArm(AddMatchArmOp {
                 pattern: pattern.unwrap_or_default(),
                 body: body.clone(),
@@ -572,8 +573,8 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
         }
 
-        Commands::UpdateMatchArm { path, pattern, body, function, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::UpdateMatchArm { paths, pattern, body, function, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::UpdateMatchArm(UpdateMatchArmOp {
                 pattern: pattern.clone(),
                 new_body: body.clone(),
@@ -583,8 +584,8 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
         }
 
-        Commands::RemoveMatchArm { path, pattern, function, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::RemoveMatchArm { paths, pattern, function, apply } => {
+            let files = collect_rust_files(&paths)?;
             let op = Operation::RemoveMatchArm(RemoveMatchArmOp {
                 pattern: pattern.clone(),
                 function_name: function,
@@ -602,20 +603,24 @@ fn main() -> Result<()> {
             execute_batch(&batch, apply)?;
         }
         
-        Commands::Find { path, node_type, name } => {
-            let content = std::fs::read_to_string(&path)
-                .context("Failed to read file")?;
+        Commands::Find { paths, node_type, name } => {
+            let files = collect_rust_files(&paths)?;
 
-            let editor = RustEditor::new(&content)?;
-            let locations = editor.find_node(&node_type, &name)?;
+            for file in files {
+                let content = std::fs::read_to_string(&file)
+                    .context(format!("Failed to read file: {:?}", file))?;
 
-            println!("{}", serde_json::to_string_pretty(&locations)?);
+                let editor = RustEditor::new(&content)?;
+                let locations = editor.find_node(&node_type, &name)?;
+
+                println!("{}", serde_json::to_string_pretty(&locations)?);
+            }
         }
 
-        Commands::Inspect { path, node_type, name, content_filter, format } => {
+        Commands::Inspect { paths, node_type, name, content_filter, format } => {
             use operations::InspectResult;
 
-            let files = collect_rust_files(&path)?;
+            let files = collect_rust_files(&paths)?;
             let mut all_results: Vec<InspectResult> = Vec::new();
 
             for file in files {
@@ -664,8 +669,8 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::AddDerive { path, target_type, name, derives, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::AddDerive { paths, target_type, name, derives, apply } => {
+            let files = collect_rust_files(&paths)?;
             let derive_vec: Vec<String> = derives
                 .split(',')
                 .map(|s| s.trim().to_string())
@@ -681,8 +686,8 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
         }
 
-        Commands::AddImplMethod { path, target, method, position, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::AddImplMethod { paths, target, method, position, apply } => {
+            let files = collect_rust_files(&paths)?;
 
             let op = Operation::AddImplMethod(AddImplMethodOp {
                 target: target.clone(),
@@ -693,8 +698,8 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
         }
 
-        Commands::AddUse { path, use_path, position, apply } => {
-            let files = collect_rust_files(&path)?;
+        Commands::AddUse { paths, use_path, position, apply } => {
+            let files = collect_rust_files(&paths)?;
 
             let op = Operation::AddUseStatement(AddUseStatementOp {
                 use_path: use_path.clone(),
@@ -719,7 +724,7 @@ fn main() -> Result<()> {
             clean_old_state(keep_days, &state_dir)?;
         }
 
-        Commands::Transform { path, node_type, name, content_filter, action, with, apply } => {
+        Commands::Transform { paths, node_type, name, content_filter, action, with, apply } => {
             use operations::{TransformOp, TransformAction};
 
             // Parse the action
@@ -733,7 +738,7 @@ fn main() -> Result<()> {
                 _ => anyhow::bail!("Invalid action: {}. Use 'comment', 'remove', or 'replace'", action),
             };
 
-            let files = collect_rust_files(&path)?;
+            let files = collect_rust_files(&paths)?;
             let op = Operation::Transform(TransformOp {
                 node_type: node_type.clone(),
                 name_filter: name,
@@ -748,36 +753,39 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn collect_rust_files(path: &PathBuf) -> Result<Vec<PathBuf>> {
+fn collect_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    let path_str = path.to_string_lossy();
 
-    // Check if path contains glob pattern characters
-    if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
-        // Use glob pattern matching
-        for entry in glob(&path_str)
-            .context("Failed to parse glob pattern")?
-        {
-            match entry {
-                Ok(file_path) => {
-                    if file_path.is_file() && file_path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                        files.push(file_path);
+    for path in paths {
+        let path_str = path.to_string_lossy();
+
+        // Check if path contains glob pattern characters
+        if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
+            // Use glob pattern matching
+            for entry in glob(&path_str)
+                .context("Failed to parse glob pattern")?
+            {
+                match entry {
+                    Ok(file_path) => {
+                        if file_path.is_file() && file_path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                            files.push(file_path);
+                        }
                     }
+                    Err(e) => eprintln!("Warning: Error reading glob entry: {}", e),
                 }
-                Err(e) => eprintln!("Warning: Error reading glob entry: {}", e),
             }
-        }
-    } else if path.is_file() {
-        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            files.push(path.clone());
-        }
-    } else if path.is_dir() {
-        for entry in WalkDir::new(path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("rs"))
-        {
-            files.push(entry.path().to_path_buf());
+        } else if path.is_file() {
+            if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                files.push(path.clone());
+            }
+        } else if path.is_dir() {
+            for entry in WalkDir::new(path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("rs"))
+            {
+                files.push(entry.path().to_path_buf());
+            }
         }
     }
 
@@ -883,7 +891,7 @@ fn execute_operation(
 
 fn execute_batch(batch: &BatchSpec, apply: bool) -> Result<()> {
     for op in &batch.operations {
-        let files = collect_rust_files(&batch.base_path)?;
+        let files = collect_rust_files(&[batch.base_path.clone()])?;
         execute_operation(&files, op, apply, None, "default", false)?;
     }
     Ok(())
