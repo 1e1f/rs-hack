@@ -81,6 +81,7 @@ impl RustEditor {
             Operation::AddUseStatement(op) => self.add_use_statement(op),
             Operation::AddDerive(op) => self.add_derive(op),
             Operation::Transform(op) => self.transform(op),
+            Operation::RenameEnumVariant(op) => self.rename_enum_variant(op),
         }
     }
     
@@ -2470,6 +2471,52 @@ impl RustEditor {
         })
     }
 
+    /// Rename an enum variant across the entire file
+    pub(crate) fn rename_enum_variant(&mut self, op: &crate::operations::RenameEnumVariantOp) -> Result<ModificationResult> {
+        // Create a visitor that will rename the variant everywhere
+        // Note: We don't require the enum to be defined in this file - it may just be used here
+        let mut renamer = EnumVariantRenamer {
+            enum_name: op.enum_name.clone(),
+            old_variant: op.old_variant.clone(),
+            new_variant: op.new_variant.clone(),
+            modified: false,
+        };
+
+        // Visit and mutate the syntax tree
+        renamer.visit_file_mut(&mut self.syntax_tree);
+
+        if !renamer.modified {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+            });
+        }
+
+        // Reformat the entire file using prettyplease
+        self.content = prettyplease::unparse(&self.syntax_tree);
+
+        // Recompute line offsets
+        self.line_offsets = Self::compute_line_offsets(&self.content);
+
+        // Create a backup node for the entire file operation
+        let backup_node = BackupNode {
+            node_type: "EnumVariantRename".to_string(),
+            identifier: format!("{}::{} -> {}", op.enum_name, op.old_variant, op.new_variant),
+            original_content: format!("Renamed {} to {} in enum {}", op.old_variant, op.new_variant, op.enum_name),
+            location: NodeLocation {
+                line: 1,
+                column: 0,
+                end_line: 1,
+                end_column: 0,
+            },
+        };
+
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: vec![backup_node],
+        })
+    }
+
     /// Convert line/column to byte offset
     fn line_column_to_byte_offset(&self, line: usize, column: usize) -> Result<usize> {
         if line == 0 || line > self.line_offsets.len() {
@@ -2767,5 +2814,89 @@ impl VisitMut for StructLiteralFieldAdder {
         // IMPORTANT: Visit children AFTER processing this node
         // This ensures we traverse into nested expressions
         syn::visit_mut::visit_expr_mut(self, node);
+    }
+}
+
+// Visitor for renaming enum variants
+struct EnumVariantRenamer {
+    enum_name: String,
+    old_variant: String,
+    new_variant: String,
+    modified: bool,
+}
+
+impl EnumVariantRenamer {
+    /// Rename a path segment if it matches
+    fn rename_path(&mut self, path: &mut syn::Path) {
+        if path.segments.len() == 2 {
+            if path.segments[0].ident == self.enum_name
+                && path.segments[1].ident == self.old_variant
+            {
+                path.segments[1].ident = syn::Ident::new(&self.new_variant, path.segments[1].ident.span());
+                self.modified = true;
+            }
+        } else if path.segments.len() == 1 {
+            if path.segments[0].ident == self.old_variant {
+                path.segments[0].ident = syn::Ident::new(&self.new_variant, path.segments[0].ident.span());
+                self.modified = true;
+            }
+        }
+    }
+}
+
+impl VisitMut for EnumVariantRenamer {
+    /// Rename in enum definition
+    fn visit_item_enum_mut(&mut self, node: &mut syn::ItemEnum) {
+        if node.ident == self.enum_name {
+            for variant in &mut node.variants {
+                if variant.ident == self.old_variant {
+                    variant.ident = syn::Ident::new(&self.new_variant, variant.ident.span());
+                    self.modified = true;
+                }
+            }
+        }
+
+        // Continue visiting nested items
+        syn::visit_mut::visit_item_enum_mut(self, node);
+    }
+
+    /// Rename in patterns (match arms, let bindings, function parameters, etc.)
+    fn visit_pat_mut(&mut self, pat: &mut syn::Pat) {
+        match pat {
+            syn::Pat::TupleStruct(tuple_struct) => {
+                self.rename_path(&mut tuple_struct.path);
+            }
+            syn::Pat::Struct(struct_pat) => {
+                self.rename_path(&mut struct_pat.path);
+            }
+            syn::Pat::Path(path_pat) => {
+                self.rename_path(&mut path_pat.path);
+            }
+            _ => {}
+        }
+
+        // Continue visiting nested patterns
+        syn::visit_mut::visit_pat_mut(self, pat);
+    }
+
+    /// Rename in expressions (constructor calls, references, etc.)
+    fn visit_expr_mut(&mut self, expr: &mut syn::Expr) {
+        match expr {
+            syn::Expr::Path(expr_path) => {
+                self.rename_path(&mut expr_path.path);
+            }
+            syn::Expr::Call(call) => {
+                if let syn::Expr::Path(path) = &mut *call.func {
+                    self.rename_path(&mut path.path);
+                }
+            }
+            syn::Expr::Struct(struct_expr) => {
+                self.rename_path(&mut struct_expr.path);
+            }
+            _ => {}
+        }
+
+        // Continue visiting nested expressions
+        syn::visit_mut::visit_expr_mut(self, expr);
     }
 }

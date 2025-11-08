@@ -1,6 +1,9 @@
-# rs-hack Quick Reference
+# rs-hack Human Reference
 
-Ultra-concise command reference for AI agents.
+Ultra-concise command reference for quick lookup.
+
+> **For Claude Code:** See [templates/claude-skills/rs-hack.md](templates/claude-skills/rs-hack.md) - copy to your project's `.claude/skills/`
+> **For Complete Docs:** See [README.md](README.md)
 
 ## Command Format
 
@@ -64,6 +67,10 @@ rs-hack update-enum-variant --path FILE --enum-name NAME \
 # Remove variant
 rs-hack remove-enum-variant --path FILE --enum-name NAME \
   --variant-name Variant [--where "filter"] --apply
+
+# Rename variant across codebase (AST-aware, type-safe)
+rs-hack rename-enum-variant --paths "src/**/*.rs" --enum-name NAME \
+  --old-variant OldName --new-variant NewName --apply
 ```
 
 ## Match Commands

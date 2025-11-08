@@ -223,6 +223,29 @@ enum Commands {
         apply: bool,
     },
 
+    /// Rename an enum variant across the codebase
+    RenameEnumVariant {
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Name of the enum containing the variant
+        #[arg(short, long)]
+        enum_name: String,
+
+        /// Current name of the variant
+        #[arg(short = 'o', long)]
+        old_variant: String,
+
+        /// New name for the variant
+        #[arg(short = 'n', long)]
+        new_variant: String,
+
+        /// Apply changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
+
     /// Add a match arm for a specific pattern
     AddMatchArm {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
@@ -548,6 +571,17 @@ fn main() -> Result<()> {
             });
 
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+        }
+
+        Commands::RenameEnumVariant { paths, enum_name, old_variant, new_variant, apply } => {
+            let files = collect_rust_files(&paths)?;
+            let op = Operation::RenameEnumVariant(RenameEnumVariantOp {
+                enum_name: enum_name.clone(),
+                old_variant: old_variant.clone(),
+                new_variant: new_variant.clone(),
+            });
+
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
         }
 
         Commands::AddMatchArm { paths, pattern, body, function, auto_detect, enum_name, apply } => {
@@ -925,6 +959,7 @@ fn execute_operation_with_state(
         Operation::AddEnumVariant(_) => "AddEnumVariant",
         Operation::UpdateEnumVariant(_) => "UpdateEnumVariant",
         Operation::RemoveEnumVariant(_) => "RemoveEnumVariant",
+        Operation::RenameEnumVariant(_) => "RenameEnumVariant",
         Operation::AddMatchArm(_) => "AddMatchArm",
         Operation::UpdateMatchArm(_) => "UpdateMatchArm",
         Operation::RemoveMatchArm(_) => "RemoveMatchArm",

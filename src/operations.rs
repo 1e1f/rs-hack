@@ -18,6 +18,7 @@ pub enum Operation {
     AddUseStatement(AddUseStatementOp),
     AddDerive(AddDeriveOp),
     Transform(TransformOp),
+    RenameEnumVariant(RenameEnumVariantOp),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,4 +189,12 @@ pub enum TransformAction {
     Comment,                    // Wrap in // comment
     Remove,                     // Delete the node entirely
     Replace { with: String },   // Replace with provided code
+}
+
+/// Rename an enum variant across the codebase
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenameEnumVariantOp {
+    pub enum_name: String,      // Name of the enum (e.g., "IRValue")
+    pub old_variant: String,    // Current variant name (e.g., "HashMapV2")
+    pub new_variant: String,    // New variant name (e.g., "HashMap")
 }

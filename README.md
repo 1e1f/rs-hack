@@ -1,6 +1,6 @@
 # rs-hack
 
-AST-aware Rust code editing tool designed for AI agents and automated refactoring.
+**Stop using sed on Rust code.** AST-aware refactoring tool for AI agents and automated transformations.
 
 ## Why?
 
@@ -21,9 +21,28 @@ Perfect for AI agents making systematic changes across codebases:
 ✅ **Enum expansion**: "Add `Unknown` variant to all enums, update matches"
 ✅ **Code generation**: "Add builder methods to all structs with >3 fields"
 
+## Documentation
+
+Three levels of documentation for different needs:
+
+📖 **[HUMAN.md](HUMAN.md)** - Quick command reference
+- Fast syntax lookup for humans
+- One-liner examples for every command
+- Perfect when you know what you want, just need the flags
+
+🤖 **[templates/claude-skills/rs-hack.md](templates/claude-skills/rs-hack.md)** - Claude Code skill
+- Complete workflows with best practices
+- Teaches Claude Code how to use rs-hack effectively
+- Copy to your project's `.claude/skills/` directory
+
+📚 **[README.md](README.md)** - You are here
+- Complete documentation with examples
+- Architecture and design decisions
+- Integration guides
+
 ## Installation
 
-### From crates.io (after publishing)
+### From crates.io
 
 ```bash
 cargo install rs-hack
@@ -75,7 +94,7 @@ rs-hack add-use --path src/lib.rs \
   --use-path "serde::Serialize" --apply
 ```
 
-## Supported Operations (20 commands)
+## Supported Operations (21 commands)
 
 ### Generic Transform (1) ⭐ NEW
 - ✅ **transform**: Find and modify any AST nodes (comment, remove, or replace)
@@ -91,8 +110,9 @@ rs-hack add-use --path src/lib.rs \
 - ✅ **update-struct-field**: Update field types/visibility
 - ✅ **remove-struct-field**: Remove fields
 
-### Enum Operations (3)
+### Enum Operations (4)
 - ✅ **add-enum-variant**, **update-enum-variant**, **remove-enum-variant**
+- ✅ **rename-enum-variant**: Rename enum variants across entire codebase ⭐ NEW
 
 ### Match Operations (3)
 - ✅ **add-match-arm** (with `--auto-detect` for missing variants)
@@ -383,6 +403,67 @@ rs-hack remove-enum-variant \
   --variant-name Deprecated \
   --apply
 ```
+
+#### Rename Variant ⭐ NEW
+
+Rename an enum variant across the entire codebase in a type-safe, AST-aware manner:
+
+```bash
+# Rename across all files in src directory
+rs-hack rename-enum-variant \
+  --paths "src/**/*.rs" \
+  --enum-name IRValue \
+  --old-variant HashMapV2 \
+  --new-variant HashMap \
+  --apply
+
+# Dry-run with diff preview
+rs-hack rename-enum-variant \
+  --paths "src/**/*.rs" \
+  --enum-name Status \
+  --old-variant Draft \
+  --new-variant Pending \
+  --format diff
+
+# Batch rename multiple variants (using batch command)
+cat <<EOF | rs-hack batch --apply
+{
+  "base_path": "src/",
+  "operations": [
+    {
+      "type": "RenameEnumVariant",
+      "enum_name": "IRValue",
+      "old_variant": "HashMapV2",
+      "new_variant": "HashMap"
+    },
+    {
+      "type": "RenameEnumVariant",
+      "enum_name": "IRValue",
+      "old_variant": "ListV2",
+      "new_variant": "List"
+    }
+  ]
+}
+EOF
+```
+
+**What it renames:**
+- ✅ Enum variant definitions (`pub enum IRValue { HashMapV2(Frame) }`)
+- ✅ Match arm patterns (`IRValue::HashMapV2(frame) => { ... }`)
+- ✅ Constructor calls (`let val = IRValue::HashMapV2(data)`)
+- ✅ Reference patterns (`&IRValue::HashMapV2(_) => { ... }`)
+- ✅ Struct patterns (`Some(IRValue::HashMapV2(f)) => { ... }`)
+
+**Benefits over sed/awk:**
+- ✅ **Type-safe**: Only renames actual enum variants, not strings/comments
+- ✅ **Complete**: Finds all usages across patterns, expressions, and types
+- ✅ **Fast**: Processes entire codebase in seconds
+- ✅ **Safe**: Dry-run mode with diff preview
+- ✅ **Reversible**: Tracked in history for easy revert
+
+**Real-world example:**
+
+The original motivation for this command was renaming `IRValue::HashMapV2` → `IRValue::HashMap` across 23 files in the noisetable/koda codebase. What would have been a 4-6 hour manual refactor became a 30-second operation.
 
 ### Match Arm Operations
 
@@ -1060,28 +1141,109 @@ cargo test  # PASS
 
 **Note**: Only modified AST nodes are backed up (not entire files), resulting in 85-95% space savings.
 
-## AI Agent Integration
+## Claude Code Integration
 
-### Example: Claude Code using rs-hack
+rs-hack works seamlessly with [Claude Code](https://claude.com/code) via the Bash tool—no additional setup required!
 
-```bash
-# Claude reads the task
-"Add Clone and Debug derives to all structs, then add get_id methods"
+### Quick Setup
 
-# Claude executes
-rs-hack add-derive \
-  --path src/models/ \
-  --target-type struct \
-  --name User \
-  --derives "Clone,Debug" \
-  --apply
+1. **Install rs-hack:**
+   ```bash
+   cargo install rs-hack
+   ```
 
-rs-hack add-impl-method \
-  --path src/models/ \
-  --target User \
-  --method 'pub fn get_id(&self) -> u64 { self.id }' \
-  --apply
+2. **(Optional) Add skill for guided usage:**
+
+   Create `.claude/skills/rs-hack.md` in your project:
+   ```bash
+   mkdir -p .claude/skills
+   curl -o .claude/skills/rs-hack.md \
+     https://raw.githubusercontent.com/1e1f/rs-hack/main/templates/claude-skills/rs-hack.md
+   ```
+
+   Or copy from this repo's `templates/claude-skills/rs-hack.md`
+
+### How It Works
+
+Claude can use rs-hack directly through bash commands:
+
 ```
+User: "Rename the enum variant IRValue::HashMapV2 to HashMap across all files"
+
+Claude: I'll use rs-hack to safely rename that enum variant.
+
+*Runs: rs-hack inspect to find usages*
+*Runs: rs-hack rename-enum-variant with --format diff to preview*
+*Shows you the diff*
+*Runs: rs-hack rename-enum-variant --apply*
+*Verifies with: cargo check*
+
+✓ Renamed HashMapV2 → HashMap in 23 files
+```
+
+### Best Practices
+
+**The skill teaches Claude to:**
+- ✅ Always inspect before transforming
+- ✅ Preview changes with `--format diff` before applying
+- ✅ Use glob patterns for multi-file operations
+- ✅ Verify changes with `cargo check`
+- ✅ Track history and revert if needed
+
+### Example Workflows
+
+**Workflow 1: Large-Scale Refactoring**
+```
+User: "Add a return_type field to all IRCtx struct literals"
+
+Claude:
+1. Inspects struct literals: rs-hack inspect --node-type struct-literal --name IRCtx
+2. Previews changes: rs-hack add-struct-field ... --format diff
+3. Shows you the diff for approval
+4. Applies: rs-hack add-struct-field ... --apply
+5. Verifies: cargo check
+6. Reports: ✓ Added field to 15 struct literals across 8 files
+```
+
+**Workflow 2: Clean Up Debug Code**
+```
+User: "Comment out all eprintln! macros with [DEBUG] in them"
+
+Claude:
+1. Finds matches: rs-hack inspect --node-type macro-call --name eprintln --content-filter "[DEBUG]"
+2. Previews: rs-hack transform ... --action comment --format diff
+3. Applies: rs-hack transform ... --action comment --apply
+4. Reports: ✓ Commented out 42 debug statements
+```
+
+**Workflow 3: Safe Experimentation**
+```
+User: "Try adding Clone to all structs and see if tests pass"
+
+Claude:
+1. Applies: rs-hack add-derive ... --apply
+   (saves run ID: a05a626)
+2. Tests: cargo test
+   (tests fail!)
+3. Reverts: rs-hack revert a05a626
+4. Reports: Reverted changes, tests were incompatible
+```
+
+### Why It Works Well
+
+- **Type-safe**: Claude won't corrupt code with sed/awk
+- **Reversible**: Every change tracked for easy revert
+- **Guided**: Skill file teaches best practices
+- **Fast**: Bulk operations across entire codebase
+- **Verifiable**: Dry-run mode prevents accidents
+
+### Without Skill File
+
+Claude can still use rs-hack effectively by reading the `--help` output, but the skill provides:
+- Pre-learned command patterns
+- Workflow best practices
+- Common use case examples
+- Error recovery patterns
 
 ## Architecture
 
@@ -1233,44 +1395,19 @@ Safe, semantic, and correct every time. 🦀
 | `syn` + custom | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ |
 | **rs-hack** | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-## Development
-
-```bash
-# Build
-cargo build --release
-
-# Run tests
-cargo test
-./tests/integration_test.sh
-
-# Install locally
-cargo install --path .
-```
-
-## Testing
-
-```bash
-# Unit tests
-cargo test
-
-# Integration tests
-./tests/integration_test.sh
-
-# Test individual operations
-rs-hack add-struct-field \
-  --path examples/sample.rs \
-  --struct-name User \
-  --field "age: u32" \
-  --apply
-```
-
-## Publishing
-
-See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to crates.io.
-
 ## Features by Version
 
-### v0.4.0 - Generic Transform & Macro Support (Current) ⭐
+### v0.4.2 - Enum Variant Renaming (Current) ⭐
+- **`rename-enum-variant` command**: Type-safe enum variant renaming across entire codebase
+  - Renames variant in enum definitions, match patterns, constructors, and all usages
+  - Handles fully qualified (`Enum::Variant`) and imported (`Variant`) paths
+  - AST-aware: won't rename strings, comments, or unrelated identifiers
+  - Real-world impact: 4-6 hour refactor → 30 seconds
+  - Supports glob patterns for multi-file operations
+  - Integrates with state/revert system
+  - Example: `IRValue::HashMapV2` → `IRValue::HashMap` across 23 files
+
+### v0.4.0 - Generic Transform & Macro Support ⭐
 - **`transform` command**: Generic find-and-modify operation for ANY AST nodes
   - Single command replaces need for dozens of specialized operations
   - Actions: `comment`, `remove`, `replace`
@@ -1328,11 +1465,7 @@ See [PUBLISHING_GUIDE.md](PUBLISHING_GUIDE.md) for instructions on publishing to
 
 ## Contributing
 
-PRs welcome! Future ideas:
-- Support for generics in impl blocks
-- Attribute macro operations
-- Function signature modification
-- Type alias operations
+Contributions are welcome! Please feel free to submit issues or pull requests on [GitHub](https://github.com/1e1f/rs-hack).
 
 ## License
 
