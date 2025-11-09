@@ -1,0 +1,26 @@
+[project]
+name = "rs-hack-mcp"
+version = "0.1.0"
+description = "MCP server for rs-hack - AST-aware Rust refactoring tools"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "mypy>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+rs-hack-mcp = "server:main"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.4",
+]
