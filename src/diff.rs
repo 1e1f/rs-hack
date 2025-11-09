@@ -93,6 +93,69 @@ pub fn print_diff(path: &Path, original: &str, modified: &str) -> DiffStats {
     stats
 }
 
+/// Print a summary of changes (only changed lines with minimal context)
+///
+/// This shows a more focused view than a full unified diff, displaying only
+/// the lines that changed with their line numbers.
+///
+/// # Arguments
+/// * `path` - The file path
+/// * `original` - The original file content
+/// * `modified` - The modified file content
+///
+/// Returns statistics about the diff.
+pub fn print_summary_diff(path: &Path, original: &str, modified: &str) -> DiffStats {
+    use similar::{ChangeTag, TextDiff};
+
+    let diff = TextDiff::from_lines(original, modified);
+    let mut stats = DiffStats::default();
+    let mut changes = Vec::new();
+
+    // Collect all changes with their line numbers
+    let mut current_line = 1;
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Delete => {
+                changes.push((current_line, '-', change.to_string()));
+                stats.lines_removed += 1;
+                current_line += 1;
+            }
+            ChangeTag::Insert => {
+                changes.push((current_line, '+', change.to_string()));
+                stats.lines_added += 1;
+            }
+            ChangeTag::Equal => {
+                current_line += 1;
+            }
+        }
+    }
+
+    if !changes.is_empty() {
+        stats.files_changed = 1;
+
+        println!("\n📝 Changes for {}:\n", path.display());
+
+        // Group consecutive changes together
+        let mut i = 0;
+        while i < changes.len() {
+            let (line_num, tag, content) = &changes[i];
+
+            // Print the change
+            if *tag == '-' {
+                print!("{:>5} | {}{}", line_num, tag, content);
+            } else {
+                print!("{:>5} | {}{}", line_num, tag, content);
+            }
+
+            i += 1;
+        }
+
+        println!("\n✓ {} changes in {}", changes.len(), path.display());
+    }
+
+    stats
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

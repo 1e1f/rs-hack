@@ -8,6 +8,7 @@ use syn::{
 use quote::ToTokens;
 
 use crate::operations::*;
+use crate::path_resolver::PathResolver;
 use prettyplease;
 
 pub struct RustEditor {
@@ -82,6 +83,23 @@ impl RustEditor {
             Operation::AddDerive(op) => self.add_derive(op),
             Operation::Transform(op) => self.transform(op),
             Operation::RenameEnumVariant(op) => self.rename_enum_variant(op),
+            Operation::RenameFunction(op) => self.rename_function(op),
+            Operation::AddDocComment(op) => self.add_doc_comment_surgical(
+                &op.target_type,
+                &op.name,
+                &op.doc_comment,
+                &op.style,
+            ),
+            Operation::UpdateDocComment(op) => self.update_doc_comment_surgical(
+                &op.target_type,
+                &op.name,
+                &op.doc_comment,
+                &DocCommentStyle::Line, // Default to line style for updates
+            ),
+            Operation::RemoveDocComment(op) => self.remove_doc_comment_surgical(
+                &op.target_type,
+                &op.name,
+            ),
         }
     }
     
@@ -182,6 +200,7 @@ impl RustEditor {
             struct_name: op.struct_name.clone(),
             field_def: format!("{}: {}", field_name, literal_default),
             position: op.position.clone(),
+            struct_path: None,  // Path resolution not available from struct field operations
         };
 
         // Update all struct literals
@@ -450,8 +469,20 @@ impl RustEditor {
             .map(|s| s.trim().to_string())
             .context("Field definition must contain ':'")?;
 
+        // Create a path resolver if a canonical path was provided
+        let path_resolver = if let Some(struct_path) = &op.struct_path {
+            let mut resolver = PathResolver::new(struct_path)
+                .ok_or_else(|| anyhow::anyhow!("Invalid struct path: {}", struct_path))?;
+
+            // Scan the file for use statements to build the alias map
+            resolver.scan_file(&self.syntax_tree);
+            Some(resolver)
+        } else {
+            None
+        };
+
         // Collect backups of all struct literal expressions that will be modified
-        let backup_nodes = self.collect_struct_literal_backups(&op.struct_name);
+        let backup_nodes = self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
 
         // Use a visitor to find and modify all struct literals
         let mut visitor = StructLiteralFieldAdder {
@@ -459,6 +490,7 @@ impl RustEditor {
             field_def: op.field_def.clone(),
             field_name,
             position: op.position.clone(),
+            path_resolver,
             modified: false,
         };
 
@@ -480,45 +512,51 @@ impl RustEditor {
     }
 
     /// Collect backups of all struct literal expressions for a given struct name
-    fn collect_struct_literal_backups(&self, struct_name: &str) -> Vec<BackupNode> {
+    fn collect_struct_literal_backups(&self, struct_name: &str, path_resolver: Option<&PathResolver>) -> Vec<BackupNode> {
         use syn::visit::Visit;
 
-        struct LiteralCollector {
+        struct LiteralCollector<'a> {
             struct_name: String,
+            path_resolver: Option<&'a PathResolver>,
             backups: Vec<BackupNode>,
             counter: usize,
         }
 
-        impl<'ast> Visit<'ast> for LiteralCollector {
+        impl<'ast, 'a> Visit<'ast> for LiteralCollector<'a> {
             fn visit_expr(&mut self, node: &'ast Expr) {
                 if let Expr::Struct(expr_struct) = node {
-                    // Match based on pattern:
-                    // - "Rectangle" → only Rectangle { ... } (no :: prefix)
-                    // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
-                    // - "View::Rectangle" → exact match only View::Rectangle
-
-                    let matches = if self.struct_name.contains("::") {
-                        // Pattern contains :: - check for exact or wildcard match
-                        if self.struct_name.starts_with("*::") {
-                            // Wildcard: *::Rectangle matches any path ending with Rectangle
-                            let target_name = &self.struct_name[3..]; // Skip "*::"
-                            expr_struct.path.segments.last()
-                                .map(|seg| seg.ident.to_string() == target_name)
-                                .unwrap_or(false)
-                        } else {
-                            // Exact path match: View::Rectangle
-                            let path_str = expr_struct.path.segments.iter()
-                                .map(|seg| seg.ident.to_string())
-                                .collect::<Vec<_>>()
-                                .join("::");
-                            path_str == self.struct_name
-                        }
+                    let matches = if let Some(resolver) = self.path_resolver {
+                        // Use PathResolver for safe matching
+                        resolver.matches_target(&expr_struct.path)
                     } else {
-                        // No :: in pattern - only match pure struct literals (no path qualifier)
-                        expr_struct.path.segments.len() == 1
-                            && expr_struct.path.segments.last()
-                                .map(|seg| seg.ident.to_string() == self.struct_name)
-                                .unwrap_or(false)
+                        // Fallback to legacy pattern matching
+                        // - "Rectangle" → only Rectangle { ... } (no :: prefix)
+                        // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
+                        // - "View::Rectangle" → exact match only View::Rectangle
+
+                        if self.struct_name.contains("::") {
+                            // Pattern contains :: - check for exact or wildcard match
+                            if self.struct_name.starts_with("*::") {
+                                // Wildcard: *::Rectangle matches any path ending with Rectangle
+                                let target_name = &self.struct_name[3..]; // Skip "*::"
+                                expr_struct.path.segments.last()
+                                    .map(|seg| seg.ident.to_string() == target_name)
+                                    .unwrap_or(false)
+                            } else {
+                                // Exact path match: View::Rectangle
+                                let path_str = expr_struct.path.segments.iter()
+                                    .map(|seg| seg.ident.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("::");
+                                path_str == self.struct_name
+                            }
+                        } else {
+                            // No :: in pattern - only match pure struct literals (no path qualifier)
+                            expr_struct.path.segments.len() == 1
+                                && expr_struct.path.segments.last()
+                                    .map(|seg| seg.ident.to_string() == self.struct_name)
+                                    .unwrap_or(false)
+                        }
                     };
 
                     if matches {
@@ -542,6 +580,7 @@ impl RustEditor {
 
         let mut collector = LiteralCollector {
             struct_name: struct_name.to_string(),
+            path_resolver,
             backups: Vec::new(),
             counter: 0,
         };
@@ -2473,48 +2512,225 @@ impl RustEditor {
 
     /// Rename an enum variant across the entire file
     pub(crate) fn rename_enum_variant(&mut self, op: &crate::operations::RenameEnumVariantOp) -> Result<ModificationResult> {
-        // Create a visitor that will rename the variant everywhere
-        // Note: We don't require the enum to be defined in this file - it may just be used here
-        let mut renamer = EnumVariantRenamer {
-            enum_name: op.enum_name.clone(),
-            old_variant: op.old_variant.clone(),
-            new_variant: op.new_variant.clone(),
-            modified: false,
+        use crate::operations::EditMode;
+
+        // Create a path resolver if a canonical path was provided
+        let path_resolver = if let Some(enum_path) = &op.enum_path {
+            let mut resolver = PathResolver::new(enum_path)
+                .ok_or_else(|| anyhow::anyhow!("Invalid enum path: {}", enum_path))?;
+
+            // Scan the file for use statements to build the alias map
+            resolver.scan_file(&self.syntax_tree);
+            Some(resolver)
+        } else {
+            None
         };
 
-        // Visit and mutate the syntax tree
-        renamer.visit_file_mut(&mut self.syntax_tree);
+        match op.edit_mode {
+            EditMode::Surgical => {
+                // Use non-mutating visitor to collect replacement locations
+                use syn::visit::Visit;
+                use crate::surgical::Replacement;
 
-        if !renamer.modified {
-            return Ok(ModificationResult {
-                changed: false,
-                modified_nodes: vec![],
-            });
+                let mut collector = EnumVariantReplacementCollector {
+                    enum_name: op.enum_name.clone(),
+                    old_variant: op.old_variant.clone(),
+                    new_variant: op.new_variant.clone(),
+                    path_resolver,
+                    replacements: Vec::new(),
+                };
+
+                collector.visit_file(&self.syntax_tree);
+
+                if collector.replacements.is_empty() {
+                    return Ok(ModificationResult {
+                        changed: false,
+                        modified_nodes: vec![],
+                    });
+                }
+
+                // Apply surgical edits to original content
+                self.content = crate::surgical::apply_surgical_edits(&self.content, collector.replacements);
+
+                // Recompute line offsets
+                self.line_offsets = Self::compute_line_offsets(&self.content);
+
+                // Re-parse the modified content
+                self.syntax_tree = syn::parse_str(&self.content)
+                    .context("Failed to re-parse after surgical edit")?;
+
+                let backup_node = BackupNode {
+                    node_type: "EnumVariantRename".to_string(),
+                    identifier: format!("{}::{} -> {} (surgical)", op.enum_name, op.old_variant, op.new_variant),
+                    original_content: format!("Renamed {} to {} in enum {} (surgical mode)", op.old_variant, op.new_variant, op.enum_name),
+                    location: NodeLocation {
+                        line: 1,
+                        column: 0,
+                        end_line: 1,
+                        end_column: 0,
+                    },
+                };
+
+                Ok(ModificationResult {
+                    changed: true,
+                    modified_nodes: vec![backup_node],
+                })
+            }
+            EditMode::Reformat => {
+                // Use mutating visitor (original behavior)
+                let mut renamer = EnumVariantRenamer {
+                    enum_name: op.enum_name.clone(),
+                    old_variant: op.old_variant.clone(),
+                    new_variant: op.new_variant.clone(),
+                    path_resolver,
+                    modified: false,
+                };
+
+                // Visit and mutate the syntax tree
+                renamer.visit_file_mut(&mut self.syntax_tree);
+
+                if !renamer.modified {
+                    return Ok(ModificationResult {
+                        changed: false,
+                        modified_nodes: vec![],
+                    });
+                }
+
+                // Reformat the entire file using prettyplease
+                self.content = prettyplease::unparse(&self.syntax_tree);
+
+                // Recompute line offsets
+                self.line_offsets = Self::compute_line_offsets(&self.content);
+
+                // Create a backup node for the entire file operation
+                let backup_node = BackupNode {
+                    node_type: "EnumVariantRename".to_string(),
+                    identifier: format!("{}::{} -> {}", op.enum_name, op.old_variant, op.new_variant),
+                    original_content: format!("Renamed {} to {} in enum {}", op.old_variant, op.new_variant, op.enum_name),
+                    location: NodeLocation {
+                        line: 1,
+                        column: 0,
+                        end_line: 1,
+                        end_column: 0,
+                    },
+                };
+
+                Ok(ModificationResult {
+                    changed: true,
+                    modified_nodes: vec![backup_node],
+                })
+            }
         }
+    }
 
-        // Reformat the entire file using prettyplease
-        self.content = prettyplease::unparse(&self.syntax_tree);
+    /// Rename a function across the entire file
+    pub(crate) fn rename_function(&mut self, op: &crate::operations::RenameFunctionOp) -> Result<ModificationResult> {
+        use crate::operations::EditMode;
 
-        // Recompute line offsets
-        self.line_offsets = Self::compute_line_offsets(&self.content);
+        // Create a path resolver if a canonical path was provided
+        let path_resolver = if let Some(function_path) = &op.function_path {
+            let mut resolver = PathResolver::new(function_path)
+                .ok_or_else(|| anyhow::anyhow!("Invalid function path: {}", function_path))?;
 
-        // Create a backup node for the entire file operation
-        let backup_node = BackupNode {
-            node_type: "EnumVariantRename".to_string(),
-            identifier: format!("{}::{} -> {}", op.enum_name, op.old_variant, op.new_variant),
-            original_content: format!("Renamed {} to {} in enum {}", op.old_variant, op.new_variant, op.enum_name),
-            location: NodeLocation {
-                line: 1,
-                column: 0,
-                end_line: 1,
-                end_column: 0,
-            },
+            // Scan the file for use statements to build the alias map
+            resolver.scan_file(&self.syntax_tree);
+            Some(resolver)
+        } else {
+            None
         };
 
-        Ok(ModificationResult {
-            changed: true,
-            modified_nodes: vec![backup_node],
-        })
+        match op.edit_mode {
+            EditMode::Surgical => {
+                // Use non-mutating visitor to collect replacement locations
+                use syn::visit::Visit;
+
+                let mut collector = FunctionReplacementCollector {
+                    old_name: op.old_name.clone(),
+                    new_name: op.new_name.clone(),
+                    path_resolver,
+                    replacements: Vec::new(),
+                };
+
+                collector.visit_file(&self.syntax_tree);
+
+                if collector.replacements.is_empty() {
+                    return Ok(ModificationResult {
+                        changed: false,
+                        modified_nodes: vec![],
+                    });
+                }
+
+                // Apply surgical edits to original content
+                self.content = crate::surgical::apply_surgical_edits(&self.content, collector.replacements);
+
+                // Recompute line offsets
+                self.line_offsets = Self::compute_line_offsets(&self.content);
+
+                // Re-parse the modified content
+                self.syntax_tree = syn::parse_str(&self.content)
+                    .context("Failed to re-parse after surgical edit")?;
+
+                let backup_node = BackupNode {
+                    node_type: "FunctionRename".to_string(),
+                    identifier: format!("{} -> {} (surgical)", op.old_name, op.new_name),
+                    original_content: format!("Renamed {} to {} (surgical mode)", op.old_name, op.new_name),
+                    location: NodeLocation {
+                        line: 1,
+                        column: 0,
+                        end_line: 1,
+                        end_column: 0,
+                    },
+                };
+
+                Ok(ModificationResult {
+                    changed: true,
+                    modified_nodes: vec![backup_node],
+                })
+            }
+            EditMode::Reformat => {
+                // Use mutating visitor (original behavior)
+                let mut renamer = FunctionRenamer {
+                    old_name: op.old_name.clone(),
+                    new_name: op.new_name.clone(),
+                    path_resolver,
+                    modified: false,
+                };
+
+                // Visit and mutate the syntax tree
+                renamer.visit_file_mut(&mut self.syntax_tree);
+
+                if !renamer.modified {
+                    return Ok(ModificationResult {
+                        changed: false,
+                        modified_nodes: vec![],
+                    });
+                }
+
+                // Reformat the entire file using prettyplease
+                self.content = prettyplease::unparse(&self.syntax_tree);
+
+                // Recompute line offsets
+                self.line_offsets = Self::compute_line_offsets(&self.content);
+
+                // Create a backup node for the entire file operation
+                let backup_node = BackupNode {
+                    node_type: "FunctionRename".to_string(),
+                    identifier: format!("{} -> {}", op.old_name, op.new_name),
+                    original_content: format!("Renamed {} to {}", op.old_name, op.new_name),
+                    location: NodeLocation {
+                        line: 1,
+                        column: 0,
+                        end_line: 1,
+                        end_column: 0,
+                    },
+                };
+
+                Ok(ModificationResult {
+                    changed: true,
+                    modified_nodes: vec![backup_node],
+                })
+            }
+        }
     }
 
     /// Convert line/column to byte offset
@@ -2728,6 +2944,7 @@ struct StructLiteralFieldAdder {
     field_def: String,
     field_name: String,
     position: InsertPosition,
+    path_resolver: Option<PathResolver>,
     modified: bool,
 }
 
@@ -2735,33 +2952,38 @@ impl VisitMut for StructLiteralFieldAdder {
     fn visit_expr_mut(&mut self, node: &mut Expr) {
         // Check if this is a struct literal expression
         if let Expr::Struct(expr_struct) = node {
-            // Match based on pattern:
-            // - "Rectangle" → only Rectangle { ... } (no :: prefix)
-            // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
-            // - "View::Rectangle" → exact match only View::Rectangle
-
-            let is_match = if self.struct_name.contains("::") {
-                // Pattern contains :: - check for exact or wildcard match
-                if self.struct_name.starts_with("*::") {
-                    // Wildcard: *::Rectangle matches any path ending with Rectangle
-                    let target_name = &self.struct_name[3..]; // Skip "*::"
-                    expr_struct.path.segments.last()
-                        .map(|seg| seg.ident.to_string() == target_name)
-                        .unwrap_or(false)
-                } else {
-                    // Exact path match: View::Rectangle
-                    let path_str = expr_struct.path.segments.iter()
-                        .map(|seg| seg.ident.to_string())
-                        .collect::<Vec<_>>()
-                        .join("::");
-                    path_str == self.struct_name
-                }
+            let is_match = if let Some(resolver) = &self.path_resolver {
+                // Use PathResolver for safe matching
+                resolver.matches_target(&expr_struct.path)
             } else {
-                // No :: in pattern - only match pure struct literals (no path qualifier)
-                expr_struct.path.segments.len() == 1
-                    && expr_struct.path.segments.last()
-                        .map(|seg| seg.ident.to_string())
-                        .as_ref() == Some(&self.struct_name)
+                // Fallback to legacy pattern matching
+                // - "Rectangle" → only Rectangle { ... } (no :: prefix)
+                // - "*::Rectangle" → any path ending with Rectangle (View::Rectangle, etc.)
+                // - "View::Rectangle" → exact match only View::Rectangle
+
+                if self.struct_name.contains("::") {
+                    // Pattern contains :: - check for exact or wildcard match
+                    if self.struct_name.starts_with("*::") {
+                        // Wildcard: *::Rectangle matches any path ending with Rectangle
+                        let target_name = &self.struct_name[3..]; // Skip "*::"
+                        expr_struct.path.segments.last()
+                            .map(|seg| seg.ident.to_string() == target_name)
+                            .unwrap_or(false)
+                    } else {
+                        // Exact path match: View::Rectangle
+                        let path_str = expr_struct.path.segments.iter()
+                            .map(|seg| seg.ident.to_string())
+                            .collect::<Vec<_>>()
+                            .join("::");
+                        path_str == self.struct_name
+                    }
+                } else {
+                    // No :: in pattern - only match pure struct literals (no path qualifier)
+                    expr_struct.path.segments.len() == 1
+                        && expr_struct.path.segments.last()
+                            .map(|seg| seg.ident.to_string())
+                            .as_ref() == Some(&self.struct_name)
+                }
             };
 
             if is_match {
@@ -2822,23 +3044,79 @@ struct EnumVariantRenamer {
     enum_name: String,
     old_variant: String,
     new_variant: String,
+    path_resolver: Option<PathResolver>,
     modified: bool,
 }
 
 impl EnumVariantRenamer {
-    /// Rename a path segment if it matches
+    /// Rename a path segment if it matches using path resolution.
+    ///
+    /// This method handles various path forms:
+    /// - Simple paths: `EnumName::Variant`
+    /// - Qualified paths: `crate::module::EnumName::Variant`
+    /// - Imported paths: `Variant` (when enum is imported via use statement)
+    ///
+    /// When a PathResolver is configured, it validates that paths refer to
+    /// the correct enum before renaming.
     fn rename_path(&mut self, path: &mut syn::Path) {
-        if path.segments.len() == 2 {
-            if path.segments[0].ident == self.enum_name
-                && path.segments[1].ident == self.old_variant
+        // Check if the path ends with EnumName::VariantName
+        let segments: Vec<_> = path.segments.iter().collect();
+        let len = segments.len();
+
+        if len >= 2 {
+            // Path has at least enum and variant segments
+            let potential_variant = &segments[len - 1];
+            let potential_enum = &segments[len - 2];
+
+            if potential_enum.ident == self.enum_name
+                && potential_variant.ident == self.old_variant
             {
-                path.segments[1].ident = syn::Ident::new(&self.new_variant, path.segments[1].ident.span());
-                self.modified = true;
+                // Path ends with EnumName::VariantName
+
+                // If we have a path resolver, validate the enum path
+                if let Some(resolver) = &self.path_resolver {
+                    // Extract just the enum path (everything except the variant)
+                    let enum_path = syn::Path {
+                        leading_colon: path.leading_colon,
+                        segments: path.segments.iter()
+                            .take(len - 1)
+                            .cloned()
+                            .collect(),
+                    };
+
+                    // Only rename if the enum path matches our target
+                    if resolver.matches_target(&enum_path) {
+                        path.segments[len - 1].ident = syn::Ident::new(
+                            &self.new_variant,
+                            path.segments[len - 1].ident.span()
+                        );
+                        self.modified = true;
+                    }
+                } else {
+                    // No resolver - use simple matching (backward compatible)
+                    // Only match if it's exactly EnumName::Variant (2 segments)
+                    if len == 2 {
+                        path.segments[1].ident = syn::Ident::new(
+                            &self.new_variant,
+                            path.segments[1].ident.span()
+                        );
+                        self.modified = true;
+                    }
+                }
             }
-        } else if path.segments.len() == 1 {
-            if path.segments[0].ident == self.old_variant {
-                path.segments[0].ident = syn::Ident::new(&self.new_variant, path.segments[0].ident.span());
-                self.modified = true;
+        } else if len == 1 {
+            // Single segment path - check if it's an imported variant
+            if segments[0].ident == self.old_variant {
+                // When using path resolver, we don't rename single-segment paths
+                // unless they're explicitly imported (which would be unusual for variants)
+                // For backward compatibility, we still rename them when no resolver is present
+                if self.path_resolver.is_none() {
+                    path.segments[0].ident = syn::Ident::new(
+                        &self.new_variant,
+                        path.segments[0].ident.span()
+                    );
+                    self.modified = true;
+                }
             }
         }
     }
@@ -2898,5 +3176,611 @@ impl VisitMut for EnumVariantRenamer {
 
         // Continue visiting nested expressions
         syn::visit_mut::visit_expr_mut(self, expr);
+    }
+}
+
+// Non-mutating visitor for collecting replacement locations (surgical mode)
+struct EnumVariantReplacementCollector {
+    enum_name: String,
+    old_variant: String,
+    new_variant: String,
+    path_resolver: Option<PathResolver>,
+    replacements: Vec<crate::surgical::Replacement>,
+}
+
+impl EnumVariantReplacementCollector {
+    /// Check if a path matches and collect replacement if it does
+    fn collect_path_replacement(&mut self, path: &syn::Path) {
+        let segments: Vec<_> = path.segments.iter().collect();
+        let len = segments.len();
+
+        if len >= 2 {
+            let potential_variant = &segments[len - 1];
+            let potential_enum = &segments[len - 2];
+
+            if potential_enum.ident == self.enum_name
+                && potential_variant.ident == self.old_variant
+            {
+                // Path ends with EnumName::VariantName
+
+                // Validate with path resolver if available
+                let should_rename = if let Some(resolver) = &self.path_resolver {
+                    let enum_path = syn::Path {
+                        leading_colon: path.leading_colon,
+                        segments: path.segments.iter()
+                            .take(len - 1)
+                            .cloned()
+                            .collect(),
+                    };
+                    resolver.matches_target(&enum_path)
+                } else {
+                    // No resolver - only match exactly 2 segments
+                    len == 2
+                };
+
+                if should_rename {
+                    let span = potential_variant.ident.span();
+                    let start = span.start();
+                    let end = span.end();
+
+                    self.replacements.push(crate::surgical::Replacement::new(
+                        start,
+                        end,
+                        self.new_variant.clone(),
+                    ));
+                }
+            }
+        } else if len == 1 && self.path_resolver.is_none() {
+            // Single segment - only without path resolver (backward compat)
+            if segments[0].ident == self.old_variant {
+                let span = segments[0].ident.span();
+                let start = span.start();
+                let end = span.end();
+
+                self.replacements.push(crate::surgical::Replacement::new(
+                    start,
+                    end,
+                    self.new_variant.clone(),
+                ));
+            }
+        }
+    }
+}
+
+impl<'ast> syn::visit::Visit<'ast> for EnumVariantReplacementCollector {
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        if node.ident == self.enum_name {
+            for variant in &node.variants {
+                if variant.ident == self.old_variant {
+                    let span = variant.ident.span();
+                    let start = span.start();
+                    let end = span.end();
+
+                    self.replacements.push(crate::surgical::Replacement::new(
+                        start,
+                        end,
+                        self.new_variant.clone(),
+                    ));
+                }
+            }
+        }
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_pat(&mut self, pat: &'ast syn::Pat) {
+        match pat {
+            syn::Pat::TupleStruct(tuple_struct) => {
+                self.collect_path_replacement(&tuple_struct.path);
+            }
+            syn::Pat::Struct(struct_pat) => {
+                self.collect_path_replacement(&struct_pat.path);
+            }
+            syn::Pat::Path(path_pat) => {
+                self.collect_path_replacement(&path_pat.path);
+            }
+            _ => {}
+        }
+        syn::visit::visit_pat(self, pat);
+    }
+
+    fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+        match expr {
+            syn::Expr::Path(expr_path) => {
+                self.collect_path_replacement(&expr_path.path);
+            }
+            syn::Expr::Call(call) => {
+                if let syn::Expr::Path(path) = &*call.func {
+                    self.collect_path_replacement(&path.path);
+                }
+            }
+            syn::Expr::Struct(struct_expr) => {
+                self.collect_path_replacement(&struct_expr.path);
+            }
+            _ => {}
+        }
+        syn::visit::visit_expr(self, expr);
+    }
+}
+
+// Mutating visitor for renaming functions (reformat mode)
+struct FunctionRenamer {
+    old_name: String,
+    new_name: String,
+    path_resolver: Option<PathResolver>,
+    modified: bool,
+}
+
+impl FunctionRenamer {
+    /// Rename a function identifier if it matches
+    fn rename_ident(&mut self, ident: &mut syn::Ident) {
+        if ident == &self.old_name {
+            *ident = syn::Ident::new(&self.new_name, ident.span());
+            self.modified = true;
+        }
+    }
+
+    /// Check if a path matches our target function (with path resolution)
+    fn matches_target_function(&self, path: &syn::Path) -> bool {
+        if let Some(resolver) = &self.path_resolver {
+            resolver.matches_target(path)
+        } else {
+            // Simple matching: just check if the last segment is our function name
+            path.segments.len() == 1 && path.segments.last().unwrap().ident == self.old_name
+        }
+    }
+}
+
+impl VisitMut for FunctionRenamer {
+    fn visit_item_fn_mut(&mut self, node: &mut syn::ItemFn) {
+        // Rename function definition
+        self.rename_ident(&mut node.sig.ident);
+        syn::visit_mut::visit_item_fn_mut(self, node);
+    }
+
+    fn visit_expr_mut(&mut self, expr: &mut syn::Expr) {
+        match expr {
+            syn::Expr::Call(call) => {
+                // Rename function calls
+                if let syn::Expr::Path(expr_path) = &mut *call.func {
+                    if self.matches_target_function(&expr_path.path) {
+                        if let Some(last_seg) = expr_path.path.segments.last_mut() {
+                            self.rename_ident(&mut last_seg.ident);
+                        }
+                    }
+                }
+            }
+            syn::Expr::Path(expr_path) => {
+                // Rename function references (not calls)
+                if self.matches_target_function(&expr_path.path) {
+                    if let Some(last_seg) = expr_path.path.segments.last_mut() {
+                        self.rename_ident(&mut last_seg.ident);
+                    }
+                }
+            }
+            _ => {}
+        }
+        syn::visit_mut::visit_expr_mut(self, expr);
+    }
+}
+
+// Non-mutating visitor for collecting function replacement locations (surgical mode)
+struct FunctionReplacementCollector {
+    old_name: String,
+    new_name: String,
+    path_resolver: Option<PathResolver>,
+    replacements: Vec<crate::surgical::Replacement>,
+}
+
+impl FunctionReplacementCollector {
+    /// Collect replacement for a function identifier
+    fn collect_replacement(&mut self, ident: &syn::Ident) {
+        if ident == &self.old_name {
+            let span = ident.span();
+            let start = span.start();
+            let end = span.end();
+
+            self.replacements.push(crate::surgical::Replacement::new(
+                start,
+                end,
+                self.new_name.clone(),
+            ));
+        }
+    }
+
+    /// Check if a path matches our target function
+    fn matches_target_function(&self, path: &syn::Path) -> bool {
+        if let Some(resolver) = &self.path_resolver {
+            resolver.matches_target(path)
+        } else {
+            // Simple matching
+            path.segments.len() == 1 && path.segments.last().unwrap().ident == self.old_name
+        }
+    }
+}
+
+impl<'ast> syn::visit::Visit<'ast> for FunctionReplacementCollector {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        // Collect function definition rename
+        self.collect_replacement(&node.sig.ident);
+        syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+        match expr {
+            syn::Expr::Call(call) => {
+                // Collect function call renames
+                if let syn::Expr::Path(expr_path) = &*call.func {
+                    if self.matches_target_function(&expr_path.path) {
+                        if let Some(last_seg) = expr_path.path.segments.last() {
+                            self.collect_replacement(&last_seg.ident);
+                        }
+                    }
+                }
+                // Visit call arguments but NOT the func (already handled above)
+                for arg in &call.args {
+                    syn::visit::visit_expr(self, arg);
+                }
+                // Don't call the default visitor which would re-visit call.func
+                return;
+            }
+            syn::Expr::Path(expr_path) => {
+                // Collect function reference renames (not calls)
+                if self.matches_target_function(&expr_path.path) {
+                    if let Some(last_seg) = expr_path.path.segments.last() {
+                        self.collect_replacement(&last_seg.ident);
+                    }
+                }
+            }
+            _ => {}
+        }
+        syn::visit::visit_expr(self, expr);
+    }
+}
+
+// ============================================================================
+// Doc Comment Operations
+// ============================================================================
+
+/// Generate a documentation comment in the specified style
+fn generate_doc_comment(text: &str, style: &DocCommentStyle) -> String {
+    match style {
+        DocCommentStyle::Line => {
+            // Split by newlines and add /// prefix to each line
+            text.lines()
+                .map(|line| {
+                    if line.trim().is_empty() {
+                        "///".to_string()
+                    } else {
+                        format!("/// {}", line)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        DocCommentStyle::Block => {
+            // Simple block comment
+            if text.contains('\n') {
+                // Multi-line block comment
+                let lines = text.lines()
+                    .map(|line| format!(" * {}", line))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("/**\n{}\n */", lines)
+            } else {
+                // Single-line block comment
+                format!("/** {} */", text)
+            }
+        }
+    }
+}
+
+/// Find the byte position and indentation of a target item
+struct TargetFinder {
+    target_type: String,
+    target_name: String,
+    found_position: Option<(usize, String)>, // (line_number, indentation)
+}
+
+impl TargetFinder {
+    fn new(target_type: String, target_name: String) -> Self {
+        Self {
+            target_type,
+            target_name,
+            found_position: None,
+        }
+    }
+}
+
+impl<'ast> syn::visit::Visit<'ast> for TargetFinder {
+    fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
+        if self.target_type == "struct" && node.ident.to_string() == self.target_name {
+            // Use struct_token span to get the line where "struct" keyword appears,
+            // not the first line of the item (which includes doc comments)
+            let line = node.struct_token.span.start().line;
+            self.found_position = Some((line, String::new()));
+        }
+        syn::visit::visit_item_struct(self, node);
+    }
+
+    fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
+        if self.target_type == "enum" && node.ident.to_string() == self.target_name {
+            // Use enum_token span to get the line where "enum" keyword appears
+            let line = node.enum_token.span.start().line;
+            self.found_position = Some((line, String::new()));
+        }
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if self.target_type == "function" && node.sig.ident.to_string() == self.target_name {
+            // Use fn_token span to get the line where "fn" keyword appears
+            let line = node.sig.fn_token.span.start().line;
+            self.found_position = Some((line, String::new()));
+        }
+        syn::visit::visit_item_fn(self, node);
+    }
+}
+
+impl RustEditor {
+    /// Add a documentation comment to a target item using surgical editing
+    pub fn add_doc_comment_surgical(
+        &mut self,
+        target_type: &str,
+        target_name: &str,
+        doc_text: &str,
+        style: &DocCommentStyle,
+    ) -> Result<ModificationResult> {
+        use syn::visit::Visit;
+
+        // Find the target item
+        let mut finder = TargetFinder::new(
+            target_type.to_string(),
+            target_name.to_string(),
+        );
+        finder.visit_file(&self.syntax_tree);
+
+        if let Some((line_num, _indent)) = finder.found_position {
+            // Lines are 1-indexed from syn, convert to 0-indexed
+            let line_idx = line_num.saturating_sub(1);
+
+            // Generate the doc comment
+            let comment = generate_doc_comment(doc_text, style);
+
+            // Find the actual line in the source
+            let lines: Vec<&str> = self.content.lines().collect();
+            if line_idx >= lines.len() {
+                anyhow::bail!("Target not found at line {}", line_num);
+            }
+
+            let target_line = lines[line_idx].to_string(); // Clone to avoid borrow issues
+            let target_line_len = target_line.len();
+
+            // Detect indentation from the target line
+            let indent = target_line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
+
+            // Build the new content with comment inserted
+            let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+
+            // Insert comment lines before the target
+            let comment_lines: Vec<String> = comment
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect();
+
+            // Insert in reverse order to maintain indices
+            for (i, comment_line) in comment_lines.iter().rev().enumerate() {
+                new_lines.insert(line_idx, comment_line.clone());
+            }
+
+            // Update content
+            self.content = new_lines.join("\n");
+
+            // Re-parse to update syntax tree
+            self.syntax_tree = syn::parse_str(&self.content)
+                .context("Failed to re-parse after adding comment")?;
+
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![BackupNode {
+                    node_type: target_type.to_string(),
+                    identifier: target_name.to_string(),
+                    original_content: target_line,
+                    location: NodeLocation {
+                        line: line_num,
+                        column: 1,
+                        end_line: line_num,
+                        end_column: target_line_len,
+                    },
+                }],
+            })
+        } else {
+            anyhow::bail!("Target {} '{}' not found", target_type, target_name)
+        }
+    }
+
+    /// Update an existing documentation comment on a target item using surgical editing
+    pub fn update_doc_comment_surgical(
+        &mut self,
+        target_type: &str,
+        target_name: &str,
+        doc_text: &str,
+        style: &DocCommentStyle,
+    ) -> Result<ModificationResult> {
+        use syn::visit::Visit;
+
+        // Find the target item
+        let mut finder = TargetFinder::new(
+            target_type.to_string(),
+            target_name.to_string(),
+        );
+        finder.visit_file(&self.syntax_tree);
+
+        if let Some((line_num, _indent)) = finder.found_position {
+            // Lines are 1-indexed from syn, convert to 0-indexed
+            let line_idx = line_num.saturating_sub(1);
+
+            // Find the actual line in the source
+            let lines: Vec<&str> = self.content.lines().collect();
+            if line_idx >= lines.len() {
+                anyhow::bail!("Target not found at line {}", line_num);
+            }
+
+            let target_line = lines[line_idx].to_string(); // Clone to avoid borrow issues
+            let target_line_len = target_line.len();
+
+            // Detect indentation from the target line
+            let indent = target_line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
+
+            // Scan backwards from target to find existing doc comment lines
+            let mut doc_comment_start = line_idx;
+            while doc_comment_start > 0 {
+                let prev_line = lines[doc_comment_start - 1].trim();
+                if prev_line.starts_with("///") || prev_line.starts_with("//!") ||
+                   prev_line.starts_with("/**") || prev_line.starts_with("/*!") ||
+                   (prev_line.starts_with("*") && !prev_line.starts_with("*/")) ||
+                   prev_line == "*/" {
+                    doc_comment_start -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Build new content with old comments removed and new ones inserted
+            let mut new_lines: Vec<String> = Vec::new();
+
+            // Add lines before the doc comments
+            for i in 0..doc_comment_start {
+                new_lines.push(lines[i].to_string());
+            }
+
+            // Generate and add new doc comment
+            let comment = generate_doc_comment(doc_text, style);
+            let comment_lines: Vec<String> = comment
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect();
+
+            for comment_line in comment_lines {
+                new_lines.push(comment_line);
+            }
+
+            // Add remaining lines (from target onwards)
+            for i in line_idx..lines.len() {
+                new_lines.push(lines[i].to_string());
+            }
+
+            // Update content
+            self.content = new_lines.join("\n");
+
+            // Re-parse to update syntax tree
+            self.syntax_tree = syn::parse_str(&self.content)
+                .context("Failed to re-parse after updating comment")?;
+
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![BackupNode {
+                    node_type: target_type.to_string(),
+                    identifier: target_name.to_string(),
+                    original_content: target_line,
+                    location: NodeLocation {
+                        line: line_num,
+                        column: 1,
+                        end_line: line_num,
+                        end_column: target_line_len,
+                    },
+                }],
+            })
+        } else {
+            anyhow::bail!("Target {} '{}' not found", target_type, target_name)
+        }
+    }
+
+    /// Remove a documentation comment from a target item using surgical editing
+    pub fn remove_doc_comment_surgical(
+        &mut self,
+        target_type: &str,
+        target_name: &str,
+    ) -> Result<ModificationResult> {
+        use syn::visit::Visit;
+
+        // Find the target item
+        let mut finder = TargetFinder::new(
+            target_type.to_string(),
+            target_name.to_string(),
+        );
+        finder.visit_file(&self.syntax_tree);
+
+        if let Some((line_num, _indent)) = finder.found_position {
+            // Lines are 1-indexed from syn, convert to 0-indexed
+            let line_idx = line_num.saturating_sub(1);
+
+            // Find the actual line in the source
+            let lines: Vec<&str> = self.content.lines().collect();
+            if line_idx >= lines.len() {
+                anyhow::bail!("Target not found at line {}", line_num);
+            }
+
+            let target_line = lines[line_idx].to_string(); // Clone to avoid borrow issues
+            let target_line_len = target_line.len();
+
+            // Scan backwards from target to find existing doc comment lines
+            let mut doc_comment_start = line_idx;
+            while doc_comment_start > 0 {
+                let prev_line = lines[doc_comment_start - 1].trim();
+                if prev_line.starts_with("///") || prev_line.starts_with("//!") ||
+                   prev_line.starts_with("/**") || prev_line.starts_with("/*!") ||
+                   (prev_line.starts_with("*") && !prev_line.starts_with("*/")) ||
+                   prev_line == "*/" {
+                    doc_comment_start -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Build new content with doc comments removed
+            let mut new_lines: Vec<String> = Vec::new();
+
+            // Add lines before the doc comments
+            for i in 0..doc_comment_start {
+                new_lines.push(lines[i].to_string());
+            }
+
+            // Skip the doc comment lines (from doc_comment_start to line_idx)
+
+            // Add remaining lines (from target onwards)
+            for i in line_idx..lines.len() {
+                new_lines.push(lines[i].to_string());
+            }
+
+            // Update content
+            self.content = new_lines.join("\n");
+
+            // Re-parse to update syntax tree
+            self.syntax_tree = syn::parse_str(&self.content)
+                .context("Failed to re-parse after removing comment")?;
+
+            Ok(ModificationResult {
+                changed: true,
+                modified_nodes: vec![BackupNode {
+                    node_type: target_type.to_string(),
+                    identifier: target_name.to_string(),
+                    original_content: target_line,
+                    location: NodeLocation {
+                        line: line_num,
+                        column: 1,
+                        end_line: line_num,
+                        end_column: target_line_len,
+                    },
+                }],
+            })
+        } else {
+            anyhow::bail!("Target {} '{}' not found", target_type, target_name)
+        }
     }
 }

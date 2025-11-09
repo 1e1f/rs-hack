@@ -1,6 +1,8 @@
 # rs-hack
 
-**Stop using sed on Rust code.** AST-aware refactoring tool for AI agents and automated transformations.
+Stop using sed on Rust code 🦀
+
+AST-aware refactoring tool for AI agents or other automated pipelines.
 
 ## Why?
 
@@ -425,6 +427,22 @@ rs-hack rename-enum-variant \
   --new-variant Pending \
   --format diff
 
+# Summary format (shows only changed lines) ⭐ NEW Sprint 2
+rs-hack rename-enum-variant \
+  --paths "src/**/*.rs" \
+  --enum-name Status \
+  --old-variant Draft \
+  --new-variant Pending \
+  --format summary
+
+# Validate mode: check for remaining references ⭐ NEW Sprint 2
+rs-hack rename-enum-variant \
+  --paths "src/**/*.rs" \
+  --enum-name Status \
+  --old-variant Draft \
+  --new-variant Pending \
+  --validate
+
 # Batch rename multiple variants (using batch command)
 cat <<EOF | rs-hack batch --apply
 {
@@ -460,6 +478,16 @@ EOF
 - ✅ **Fast**: Processes entire codebase in seconds
 - ✅ **Safe**: Dry-run mode with diff preview
 - ✅ **Reversible**: Tracked in history for easy revert
+
+**New in Sprint 2:**
+- ⭐ **Validation mode** (`--validate`): Check for remaining references after a rename
+  - Helps identify patterns that weren't caught (e.g., fully qualified paths)
+  - Provides suggestions for fixing missed references
+  - Perfect for verifying completeness of large refactors
+- ⭐ **Summary format** (`--format summary`): Show only changed lines
+  - Cleaner output than full diffs for large files
+  - Focuses on what actually changed
+  - Easier to review and verify changes
 
 **Real-world example:**
 
@@ -925,8 +953,9 @@ rs-hack transform \
 
 ### Batch Operations
 
-Create a JSON file with multiple operations:
+Create a JSON or YAML file with multiple operations ⭐ YAML support NEW in Sprint 3:
 
+**JSON format:**
 ```json
 {
   "base_path": "src/",
@@ -953,11 +982,116 @@ Create a JSON file with multiple operations:
 }
 ```
 
+**YAML format** (easier for humans to write):
+```yaml
+base_path: src/
+operations:
+  - type: RenameEnumVariant
+    enum_name: Status
+    old_variant: DraftV2
+    new_variant: Draft
+    edit_mode: surgical
+
+  - type: RenameEnumVariant
+    enum_name: Status
+    old_variant: PublishedV2
+    new_variant: Published
+    edit_mode: surgical
+
+  - type: RenameFunction
+    old_name: process_event_v2
+    new_name: process_event
+```
+
 Run batch:
 
 ```bash
+# Auto-detects format from file extension
+rs-hack batch --spec migrations.yaml --apply
 rs-hack batch --spec migrations.json --apply
+
+# With exclude patterns ⭐ NEW in Sprint 3
+rs-hack batch --spec migrations.yaml --exclude "**/tests/**" --exclude "**/deprecated/**" --apply
 ```
+
+## Exclude Patterns ⭐ NEW in Sprint 3
+
+Skip certain paths during operations using glob patterns:
+
+```bash
+# Exclude test fixtures and deprecated code
+rs-hack rename-enum-variant \
+  --paths "src/**/*.rs" \
+  --enum-name Status \
+  --old-variant Draft \
+  --new-variant Pending \
+  --exclude "**/tests/fixtures/**" \
+  --exclude "**/deprecated/**" \
+  --apply
+
+# Exclude multiple patterns (use --exclude multiple times)
+rs-hack add-struct-field \
+  --paths "**/*.rs" \
+  --struct-name User \
+  --field "verified: bool" \
+  --exclude "**/tests/**" \
+  --exclude "**/examples/**" \
+  --exclude "**/vendor/**" \
+  --apply
+
+# Works with any command that accepts --paths
+rs-hack transform \
+  --paths "src/**/*.rs" \
+  --node-type macro-call \
+  --name eprintln \
+  --action comment \
+  --exclude "**/production/**" \
+  --apply
+```
+
+**Use cases:**
+- Skip test fixtures that should remain unchanged
+- Exclude deprecated code that will be removed
+- Avoid vendored/third-party code
+- Selective refactoring of specific modules
+
+**Pattern matching:**
+- Glob patterns: `**/tests/**`, `src/deprecated/*.rs`
+- Simple strings: `deprecated`, `test` (matches anywhere in path)
+- Multiple patterns: Use `--exclude` multiple times
+
+## Documentation Comment Operations
+
+Add, update, or remove documentation comments systematically:
+
+```bash
+# Add documentation to items
+rs-hack add-doc-comment \
+  --paths "src/**/*.rs" \
+  --target-type struct \
+  --name User \
+  --doc-comment "Represents a user in the system" \
+  --apply
+
+# Update existing documentation
+rs-hack update-doc-comment \
+  --paths "src/**/*.rs" \
+  --target-type function \
+  --name process_user \
+  --doc-comment "Updated documentation" \
+  --apply
+
+# Remove documentation
+rs-hack remove-doc-comment \
+  --paths "src/**/*.rs" \
+  --target-type enum \
+  --name Status \
+  --apply
+```
+
+**Supported targets:** `struct`, `enum`, `function`
+
+**Comment styles:** `line` (///) or `block` (/** */)
 
 ## Diff Output
 

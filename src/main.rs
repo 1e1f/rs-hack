@@ -9,6 +9,8 @@ mod visitor;
 mod editor;
 mod state;
 mod diff;
+mod path_resolver;
+mod surgical;
 
 #[cfg(test)]
 mod tests;
@@ -16,7 +18,7 @@ mod tests;
 use operations::*;
 use editor::RustEditor;
 use state::{*, save_backup_nodes};
-use diff::{print_diff, DiffStats};
+use diff::{print_diff, print_summary_diff, DiffStats};
 
 #[derive(Parser)]
 #[command(name = "rs-hack")]
@@ -27,7 +29,7 @@ struct Cli {
     #[arg(long, global = true)]
     local_state: bool,
 
-    /// Output format: "default" or "diff"
+    /// Output format: "default", "diff", or "summary"
     #[arg(long, default_value = "default", global = true)]
     format: String,
 
@@ -38,6 +40,10 @@ struct Cli {
     /// Filter targets based on traits or attributes (e.g., "derives_trait:Clone", "derives_trait:Serialize,Debug")
     #[arg(long, global = true)]
     r#where: Option<String>,
+
+    /// Exclude paths matching these patterns (can be used multiple times)
+    #[arg(long, global = true, num_args = 0..)]
+    exclude: Vec<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -241,6 +247,51 @@ enum Commands {
         #[arg(short = 'n', long)]
         new_variant: String,
 
+        /// Optional fully-qualified path to the enum (e.g., "crate::compiler::types::IRValue")
+        /// When provided, enables safe matching of fully qualified paths by tracking use statements
+        #[arg(long)]
+        enum_path: Option<String>,
+
+        /// Edit mode: 'surgical' (default, preserves formatting) or 'reformat' (uses prettyplease)
+        #[arg(long, default_value = "surgical")]
+        edit_mode: String,
+
+        /// Validate mode: check for remaining references without making changes
+        #[arg(long)]
+        validate: bool,
+
+        /// Apply changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
+
+    /// Rename a function across the codebase
+    RenameFunction {
+        /// Path to the Rust file or directory (supports multiple paths and glob patterns)
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Current name of the function
+        #[arg(short = 'o', long)]
+        old_name: String,
+
+        /// New name for the function
+        #[arg(short = 'n', long)]
+        new_name: String,
+
+        /// Optional fully-qualified path to the function (e.g., "crate::utils::process_v2")
+        /// When provided, enables safe matching of fully qualified paths by tracking use statements
+        #[arg(long)]
+        function_path: Option<String>,
+
+        /// Edit mode: 'surgical' (default, preserves formatting) or 'reformat' (uses prettyplease)
+        #[arg(long, default_value = "surgical")]
+        edit_mode: String,
+
+        /// Validate mode: check for remaining references without making changes
+        #[arg(long)]
+        validate: bool,
+
         /// Apply changes (default is dry-run)
         #[arg(long)]
         apply: bool,
@@ -319,12 +370,12 @@ enum Commands {
         apply: bool,
     },
 
-    /// Batch operation from JSON specification
+    /// Batch operation from JSON or YAML specification
     Batch {
-        /// Path to JSON file with batch operations
+        /// Path to JSON or YAML file with batch operations
         #[arg(short, long)]
         spec: PathBuf,
-        
+
         /// Apply changes (default is dry-run)
         #[arg(long)]
         apply: bool,
@@ -487,6 +538,240 @@ enum Commands {
         #[arg(long)]
         apply: bool,
     },
+
+    /// Add documentation comment to an item
+    AddDocComment {
+        /// Path to Rust file(s) - supports multiple paths and glob patterns
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Type of target: "struct", "enum", "function", "field", "variant"
+        #[arg(short = 't', long)]
+        target_type: String,
+
+        /// Name of the target (e.g., "User", "Status::Draft", "User::id")
+        #[arg(short, long)]
+        name: String,
+
+        /// Documentation comment text (without /// prefix)
+        #[arg(short = 'd', long)]
+        doc_comment: String,
+
+        /// Comment style: "line" (///) or "block" (/** */)
+        #[arg(long, default_value = "line")]
+        style: String,
+
+        /// Apply changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
+
+    /// Update existing documentation comment
+    UpdateDocComment {
+        /// Path to Rust file(s) - supports multiple paths and glob patterns
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Type of target: "struct", "enum", "function", "field", "variant"
+        #[arg(short = 't', long)]
+        target_type: String,
+
+        /// Name of the target
+        #[arg(short, long)]
+        name: String,
+
+        /// New documentation comment text
+        #[arg(short = 'd', long)]
+        doc_comment: String,
+
+        /// Apply changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
+
+    /// Remove documentation comment from an item
+    RemoveDocComment {
+        /// Path to Rust file(s) - supports multiple paths and glob patterns
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Type of target: "struct", "enum", "function", "field", "variant"
+        #[arg(short = 't', long)]
+        target_type: String,
+
+        /// Name of the target
+        #[arg(short, long)]
+        name: String,
+
+        /// Apply changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+/// Validate that an enum variant rename would catch all references
+fn validate_enum_variant_rename(
+    files: &[PathBuf],
+    enum_name: &str,
+    old_variant: &str,
+    enum_path: Option<&str>,
+) -> Result<()> {
+    use syn::{visit::Visit, File};
+
+    struct VariantFinder<'a> {
+        enum_name: &'a str,
+        variant_name: &'a str,
+        enum_path: Option<&'a str>,
+        references: Vec<(String, usize, usize, String)>, // (file, line, col, code)
+    }
+
+    impl<'a, 'ast> Visit<'ast> for VariantFinder<'a> {
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            let path_str = quote::quote!(#path).to_string();
+
+            // Check if this path contains our variant
+            // Handle cases like:
+            // - EnumName::VariantName
+            // - super::EnumName::VariantName
+            // - crate::module::EnumName::VariantName
+            if path_str.contains(self.variant_name) {
+                let segments: Vec<_> = path.segments.iter().collect();
+                let len = segments.len();
+
+                if len >= 2 {
+                    let enum_seg = &segments[len - 2];
+                    let variant_seg = &segments[len - 1];
+
+                    if enum_seg.ident == self.enum_name && variant_seg.ident == self.variant_name {
+                        // Found a match - we'll record it in visit_file
+                        syn::visit::visit_path(self, path);
+                        return;
+                    }
+                } else if len == 1 && segments[0].ident == self.variant_name {
+                    // Might be an imported variant
+                    syn::visit::visit_path(self, path);
+                    return;
+                }
+            }
+
+            syn::visit::visit_path(self, path);
+        }
+    }
+
+    let mut finder = VariantFinder {
+        enum_name,
+        variant_name: old_variant,
+        enum_path,
+        references: Vec::new(),
+    };
+
+    for file_path in files {
+        let content = std::fs::read_to_string(file_path)
+            .with_context(|| format!("Failed to read {}", file_path.display()))?;
+
+        let syntax_tree: File = syn::parse_str(&content)
+            .with_context(|| format!("Failed to parse {}", file_path.display()))?;
+
+        // Search for simple text matches (this catches things AST might miss)
+        for (line_num, line) in content.lines().enumerate() {
+            if line.contains(old_variant) {
+                // Check if it's part of our enum variant pattern
+                if line.contains(&format!("{}::{}", enum_name, old_variant)) ||
+                   line.contains(&format!("::{}", old_variant)) {
+                    finder.references.push((
+                        file_path.display().to_string(),
+                        line_num + 1,
+                        0,
+                        line.trim().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    if finder.references.is_empty() {
+        println!("✓ No references to '{}::{}' found.", enum_name, old_variant);
+        println!("  All occurrences have been renamed or there were none to begin with.");
+    } else {
+        println!("❌ Found {} remaining references to '{}::{}':",
+                 finder.references.len(), enum_name, old_variant);
+        println!();
+
+        for (file, line, _col, code) in &finder.references {
+            println!("  - {}:{}", file, line);
+            println!("    {}", code);
+        }
+
+        println!();
+        println!("💡 Suggestions:");
+        if enum_path.is_none() {
+            println!("  - Try using --enum-path to enable better matching of fully qualified paths");
+        }
+        println!("  - Run without --validate to rename these references");
+        println!("  - Check if these are false positives (comments, strings, etc.)");
+    }
+
+    Ok(())
+}
+
+/// Validate that a function rename would catch all references
+fn validate_function_rename(
+    files: &[PathBuf],
+    old_name: &str,
+    function_path: Option<&str>,
+) -> Result<()> {
+    let mut references = Vec::new();
+
+    for file_path in files {
+        let content = std::fs::read_to_string(file_path)
+            .with_context(|| format!("Failed to read {}", file_path.display()))?;
+
+        // Search for simple text matches
+        for (line_num, line) in content.lines().enumerate() {
+            if line.contains(old_name) {
+                // Check if it looks like a function reference
+                // This is a simple heuristic - matches function calls, definitions, etc.
+                let patterns = [
+                    format!("fn {}(", old_name),
+                    format!("fn {}<", old_name),
+                    format!("{}(", old_name),
+                    format!("{}::", old_name),
+                    format!("::{}", old_name),
+                ];
+
+                if patterns.iter().any(|p| line.contains(p)) {
+                    references.push((
+                        file_path.display().to_string(),
+                        line_num + 1,
+                        line.trim().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    if references.is_empty() {
+        println!("✓ No references to '{}' found.", old_name);
+        println!("  All occurrences have been renamed or there were none to begin with.");
+    } else {
+        println!("❌ Found {} remaining references to '{}':", references.len(), old_name);
+        println!();
+
+        for (file, line, code) in &references {
+            println!("  - {}:{}", file, line);
+            println!("    {}", code);
+        }
+
+        println!();
+        println!("💡 Suggestions:");
+        if function_path.is_none() {
+            println!("  - Try using --function-path to enable better matching of fully qualified paths");
+        }
+        println!("  - Run without --validate to rename these references");
+        println!("  - Check if these are false positives (comments, strings, etc.)");
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -494,7 +779,7 @@ fn main() -> Result<()> {
     
     match cli.command {
         Commands::AddStructField { paths, struct_name, field, position, literal_default, output, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddStructField(AddStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
@@ -507,7 +792,7 @@ fn main() -> Result<()> {
         }
 
         Commands::UpdateStructField { paths, struct_name, field, output, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateStructField(UpdateStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
@@ -518,7 +803,7 @@ fn main() -> Result<()> {
         }
 
         Commands::RemoveStructField { paths, struct_name, field_name, output, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveStructField(RemoveStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_name: field_name.clone(),
@@ -529,18 +814,19 @@ fn main() -> Result<()> {
         }
 
         Commands::AddStructLiteralField { paths, struct_name, field, position, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddStructLiteralField(AddStructLiteralFieldOp {
                 struct_name: struct_name.clone(),
                 field_def: field.clone(),
                 position: parse_position(&position)?,
+                struct_path: None,  // Deprecated command doesn't support path resolution
             });
 
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
         }
 
         Commands::AddEnumVariant { paths, enum_name, variant, position, output, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddEnumVariant(AddEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_def: variant.clone(),
@@ -552,7 +838,7 @@ fn main() -> Result<()> {
         }
 
         Commands::UpdateEnumVariant { paths, enum_name, variant, output, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateEnumVariant(UpdateEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_def: variant.clone(),
@@ -563,7 +849,7 @@ fn main() -> Result<()> {
         }
 
         Commands::RemoveEnumVariant { paths, enum_name, variant_name, output, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveEnumVariant(RemoveEnumVariantOp {
                 enum_name: enum_name.clone(),
                 variant_name: variant_name.clone(),
@@ -573,15 +859,49 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::RenameEnumVariant { paths, enum_name, old_variant, new_variant, apply } => {
-            let files = collect_rust_files(&paths)?;
-            let op = Operation::RenameEnumVariant(RenameEnumVariantOp {
-                enum_name: enum_name.clone(),
-                old_variant: old_variant.clone(),
-                new_variant: new_variant.clone(),
-            });
+        Commands::RenameEnumVariant { paths, enum_name, old_variant, new_variant, enum_path, edit_mode, validate, apply } => {
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            // If validate mode, run validation instead of rename
+            if validate {
+                validate_enum_variant_rename(&files, &enum_name, &old_variant, enum_path.as_deref())?;
+            } else {
+                // Parse edit mode
+                let edit_mode = edit_mode.parse::<EditMode>()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                let op = Operation::RenameEnumVariant(RenameEnumVariantOp {
+                    enum_name: enum_name.clone(),
+                    old_variant: old_variant.clone(),
+                    new_variant: new_variant.clone(),
+                    enum_path: enum_path.clone(),
+                    edit_mode,
+                });
+
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            }
+        }
+
+        Commands::RenameFunction { paths, old_name, new_name, function_path, edit_mode, validate, apply } => {
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            // If validate mode, run validation instead of rename
+            if validate {
+                validate_function_rename(&files, &old_name, function_path.as_deref())?;
+            } else {
+                // Parse edit mode
+                let edit_mode = edit_mode.parse::<EditMode>()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                let op = Operation::RenameFunction(RenameFunctionOp {
+                    old_name: old_name.clone(),
+                    new_name: new_name.clone(),
+                    function_path: function_path.clone(),
+                    edit_mode,
+                });
+
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            }
         }
 
         Commands::AddMatchArm { paths, pattern, body, function, auto_detect, enum_name, apply } => {
@@ -595,7 +915,7 @@ fn main() -> Result<()> {
                 anyhow::bail!("--pattern is required when not using --auto-detect");
             }
 
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddMatchArm(AddMatchArmOp {
                 pattern: pattern.unwrap_or_default(),
                 body: body.clone(),
@@ -608,7 +928,7 @@ fn main() -> Result<()> {
         }
 
         Commands::UpdateMatchArm { paths, pattern, body, function, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateMatchArm(UpdateMatchArmOp {
                 pattern: pattern.clone(),
                 new_body: body.clone(),
@@ -619,7 +939,7 @@ fn main() -> Result<()> {
         }
 
         Commands::RemoveMatchArm { paths, pattern, function, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveMatchArm(RemoveMatchArmOp {
                 pattern: pattern.clone(),
                 function_name: function,
@@ -631,14 +951,24 @@ fn main() -> Result<()> {
         Commands::Batch { spec, apply } => {
             let content = std::fs::read_to_string(&spec)
                 .context("Failed to read batch spec file")?;
-            let batch: BatchSpec = serde_json::from_str(&content)
-                .context("Failed to parse batch spec JSON")?;
 
-            execute_batch(&batch, apply)?;
+            // Auto-detect format based on file extension
+            let batch: BatchSpec = if spec.extension().and_then(|s| s.to_str()) == Some("yaml")
+                || spec.extension().and_then(|s| s.to_str()) == Some("yml") {
+                serde_yaml::from_str(&content)
+                    .context("Failed to parse batch spec YAML")?
+            } else {
+                // Try JSON first, fall back to YAML if JSON fails
+                serde_json::from_str(&content)
+                    .or_else(|_| serde_yaml::from_str(&content))
+                    .context("Failed to parse batch spec (tried both JSON and YAML)")?
+            };
+
+            execute_batch(&batch, apply, &cli.exclude)?;
         }
         
         Commands::Find { paths, node_type, name } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             for file in files {
                 let content = std::fs::read_to_string(&file)
@@ -654,7 +984,7 @@ fn main() -> Result<()> {
         Commands::Inspect { paths, node_type, name, content_filter, format } => {
             use operations::InspectResult;
 
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let mut all_results: Vec<InspectResult> = Vec::new();
 
             for file in files {
@@ -704,7 +1034,7 @@ fn main() -> Result<()> {
         }
 
         Commands::AddDerive { paths, target_type, name, derives, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let derive_vec: Vec<String> = derives
                 .split(',')
                 .map(|s| s.trim().to_string())
@@ -721,7 +1051,7 @@ fn main() -> Result<()> {
         }
 
         Commands::AddImplMethod { paths, target, method, position, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::AddImplMethod(AddImplMethodOp {
                 target: target.clone(),
@@ -733,7 +1063,7 @@ fn main() -> Result<()> {
         }
 
         Commands::AddUse { paths, use_path, position, apply } => {
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::AddUseStatement(AddUseStatementOp {
                 use_path: use_path.clone(),
@@ -772,12 +1102,52 @@ fn main() -> Result<()> {
                 _ => anyhow::bail!("Invalid action: {}. Use 'comment', 'remove', or 'replace'", action),
             };
 
-            let files = collect_rust_files(&paths)?;
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::Transform(TransformOp {
                 node_type: node_type.clone(),
                 name_filter: name,
                 content_filter,
                 action: transform_action,
+            });
+
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+        }
+
+        Commands::AddDocComment { paths, target_type, name, doc_comment, style, apply } => {
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            // Parse style
+            let doc_style = style.parse::<DocCommentStyle>()
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            let op = Operation::AddDocComment(AddDocCommentOp {
+                target_type: target_type.clone(),
+                name: name.clone(),
+                doc_comment: doc_comment.clone(),
+                style: doc_style,
+            });
+
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+        }
+
+        Commands::UpdateDocComment { paths, target_type, name, doc_comment, apply } => {
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            let op = Operation::UpdateDocComment(UpdateDocCommentOp {
+                target_type: target_type.clone(),
+                name: name.clone(),
+                doc_comment: doc_comment.clone(),
+            });
+
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+        }
+
+        Commands::RemoveDocComment { paths, target_type, name, apply } => {
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            let op = Operation::RemoveDocComment(RemoveDocCommentOp {
+                target_type: target_type.clone(),
+                name: name.clone(),
             });
 
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
@@ -788,6 +1158,10 @@ fn main() -> Result<()> {
 }
 
 fn collect_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    collect_rust_files_with_exclusions(paths, &[])
+}
+
+fn collect_rust_files_with_exclusions(paths: &[PathBuf], exclude_patterns: &[String]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
 
     for path in paths {
@@ -821,6 +1195,25 @@ fn collect_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
                 files.push(entry.path().to_path_buf());
             }
         }
+    }
+
+    // Filter out excluded paths
+    if !exclude_patterns.is_empty() {
+        files.retain(|file| {
+            let file_str = file.to_string_lossy();
+            !exclude_patterns.iter().any(|pattern| {
+                // Check if the file matches the exclude pattern
+                if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+                    // Use glob matching
+                    glob::Pattern::new(pattern)
+                        .map(|p| p.matches(&file_str))
+                        .unwrap_or(false)
+                } else {
+                    // Simple string matching for non-glob patterns
+                    file_str.contains(pattern.as_str())
+                }
+            })
+        });
     }
 
     Ok(files)
@@ -880,6 +1273,17 @@ fn execute_operation(
                             std::fs::write(write_path, &new_content)
                                 .with_context(|| format!("Failed to write {}", write_path.display()))?;
                         }
+                    } else if format == "summary" {
+                        // In summary mode, print only changed lines
+                        let stats = print_summary_diff(file_path, &content, &new_content);
+                        total_stats.add(&stats);
+
+                        if apply {
+                            // Apply changes and show a message
+                            let write_path = output.unwrap_or(file_path);
+                            std::fs::write(write_path, &new_content)
+                                .with_context(|| format!("Failed to write {}", write_path.display()))?;
+                        }
                     } else {
                         // Default mode - original behavior
                         if apply {
@@ -923,9 +1327,9 @@ fn execute_operation(
     Ok(())
 }
 
-fn execute_batch(batch: &BatchSpec, apply: bool) -> Result<()> {
+fn execute_batch(batch: &BatchSpec, apply: bool, exclude_patterns: &[String]) -> Result<()> {
     for op in &batch.operations {
-        let files = collect_rust_files(&[batch.base_path.clone()])?;
+        let files = collect_rust_files_with_exclusions(&[batch.base_path.clone()], exclude_patterns)?;
         execute_operation(&files, op, apply, None, "default", false)?;
     }
     Ok(())
@@ -967,6 +1371,10 @@ fn execute_operation_with_state(
         Operation::AddUseStatement(_) => "AddUseStatement",
         Operation::AddDerive(_) => "AddDerive",
         Operation::Transform(_) => "Transform",
+        Operation::RenameFunction(_) => "RenameFunction",
+        Operation::AddDocComment(_) => "AddDocComment",
+        Operation::UpdateDocComment(_) => "UpdateDocComment",
+        Operation::RemoveDocComment(_) => "RemoveDocComment",
     };
 
     // First pass: collect changes and backup files
@@ -985,9 +1393,12 @@ fn execute_operation_with_state(
                 if result.changed {
                     let new_content = editor.to_string();
 
-                    // Print diff if format is "diff"
+                    // Print diff if format is "diff" or "summary"
                     if format == "diff" {
                         let stats = print_diff(file_path, &content, &new_content);
+                        total_stats.add(&stats);
+                    } else if format == "summary" {
+                        let stats = print_summary_diff(file_path, &content, &new_content);
                         total_stats.add(&stats);
                     }
 

@@ -1,6 +1,45 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Edit mode for operations - controls how changes are applied to source files
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EditMode {
+    /// Surgical mode: preserve all formatting, only change specific locations
+    /// This is the recommended default for minimal diffs
+    Surgical,
+    /// Reformat mode: use prettyplease to reformat the entire file
+    /// Use this if you want consistent formatting across the file
+    Reformat,
+}
+
+impl Default for EditMode {
+    fn default() -> Self {
+        EditMode::Surgical
+    }
+}
+
+impl std::fmt::Display for EditMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EditMode::Surgical => write!(f, "surgical"),
+            EditMode::Reformat => write!(f, "reformat"),
+        }
+    }
+}
+
+impl std::str::FromStr for EditMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "surgical" => Ok(EditMode::Surgical),
+            "reformat" => Ok(EditMode::Reformat),
+            _ => Err(format!("Invalid edit mode: {}. Valid values are 'surgical' or 'reformat'", s)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Operation {
@@ -19,6 +58,10 @@ pub enum Operation {
     AddDerive(AddDeriveOp),
     Transform(TransformOp),
     RenameEnumVariant(RenameEnumVariantOp),
+    RenameFunction(RenameFunctionOp),
+    AddDocComment(AddDocCommentOp),
+    UpdateDocComment(UpdateDocCommentOp),
+    RemoveDocComment(RemoveDocCommentOp),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +96,8 @@ pub struct AddStructLiteralFieldOp {
     pub struct_name: String,
     pub field_def: String, // e.g., "return_type: None"
     pub position: InsertPosition,
+    #[serde(default)]
+    pub struct_path: Option<String>,  // Optional canonical path (e.g., "crate::types::Rectangle")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,4 +242,70 @@ pub struct RenameEnumVariantOp {
     pub enum_name: String,      // Name of the enum (e.g., "IRValue")
     pub old_variant: String,    // Current variant name (e.g., "HashMapV2")
     pub new_variant: String,    // New variant name (e.g., "HashMap")
+    #[serde(default)]
+    pub enum_path: Option<String>,  // Optional canonical path (e.g., "crate::compiler::types::IRValue")
+    #[serde(default)]
+    pub edit_mode: EditMode,    // How to apply changes (surgical vs reformat)
+}
+
+/// Rename a function across the codebase
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenameFunctionOp {
+    pub old_name: String,       // Current function name (e.g., "process_v2")
+    pub new_name: String,       // New function name (e.g., "process")
+    #[serde(default)]
+    pub function_path: Option<String>,  // Optional canonical path (e.g., "crate::utils::process_v2")
+    #[serde(default)]
+    pub edit_mode: EditMode,    // How to apply changes (surgical vs reformat)
+}
+
+/// Add documentation comment to an item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddDocCommentOp {
+    pub target_type: String,    // "struct", "enum", "function", "field", "variant"
+    pub name: String,           // Name of the target (e.g., "User", "Status::Draft")
+    pub doc_comment: String,    // Documentation text (without /// prefix)
+    #[serde(default)]
+    pub style: DocCommentStyle, // Line (///) or Block (/** */)
+}
+
+/// Update existing documentation comment
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateDocCommentOp {
+    pub target_type: String,    // "struct", "enum", "function", "field", "variant"
+    pub name: String,           // Name of the target
+    pub doc_comment: String,    // New documentation text
+}
+
+/// Remove documentation comment from an item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveDocCommentOp {
+    pub target_type: String,    // "struct", "enum", "function", "field", "variant"
+    pub name: String,           // Name of the target
+}
+
+/// Documentation comment style
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DocCommentStyle {
+    Line,   // /// or //!
+    Block,  // /** */ or /*! */
+}
+
+impl Default for DocCommentStyle {
+    fn default() -> Self {
+        DocCommentStyle::Line
+    }
+}
+
+impl std::str::FromStr for DocCommentStyle {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "line" => Ok(DocCommentStyle::Line),
+            "block" => Ok(DocCommentStyle::Block),
+            _ => Err(format!("Invalid doc comment style: {}. Valid values are 'line' or 'block'", s)),
+        }
+    }
 }

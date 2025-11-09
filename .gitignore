@@ -3,3 +3,5 @@
 /*.md
 !README.md
 !HUMAN.md
+.claude
+Cargo.lock
