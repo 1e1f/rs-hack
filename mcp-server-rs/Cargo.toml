@@ -1,0 +1,36 @@
+[package]
+name = "rs-hack-mcp"
+version = "0.1.0"
+edition = "2021"
+authors = ["Leif Shackelford <structuresound@gmail.com>"]
+description = "MCP server for rs-hack - AST-aware Rust refactoring tools"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/1e1f/rs-hack"
+keywords = ["mcp", "ai", "rust", "refactoring", "ast"]
+categories = ["development-tools", "command-line-utilities"]
+
+[[bin]]
+name = "rs-hack-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+
+# MCP protocol
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+bytes = "1.5"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# rs-hack integration (not needed - we call via CLI)
+# rs-hack = { path = "..", version = "0.4.3" }
+
+[dev-dependencies]
+tokio-test = "0.4"
