@@ -52,6 +52,32 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Add a field to a struct (idempotent - skips if field already exists)
+    #[command(after_help = "EXAMPLES:
+    # Add field to struct definition only
+    rs-hack add-struct-field --struct-name Config --field \"timeout: Duration\" --paths src --apply
+
+    # Add field to definition AND all struct literals
+    rs-hack add-struct-field --struct-name Config --field \"timeout: Duration\" --literal-default \"Duration::from_secs(30)\" --paths src --apply
+
+    # Common case: field exists in struct, add to all literals
+    rs-hack add-struct-field --struct-name Config --field timeout --literal-default \"Duration::from_secs(30)\" --paths src --apply
+
+    # Insert field at specific position
+    rs-hack add-struct-field --struct-name User --field \"created_at: DateTime\" --position first --paths src --apply
+    rs-hack add-struct-field --struct-name User --field \"updated_at: DateTime\" --position \"after:created_at\" --paths src --apply
+
+BEHAVIOR WITH --literal-default:
+    Without --literal-default:
+        Only modifies struct DEFINITION (adds field to struct declaration)
+
+    With --literal-default:
+        1. Tries to add field to struct definition (skips if already exists)
+        2. ALWAYS adds field with default value to ALL struct literal expressions
+
+    This is useful when:
+        - Migrating existing code to use a new field
+        - Field already exists in struct, but not all initializations use it
+        - You want to ensure every struct creation includes the new field")]
     AddStructField {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -70,9 +96,8 @@ enum Commands {
         position: String,
 
         /// Default value for struct literals (e.g., "None", "vec![]", "0")
-        /// - If provided: tries to add to definition (idempotent), always adds to literals
-        /// - If omitted: only adds to definition
-        /// Common case: field already exists in struct, you just want to add it to all literals
+        /// When provided: adds field to definition (idempotent) AND all literal expressions
+        /// When omitted: only adds to definition
         #[arg(long)]
         literal_default: Option<String>,
 
@@ -108,19 +133,47 @@ enum Commands {
         apply: bool,
     },
 
-    /// Remove a field from a struct
+    /// Remove a field from struct definitions and all struct literal expressions (also works on enum variant fields)
+    #[command(after_help = "EXAMPLES:
+    # Remove field from struct definition AND all struct literals
+    rs-hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --paths src --apply
+
+    # Dry-run to preview changes (default behavior)
+    rs-hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --paths src
+
+    # Remove field from enum variant (use Enum::Variant syntax)
+    rs-hack remove-struct-field --struct-name \"View::Rectangle\" --field-name \"immediate_mode\" --paths src --apply
+
+    # Remove field from literals only (keep in struct definition)
+    rs-hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --literal-only --paths src --apply
+
+    # Works on multiple files in a directory
+    rs-hack remove-struct-field --struct-name \"User\" --field-name \"deprecated_field\" --paths src --apply
+
+WHAT IT DOES:
+    This command removes a field in TWO places:
+    1. From the struct/enum variant DEFINITION (e.g., struct Config { debug_mode: bool })
+    2. From ALL struct literal expressions (e.g., Config { color: red, debug_mode: false })
+
+    Both removals happen automatically - you don't need separate commands.
+
+    With --literal-only: Only removes from struct literals, keeps the field in the definition.")]
     RemoveStructField {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
         paths: Vec<PathBuf>,
 
-        /// Name of the struct to modify
+        /// Name of the struct to modify (or \"EnumName::VariantName\" for enum variants)
         #[arg(short, long)]
         struct_name: String,
 
         /// Name of the field to remove
         #[arg(short = 'n', long)]
         field_name: String,
+
+        /// Remove field from struct literal expressions only, not the definition
+        #[arg(long)]
+        literal_only: bool,
 
         /// Output path (if specified, writes to new file instead of modifying in place)
         #[arg(short, long)]
@@ -397,6 +450,38 @@ enum Commands {
     },
 
     /// Inspect and list AST nodes with full content (supports glob patterns)
+    #[command(after_help = "EXAMPLES:
+    # Find all struct literal expressions for a specific struct
+    rs-hack inspect --paths src --node-type struct-literal --name Shadow
+
+    # Find all calls to unwrap() method
+    rs-hack inspect --paths src --node-type method-call --name unwrap
+
+    # Find all eprintln! debug statements
+    rs-hack inspect --paths src --node-type macro-call --name eprintln
+
+    # Find enum variant usages
+    rs-hack inspect --paths src --node-type enum-usage --name \"Operator::Error\"
+
+    # Find nodes containing specific text
+    rs-hack inspect --paths src --node-type struct-literal --content-filter \"[SHADOW RENDER]\"
+
+    # Get JSON output (useful for scripting)
+    rs-hack inspect --paths src --node-type function --name process --format json
+
+    # Get just file locations (grep-like output)
+    rs-hack inspect --paths src --node-type method-call --name unwrap --format locations
+
+    # Search multiple files with glob patterns
+    rs-hack inspect --paths \"src/**/*.rs\" --node-type struct --name Config
+
+    # Include documentation comments in output
+    rs-hack inspect --paths src --node-type function --name main --include-comments true
+
+OUTPUT FORMATS:
+    snippets    Show full code snippets with file locations (default, most readable)
+    locations   Show only file:line:column (grep-style, good for scripting)
+    json        JSON output with all metadata (for programmatic use)")]
     Inspect {
         /// Path to Rust file(s) - supports multiple paths and glob patterns (e.g., "tests/*.rs")
         #[arg(short, long, num_args = 1..)]
@@ -513,16 +598,57 @@ enum Commands {
     },
 
     /// Transform AST nodes (generic find-and-transform operation)
+    #[command(after_help = "SUPPORTED NODE TYPES:
+
+Expression-level nodes (8 types):
+    struct-literal      Struct initialization (e.g., Config { field: value })
+    match-arm           Match arm pattern and body
+    enum-usage          Enum variant usage (e.g., Status::Active)
+    function-call       Function call (e.g., process_data())
+    method-call         Method call (e.g., value.unwrap())
+    macro-call          Macro invocation (e.g., println!(), vec![])
+    identifier          Variable or type identifier
+    type-ref            Type reference in annotations
+
+Definition-level nodes (9 types):
+    struct              Struct definition
+    enum                Enum definition
+    function            Function definition
+    impl-method         Method in impl block
+    trait               Trait definition
+    const               Const item
+    static              Static item
+    type-alias          Type alias
+    mod                 Module definition
+
+EXAMPLES:
+    # Comment out all unwrap() calls
+    rs-hack transform --paths src --node-type method-call --name unwrap --action comment --apply
+
+    # Remove all eprintln! debug statements
+    rs-hack transform --paths src --node-type macro-call --name eprintln --action remove --apply
+
+    # Replace a specific function call
+    rs-hack transform --paths src --node-type function-call --name old_func --action replace --with new_func --apply
+
+    # Remove all struct literals containing a specific value
+    rs-hack transform --paths src --node-type struct-literal --content-filter \"[SHADOW RENDER]\" --action remove --apply
+
+    # Comment out all TODO match arms
+    rs-hack transform --paths src --node-type match-arm --content-filter \"todo!()\" --action comment --apply
+
+    # Preview changes before applying (default dry-run)
+    rs-hack transform --paths src --node-type method-call --name unwrap --action comment")]
     Transform {
         /// Path to Rust file(s) - supports multiple paths and glob patterns (e.g., "src/**/*.rs")
         #[arg(short, long, num_args = 1..)]
         paths: Vec<PathBuf>,
 
-        /// Type of node: "macro-call", "method-call", "function-call", etc.
+        /// Type of node (see SUPPORTED NODE TYPES above for full list)
         #[arg(short = 't', long)]
         node_type: String,
 
-        /// Filter by name (e.g., "eprintln", "unwrap")
+        /// Filter by name (e.g., "eprintln", "unwrap", "Config")
         #[arg(short, long)]
         name: Option<String>,
 
@@ -610,6 +736,35 @@ enum Commands {
         /// Apply changes (default is dry-run)
         #[arg(long)]
         apply: bool,
+    },
+
+    /// Find all occurrences of a field across the codebase
+    #[command(after_help = "EXAMPLES:
+    # Find all occurrences of a field
+    rs-hack find-field --paths src --field-name immediate_mode
+
+    # Show summary only (don't list all literal occurrences)
+    rs-hack find-field --paths src --field-name debug_mode --summary
+
+WHAT IT DOES:
+    This command searches for a field in three places:
+    1. Struct definitions (where the field is declared)
+    2. Enum variant definitions (for enum variants with fields)
+    3. Struct literal expressions (where the field is initialized)
+
+    It provides suggested commands for removing the field from each location.")]
+    FindField {
+        /// Path to Rust file(s) - supports glob patterns
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Name of the field to search for
+        #[arg(short = 'n', long)]
+        field_name: String,
+
+        /// Show summary only (don't list all literal occurrences)
+        #[arg(long)]
+        summary: bool,
     },
 }
 
@@ -806,11 +961,12 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
         }
 
-        Commands::RemoveStructField { paths, struct_name, field_name, output, apply } => {
+        Commands::RemoveStructField { paths, struct_name, field_name, literal_only, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveStructField(RemoveStructFieldOp {
                 struct_name: struct_name.clone(),
                 field_name: field_name.clone(),
+                literal_only,
                 where_filter: cli.r#where.clone(),
             });
 
@@ -1159,6 +1315,92 @@ fn main() -> Result<()> {
             });
 
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+        }
+
+        Commands::FindField { paths, field_name, summary } => {
+            use operations::{FieldLocation, FieldContext};
+
+            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            let mut all_struct_defs = Vec::new();
+            let mut all_enum_variants = Vec::new();
+            let mut all_literals = Vec::new();
+
+            for file in files {
+                let content = std::fs::read_to_string(&file)?;
+                let editor = RustEditor::new(&content)?;
+                let locations = editor.find_field_locations(&field_name)?;
+
+                for mut loc in locations {
+                    loc.file_path = file.to_string_lossy().to_string();
+                    match loc.context {
+                        FieldContext::StructDefinition { .. } => all_struct_defs.push(loc),
+                        FieldContext::EnumVariantDefinition { .. } => all_enum_variants.push(loc),
+                        FieldContext::StructLiteral { .. } => all_literals.push(loc),
+                    }
+                }
+            }
+
+            // Print results
+            if all_struct_defs.is_empty() && all_enum_variants.is_empty() && all_literals.is_empty() {
+                println!("No occurrences of field '{}' found.", field_name);
+                return Ok(());
+            }
+
+            println!("Found field \"{}\" in:\n", field_name);
+
+            if !all_struct_defs.is_empty() {
+                println!("Struct definitions:");
+                for loc in &all_struct_defs {
+                    if let FieldContext::StructDefinition { struct_name, field_type } = &loc.context {
+                        println!("  - {}.{}: {} ({}:{})", struct_name, field_name, field_type, loc.file_path, loc.line);
+                    }
+                }
+                println!();
+            }
+
+            if !all_enum_variants.is_empty() {
+                println!("Enum variant definitions:");
+                for loc in &all_enum_variants {
+                    if let FieldContext::EnumVariantDefinition { enum_name, variant_name, field_type } = &loc.context {
+                        println!("  - {}::{}.{}: {} ({}:{})", enum_name, variant_name, field_name, field_type, loc.file_path, loc.line);
+                    }
+                }
+                println!();
+            }
+
+            if !all_literals.is_empty() {
+                println!("Struct literal expressions: ({} occurrences)", all_literals.len());
+                let to_show = if summary { 5 } else { all_literals.len() };
+                for loc in all_literals.iter().take(to_show) {
+                    if let FieldContext::StructLiteral { struct_name } = &loc.context {
+                        println!("  - {} ({}:{})", struct_name, loc.file_path, loc.line);
+                    }
+                }
+                if all_literals.len() > to_show {
+                    println!("  ... ({} more)", all_literals.len() - to_show);
+                }
+                println!();
+            }
+
+            // Print suggested commands
+            if !all_struct_defs.is_empty() || !all_enum_variants.is_empty() {
+                println!("Suggested commands:");
+                for loc in &all_struct_defs {
+                    if let FieldContext::StructDefinition { struct_name, .. } = &loc.context {
+                        println!("  # Remove from struct definition AND all literals");
+                        println!("  rs-hack remove-struct-field --struct-name \"{}\" --field-name \"{}\" --paths src --apply", struct_name, field_name);
+                        println!();
+                    }
+                }
+                for loc in &all_enum_variants {
+                    if let FieldContext::EnumVariantDefinition { enum_name, variant_name, .. } = &loc.context {
+                        println!("  # Remove from enum variant definition AND all literals");
+                        println!("  rs-hack remove-struct-field --struct-name \"{}::{}\" --field-name \"{}\" --paths src --apply", enum_name, variant_name, field_name);
+                        println!();
+                    }
+                }
+            }
         }
     }
 

@@ -219,7 +219,41 @@ rs-hack add-struct-field \
 cargo check
 ```
 
-### Workflow 3: Clean Up Debug Code
+### Workflow 3: Remove Struct Field Everywhere
+
+```bash
+# Remove field from BOTH definitions AND all literal expressions
+# This is what confused users - remove-struct-field does both automatically!
+
+# 1. Inspect where field is used
+rs-hack inspect --paths "src/**/*.rs" \
+  --node-type struct-literal --name Config \
+  --content-filter "debug_mode" \
+  --format locations
+
+# 2. Preview removal (removes from definition AND literals)
+rs-hack remove-struct-field \
+  --paths "src/**/*.rs" \
+  --struct-name Config \
+  --field-name debug_mode \
+  --format diff
+
+# 3. Apply
+rs-hack remove-struct-field \
+  --paths "src/**/*.rs" \
+  --struct-name Config \
+  --field-name debug_mode \
+  --apply
+
+# For enum variant fields, use EnumName::VariantName syntax:
+rs-hack remove-struct-field \
+  --paths "src/**/*.rs" \
+  --struct-name "View::Rectangle" \
+  --field-name immediate_mode \
+  --apply
+```
+
+### Workflow 4: Clean Up Debug Code
 
 ```bash
 # 1. Find debug macros
@@ -250,6 +284,8 @@ rs-hack transform \
 ✅ **DO use rs-hack for:**
 - Renaming enum variants across multiple files
 - Adding fields to struct definitions and literals
+- Removing fields from struct definitions AND literals (both happen automatically!)
+- Removing fields from enum variant fields (use `EnumName::VariantName` syntax)
 - Adding match arms for enum variants
 - Commenting out debug macros
 - Any bulk AST-level transformation

@@ -110,7 +110,7 @@ rs-hack add-use --path src/lib.rs \
   - `--literal-default VALUE` → definition + literals
   - `--literal-only` → literals only (replaces old `add-struct-literal-field`)
 - ✅ **update-struct-field**: Update field types/visibility
-- ✅ **remove-struct-field**: Remove fields
+- ✅ **remove-struct-field**: Remove fields from definitions AND all literals (also works on enum variant fields using `EnumName::VariantName` syntax)
 
 ### Enum Operations (4)
 - ✅ **add-enum-variant**, **update-enum-variant**, **remove-enum-variant**

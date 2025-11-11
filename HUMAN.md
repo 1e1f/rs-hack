@@ -36,9 +36,13 @@ rs-hack add-struct-field --paths FILE --struct-name NAME \
 rs-hack update-struct-field --paths FILE --struct-name NAME \
   --field "name: NewType" [--where "filter"] --apply
 
-# Remove field
+# Remove field (from BOTH definition AND all literals)
 rs-hack remove-struct-field --paths FILE --struct-name NAME \
   --field-name name [--where "filter"] --apply
+
+# Remove field from enum variant (use EnumName::VariantName syntax)
+rs-hack remove-struct-field --paths FILE --struct-name "View::Rectangle" \
+  --field-name field_name --apply
 
 # Add to struct literals only (v0.4.0+)
 # Simply omit the type - no ':' means literals only

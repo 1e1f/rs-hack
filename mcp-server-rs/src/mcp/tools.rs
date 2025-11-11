@@ -19,7 +19,7 @@ impl ToolRegistry {
         Self {
             tools: vec![
                 // ============================================================
-                // INSPECTION TOOLS (2)
+                // INSPECTION TOOLS (3)
                 // ============================================================
                 Tool {
                     name: "inspect",
@@ -52,6 +52,19 @@ impl ToolRegistry {
                             "name": {"type": "string", "description": "Name of the item to find"}
                         },
                         "required": ["paths", "node_type", "name"]
+                    }),
+                },
+                Tool {
+                    name: "find_field",
+                    description: "Find all occurrences of a field across the codebase (struct definitions, enum variant definitions, and struct literal expressions). Provides suggested commands for removing the field.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
+                            "field_name": {"type": "string", "description": "Name of the field to search for"},
+                            "summary": {"type": "boolean", "default": false, "description": "Show summary only (limit literal occurrences to 5)"}
+                        },
+                        "required": ["paths", "field_name"]
                     }),
                 },
 
@@ -90,13 +103,14 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "remove_struct_field",
-                    description: "Remove a field from a struct",
+                    description: "Remove a field from struct definitions and/or struct literal expressions (also works on enum variant fields using EnumName::VariantName syntax)",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string"},
-                            "struct_name": {"type": "string"},
+                            "struct_name": {"type": "string", "description": "Name of struct (or \"EnumName::VariantName\" for enum variants)"},
                             "field_name": {"type": "string", "description": "Name of field to remove"},
+                            "literal_only": {"type": "boolean", "default": false, "description": "If true, only remove from struct literals, not the definition"},
                             "apply": {"type": "boolean", "default": false}
                         },
                         "required": ["paths", "struct_name", "field_name"]
@@ -452,6 +466,11 @@ impl ToolRegistry {
                 self.add_find_args(&arguments, &mut args);
                 "find"
             }
+            // Find field uses "find-field" command
+            "find_field" => {
+                self.add_find_field_args(&arguments, &mut args);
+                "find-field"
+            }
             // Transform command
             "transform" => {
                 self.add_transform_args(&arguments, &mut args)?;
@@ -559,6 +578,22 @@ impl ToolRegistry {
         }
     }
 
+    fn add_find_field_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        if let Some(paths) = arguments.get("paths").and_then(|v| v.as_str()) {
+            args.push("--paths".to_string());
+            args.push(paths.to_string());
+        }
+        if let Some(field_name) = arguments.get("field_name").and_then(|v| v.as_str()) {
+            args.push("--field-name".to_string());
+            args.push(field_name.to_string());
+        }
+        if let Some(summary) = arguments.get("summary").and_then(|v| v.as_bool()) {
+            if summary {
+                args.push("--summary".to_string());
+            }
+        }
+    }
+
     fn add_transform_args(&self, arguments: &Value, args: &mut Vec<String>) -> Result<()> {
         // Add paths
         if let Some(paths) = arguments.get("paths").and_then(|v| v.as_str()) {
@@ -612,11 +647,12 @@ impl ToolRegistry {
 
                 match value {
                     Value::Bool(true) => {
-                        if key == "apply" {
-                            args.push("--apply".to_string());
+                        // Handle boolean true values as flags
+                        if key == "apply" || key == "literal_only" || key == "summary" || key == "force" || key == "auto_detect" {
+                            args.push(flag);
                         }
                     }
-                    Value::Bool(false) => {}, // Skip false booleans
+                    Value::Bool(false) => {}, // Skip false booleans (they're usually the default)
                     Value::String(s) => {
                         args.push(flag);
                         args.push(s.clone());

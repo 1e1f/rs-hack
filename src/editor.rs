@@ -65,7 +65,23 @@ impl RustEditor {
         }
         offsets
     }
-    
+
+    /// Find similar field names using Levenshtein distance for fuzzy matching
+    fn find_similar_fields(target: &str, available: &[String]) -> Vec<String> {
+        use strsim::levenshtein;
+
+        let mut scored: Vec<_> = available.iter()
+            .map(|field| (field, levenshtein(target, field)))
+            .filter(|(_, distance)| *distance <= 3)  // Max 3 character difference
+            .collect();
+
+        scored.sort_by_key(|(_, distance)| *distance);
+        scored.into_iter()
+            .take(3)  // Top 3 suggestions
+            .map(|(field, _)| field.to_string())
+            .collect()
+    }
+
     pub fn apply_operation(&mut self, op: &Operation) -> Result<ModificationResult> {
         match op {
             Operation::AddStructField(op) => self.add_struct_field(op),
@@ -376,90 +392,204 @@ impl RustEditor {
     }
 
     pub(crate) fn remove_struct_field(&mut self, op: &RemoveStructFieldOp) -> Result<ModificationResult> {
-        // Find the struct and clone it to avoid borrowing issues
-        let item_struct = self.syntax_tree.items.iter()
-            .find_map(|item| {
-                if let Item::Struct(s) = item {
-                    if s.ident == op.struct_name {
-                        return Some(s.clone());
+        let mut modified_nodes = Vec::new();
+        let mut changed = false;
+
+        // Step 1: Remove from struct definition (unless literal_only is true)
+        if !op.literal_only {
+            // Find the struct and clone it to avoid borrowing issues
+            let item_struct = self.syntax_tree.items.iter()
+                .find_map(|item| {
+                    if let Item::Struct(s) = item {
+                        if s.ident == op.struct_name {
+                            return Some(s.clone());
+                        }
+                    }
+                    None
+                })
+                .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
+
+            // Check if the struct matches the where filter (if specified)
+            if let Some(ref where_filter) = op.where_filter {
+                if !self.matches_where_filter(&item_struct.attrs, where_filter)? {
+                    // Struct doesn't match filter - skip without error
+                    return Ok(ModificationResult {
+                        changed: false,
+                        modified_nodes: vec![],
+                    });
+                }
+            }
+
+            // Create backup of original struct before modification
+            let backup_node = BackupNode {
+                node_type: "ItemStruct".to_string(),
+                identifier: op.struct_name.clone(),
+                original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
+                location: self.span_to_location(item_struct.span()),
+            };
+
+            if let Fields::Named(ref fields) = item_struct.fields {
+                // Find the field to remove
+                let field_to_remove = fields.named.iter()
+                    .find(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(op.field_name.clone()));
+
+                // If field not found, provide helpful error with suggestions
+                if field_to_remove.is_none() {
+                    let field_names: Vec<String> = fields.named.iter()
+                        .filter_map(|f| f.ident.as_ref().map(|i| i.to_string()))
+                        .collect();
+
+                    let suggestions = Self::find_similar_fields(&op.field_name, &field_names);
+
+                    if suggestions.is_empty() {
+                        return Err(anyhow::anyhow!(
+                            "Field '{}' not found in struct '{}'\n\nAvailable fields: {}",
+                            op.field_name,
+                            op.struct_name,
+                            field_names.join(", ")
+                        ));
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "Field '{}' not found in struct '{}'\n\nDid you mean one of these?\n  - {}\n\nAll available fields: {}",
+                            op.field_name,
+                            op.struct_name,
+                            suggestions.join("\n  - "),
+                            field_names.join(", ")
+                        ));
                     }
                 }
-                None
-            })
-            .ok_or_else(|| anyhow::anyhow!("Struct '{}' not found", op.struct_name))?;
 
-        // Check if the struct matches the where filter (if specified)
-        if let Some(ref where_filter) = op.where_filter {
-            if !self.matches_where_filter(&item_struct.attrs, where_filter)? {
-                // Struct doesn't match filter - skip without error
-                return Ok(ModificationResult {
-                    changed: false,
-                    modified_nodes: vec![],
-                });
+                let field_to_remove = field_to_remove.unwrap();
+
+                // Get the span including the comma
+                let start = self.span_to_byte_offset(field_to_remove.span().start());
+                let mut end = self.span_to_byte_offset(field_to_remove.span().end());
+
+                // Find and include the comma and any trailing whitespace/newline
+                while end < self.content.len() {
+                    match self.content.as_bytes()[end] as char {
+                        ',' => {
+                            end += 1;
+                            // Also consume the newline after the comma if present
+                            if end < self.content.len() && self.content.as_bytes()[end] == b'\n' {
+                                end += 1;
+                            }
+                            break;
+                        }
+                        ' ' | '\t' => end += 1,
+                        '\n' => {
+                            end += 1;
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+
+                // Also need to remove leading whitespace/indentation on the same line
+                let mut line_start = start;
+                while line_start > 0 && self.content.as_bytes()[line_start - 1] != b'\n' {
+                    line_start -= 1;
+                }
+
+                // Check if there's only whitespace between line_start and start
+                let before_field = &self.content[line_start..start];
+                if before_field.trim().is_empty() {
+                    // Remove the whole line
+                    self.content.replace_range(line_start..end, "");
+                } else {
+                    // Just remove the field and comma
+                    self.content.replace_range(start..end, "");
+                }
+
+                modified_nodes.push(backup_node);
+                changed = true;
+
+                // Re-parse the syntax tree after surgical edit
+                self.syntax_tree = syn::parse_str(&self.content)?;
+            } else {
+                anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
             }
         }
 
-        // Create backup of original struct before modification
-        let backup_node = BackupNode {
-            node_type: "ItemStruct".to_string(),
-            identifier: op.struct_name.clone(),
-            original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
-            location: self.span_to_location(item_struct.span()),
+        // Step 2: Remove from all struct literal expressions
+        // Collect backups of struct literals before modification
+        let literal_backups = self.collect_struct_literal_backups(&op.struct_name, None);
+
+        // Use a visitor to remove the field from all struct literals
+        use syn::visit_mut::VisitMut;
+
+        struct FieldRemover {
+            struct_name: String,
+            field_name: String,
+            modified: bool,
+        }
+
+        impl VisitMut for FieldRemover {
+            fn visit_expr_mut(&mut self, node: &mut Expr) {
+                if let Expr::Struct(expr_struct) = node {
+                    // Check if this struct literal matches our target struct
+                    let matches = if self.struct_name.contains("::") {
+                        // Handle enum variants or module paths
+                        if self.struct_name.starts_with("*::") {
+                            let target_name = &self.struct_name[3..];
+                            expr_struct.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == target_name)
+                                .unwrap_or(false)
+                        } else {
+                            let path_str = expr_struct.path.segments.iter()
+                                .map(|seg| seg.ident.to_string())
+                                .collect::<Vec<_>>()
+                                .join("::");
+                            path_str == self.struct_name
+                        }
+                    } else {
+                        // Simple struct name
+                        expr_struct.path.segments.len() == 1
+                            && expr_struct.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == self.struct_name)
+                                .unwrap_or(false)
+                    };
+
+                    if matches {
+                        // Remove the field from this struct literal
+                        let mut new_fields = syn::punctuated::Punctuated::new();
+                        for field_value in expr_struct.fields.iter() {
+                            if let syn::Member::Named(ident) = &field_value.member {
+                                if ident.to_string() == self.field_name {
+                                    self.modified = true;
+                                    continue;
+                                }
+                            }
+                            new_fields.push(field_value.clone());
+                        }
+                        expr_struct.fields = new_fields;
+                    }
+                }
+
+                // Continue visiting nested expressions
+                syn::visit_mut::visit_expr_mut(self, node);
+            }
+        }
+
+        let mut remover = FieldRemover {
+            struct_name: op.struct_name.clone(),
+            field_name: op.field_name.clone(),
+            modified: false,
         };
 
-        if let Fields::Named(ref fields) = item_struct.fields {
-            // Find the field to remove
-            let field_to_remove = fields.named.iter()
-                .find(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(op.field_name.clone()))
-                .ok_or_else(|| anyhow::anyhow!("Field '{}' not found in struct '{}'", op.field_name, op.struct_name))?;
+        remover.visit_file_mut(&mut self.syntax_tree);
 
-            // Get the span including the comma
-            let start = self.span_to_byte_offset(field_to_remove.span().start());
-            let mut end = self.span_to_byte_offset(field_to_remove.span().end());
-
-            // Find and include the comma and any trailing whitespace/newline
-            while end < self.content.len() {
-                match self.content.as_bytes()[end] as char {
-                    ',' => {
-                        end += 1;
-                        // Also consume the newline after the comma if present
-                        if end < self.content.len() && self.content.as_bytes()[end] == b'\n' {
-                            end += 1;
-                        }
-                        break;
-                    }
-                    ' ' | '\t' => end += 1,
-                    '\n' => {
-                        end += 1;
-                        break;
-                    }
-                    _ => break,
-                }
-            }
-
-            // Also need to remove leading whitespace/indentation on the same line
-            let mut line_start = start;
-            while line_start > 0 && self.content.as_bytes()[line_start - 1] != b'\n' {
-                line_start -= 1;
-            }
-
-            // Check if there's only whitespace between line_start and start
-            let before_field = &self.content[line_start..start];
-            if before_field.trim().is_empty() {
-                // Remove the whole line
-                self.content.replace_range(line_start..end, "");
-            } else {
-                // Just remove the field and comma
-                self.content.replace_range(start..end, "");
-            }
-
-            return Ok(ModificationResult {
-                changed: true,
-                modified_nodes: vec![backup_node],
-            });
+        if remover.modified {
+            // Reformat using prettyplease to apply the changes
+            self.content = prettyplease::unparse(&self.syntax_tree);
+            modified_nodes.extend(literal_backups);
+            changed = true;
         }
 
-        anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
+        Ok(ModificationResult {
+            changed,
+            modified_nodes,
+        })
     }
 
     pub(crate) fn add_struct_literal_field(&mut self, op: &AddStructLiteralFieldOp) -> Result<ModificationResult> {
@@ -1701,6 +1831,113 @@ impl RustEditor {
     
     pub fn to_string(&self) -> String {
         self.content.clone()
+    }
+
+    /// Find all locations where a field appears in the codebase
+    pub(crate) fn find_field_locations(&self, field_name: &str) -> Result<Vec<crate::operations::FieldLocation>> {
+        use syn::visit::Visit;
+        use crate::operations::{FieldLocation, FieldContext};
+
+        let mut locations = Vec::new();
+
+        // Search struct definitions
+        for item in &self.syntax_tree.items {
+            if let Item::Struct(s) = item {
+                if let Fields::Named(ref fields) = s.fields {
+                    for field in &fields.named {
+                        if let Some(ident) = &field.ident {
+                            if ident == field_name {
+                                let field_type = quote::quote!(#field).to_string()
+                                    .split(':')
+                                    .nth(1)
+                                    .map(|s| s.trim().to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                locations.push(FieldLocation {
+                                    file_path: String::new(),
+                                    line: s.span().start().line,
+                                    context: FieldContext::StructDefinition {
+                                        struct_name: s.ident.to_string(),
+                                        field_type,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Search enum variants
+            if let Item::Enum(e) = item {
+                for variant in &e.variants {
+                    if let Fields::Named(ref fields) = variant.fields {
+                        for field in &fields.named {
+                            if let Some(ident) = &field.ident {
+                                if ident == field_name {
+                                    let field_type = quote::quote!(#field).to_string()
+                                        .split(':')
+                                        .nth(1)
+                                        .map(|s| s.trim().to_string())
+                                        .unwrap_or_else(|| "unknown".to_string());
+                                    locations.push(FieldLocation {
+                                        file_path: String::new(),
+                                        line: variant.span().start().line,
+                                        context: FieldContext::EnumVariantDefinition {
+                                            enum_name: e.ident.to_string(),
+                                            variant_name: variant.ident.to_string(),
+                                            field_type,
+                                        },
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Search struct literals
+        struct LiteralVisitor<'a> {
+            field_name: &'a str,
+            locations: Vec<FieldLocation>,
+        }
+
+        impl<'ast, 'a> Visit<'ast> for LiteralVisitor<'a> {
+            fn visit_expr(&mut self, node: &'ast Expr) {
+                if let Expr::Struct(expr_struct) = node {
+                    // Check if this struct literal has the field
+                    for field_value in &expr_struct.fields {
+                        if let syn::Member::Named(ident) = &field_value.member {
+                            if ident == self.field_name {
+                                let struct_name = expr_struct.path.segments.iter()
+                                    .map(|seg| seg.ident.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("::");
+
+                                self.locations.push(FieldLocation {
+                                    file_path: String::new(),
+                                    line: expr_struct.span().start().line,
+                                    context: FieldContext::StructLiteral {
+                                        struct_name,
+                                    },
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+                syn::visit::visit_expr(self, node);
+            }
+        }
+
+        let mut visitor = LiteralVisitor {
+            field_name,
+            locations: Vec::new(),
+        };
+
+        visitor.visit_file(&self.syntax_tree);
+        locations.extend(visitor.locations);
+
+        Ok(locations)
     }
 
     /// Inspect and list AST nodes (e.g., struct literals) in the file

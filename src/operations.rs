@@ -88,6 +88,8 @@ pub struct RemoveStructFieldOp {
     pub struct_name: String,
     pub field_name: String, // Name of the field to remove
     #[serde(default)]
+    pub literal_only: bool, // If true, only remove from struct literals, not the definition
+    #[serde(default)]
     pub where_filter: Option<String>, // Optional: filter targets (e.g., "derives_trait:Clone")
 }
 
@@ -310,4 +312,30 @@ impl std::str::FromStr for DocCommentStyle {
             _ => Err(format!("Invalid doc comment style: {}. Valid values are 'line' or 'block'", s)),
         }
     }
+}
+
+/// Location of a field in the codebase
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldLocation {
+    pub file_path: String,
+    pub line: usize,
+    pub context: FieldContext,
+}
+
+/// Context in which a field appears
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum FieldContext {
+    StructDefinition {
+        struct_name: String,
+        field_type: String,
+    },
+    EnumVariantDefinition {
+        enum_name: String,
+        variant_name: String,
+        field_type: String,
+    },
+    StructLiteral {
+        struct_name: String,
+    },
 }
