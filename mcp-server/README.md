@@ -47,6 +47,21 @@ This MCP server makes rs-hack's capabilities available through a standardized pr
 
 2. **Python 3.10+** and **uv** (recommended) or pip
 
+## Testing
+
+Before using the server, verify it works:
+
+```bash
+# Quick test (30 seconds)
+cd mcp-server
+pip install mcp
+python3 test_basic.py
+```
+
+Expected output: `✓ All tests passed!`
+
+For detailed testing instructions, see [TESTING.md](TESTING.md)
+
 ## Installation
 
 ### Using uvx (Recommended - No Local Installation)
