@@ -18,84 +18,57 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: vec![
-                // Inspection tools
+                // ============================================================
+                // INSPECTION TOOLS (2)
+                // ============================================================
                 Tool {
-                    name: "inspect_struct_literals",
-                    description: "Inspect struct literal initializations in Rust files",
+                    name: "inspect",
+                    description: "Generic inspection tool - find and list any AST nodes (struct-literal, match-arm, enum-usage, function-call, method-call, macro-call, identifier, type-ref)",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
-                            "paths": {
+                            "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
+                            "node_type": {
                                 "type": "string",
-                                "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"
+                                "enum": ["struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref"],
+                                "description": "Type of AST node to inspect"
                             },
-                            "name": {
-                                "type": "string",
-                                "description": "Optional struct name to filter (supports patterns like \"*::Rectangle\")"
-                            },
-                            "format": {
-                                "type": "string",
-                                "enum": ["snippets", "locations", "json"],
-                                "default": "snippets",
-                                "description": "Output format"
-                            }
+                            "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\")"},
+                            "content_filter": {"type": "string", "description": "Filter by content substring"},
+                            "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"}
                         },
-                        "required": ["paths"]
+                        "required": ["paths", "node_type"]
                     }),
                 },
                 Tool {
-                    name: "inspect_match_arms",
-                    description: "Inspect match expression arms in Rust files",
+                    name: "find",
+                    description: "Find locations of AST node definitions (struct, enum, function) - useful for debugging",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
-                            "paths": {"type": "string", "description": "File path or glob pattern"},
-                            "name": {"type": "string", "description": "Optional pattern to match (e.g., \"Status::Active\")"},
-                            "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"}
+                            "paths": {"type": "string"},
+                            "node_type": {"type": "string", "enum": ["struct", "enum", "function"], "description": "Type of definition to find"},
+                            "name": {"type": "string", "description": "Name of the item to find"}
                         },
-                        "required": ["paths"]
+                        "required": ["paths", "node_type", "name"]
                     }),
                 },
-                Tool {
-                    name: "inspect_enum_usage",
-                    description: "Find all usages of an enum variant in Rust files",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "paths": {"type": "string", "description": "File path or glob pattern"},
-                            "name": {"type": "string", "description": "Enum variant to find (e.g., \"Operator::PropagateError\")"},
-                            "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"}
-                        },
-                        "required": ["paths", "name"]
-                    }),
-                },
-                Tool {
-                    name: "inspect_macro_calls",
-                    description: "Find macro invocations in Rust files",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "paths": {"type": "string", "description": "File path or glob pattern"},
-                            "name": {"type": "string", "description": "Macro name (e.g., \"eprintln\", \"todo\")"},
-                            "content_filter": {"type": "string", "description": "Optional content to filter by"},
-                            "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"}
-                        },
-                        "required": ["paths", "name"]
-                    }),
-                },
-                // Struct operations
+
+                // ============================================================
+                // STRUCT OPERATIONS (3)
+                // ============================================================
                 Tool {
                     name: "add_struct_field",
-                    description: "Add a field to Rust struct definitions and/or literals",
+                    description: "Add a field to struct definitions and/or literals",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
-                            "paths": {"type": "string", "description": "File path or glob pattern"},
-                            "struct_name": {"type": "string", "description": "Name of the struct"},
+                            "paths": {"type": "string"},
+                            "struct_name": {"type": "string"},
                             "field": {"type": "string", "description": "Field definition (e.g., \"email: String\")"},
-                            "position": {"type": "string", "description": "Where to add (\"after:field_name\", \"before:field_name\", or \"last\")"},
-                            "literal_default": {"type": "string", "description": "If provided, also update struct literals with this default value"},
-                            "apply": {"type": "boolean", "default": false, "description": "If true, make actual changes. If false, show preview only."}
+                            "position": {"type": "string", "description": "Position: \"first\", \"last\", \"after:field_name\""},
+                            "literal_default": {"type": "string", "description": "Default value for struct literals"},
+                            "apply": {"type": "boolean", "default": false}
                         },
                         "required": ["paths", "struct_name", "field"]
                     }),
@@ -108,16 +81,33 @@ impl ToolRegistry {
                         "properties": {
                             "paths": {"type": "string"},
                             "struct_name": {"type": "string"},
-                            "field": {"type": "string", "description": "New field definition"},
+                            "field": {"type": "string"},
                             "apply": {"type": "boolean", "default": false}
                         },
                         "required": ["paths", "struct_name", "field"]
                     }),
                 },
-                // Enum operations
+                Tool {
+                    name: "remove_struct_field",
+                    description: "Remove a field from a struct",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "struct_name": {"type": "string"},
+                            "field_name": {"type": "string", "description": "Name of field to remove"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "struct_name", "field_name"]
+                    }),
+                },
+
+                // ============================================================
+                // ENUM OPERATIONS (4)
+                // ============================================================
                 Tool {
                     name: "add_enum_variant",
-                    description: "Add a variant to a Rust enum",
+                    description: "Add a variant to an enum",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -130,12 +120,40 @@ impl ToolRegistry {
                     }),
                 },
                 Tool {
+                    name: "update_enum_variant",
+                    description: "Update an existing enum variant",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "enum_name": {"type": "string"},
+                            "variant": {"type": "string", "description": "New variant definition"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "enum_name", "variant"]
+                    }),
+                },
+                Tool {
+                    name: "remove_enum_variant",
+                    description: "Remove a variant from an enum",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "enum_name": {"type": "string"},
+                            "variant_name": {"type": "string", "description": "Name of variant to remove"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "enum_name", "variant_name"]
+                    }),
+                },
+                Tool {
                     name: "rename_enum_variant",
                     description: "Rename an enum variant throughout the entire codebase",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
-                            "paths": {"type": "string", "description": "File path or glob pattern (usually \"src/**/*.rs\")"},
+                            "paths": {"type": "string"},
                             "enum_name": {"type": "string"},
                             "old_variant": {"type": "string"},
                             "new_variant": {"type": "string"},
@@ -144,28 +162,63 @@ impl ToolRegistry {
                         "required": ["paths", "enum_name", "old_variant", "new_variant"]
                     }),
                 },
-                // Match operations
+
+                // ============================================================
+                // MATCH OPERATIONS (3)
+                // ============================================================
                 Tool {
                     name: "add_match_arm",
-                    description: "Add a match arm to match expressions",
+                    description: "Add a match arm to match expressions (supports auto-detect for missing variants)",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string"},
                             "pattern": {"type": "string"},
                             "body": {"type": "string"},
-                            "function": {"type": "string"},
-                            "enum_name": {"type": "string"},
-                            "auto_detect": {"type": "boolean", "default": false, "description": "If true, automatically add all missing enum variants"},
+                            "function": {"type": "string", "description": "Function containing the match"},
+                            "enum_name": {"type": "string", "description": "Enum name for auto-detect"},
+                            "auto_detect": {"type": "boolean", "default": false},
                             "apply": {"type": "boolean", "default": false}
                         },
                         "required": ["paths", "pattern", "body"]
                     }),
                 },
-                // Transform
+                Tool {
+                    name: "update_match_arm",
+                    description: "Update an existing match arm",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "pattern": {"type": "string"},
+                            "body": {"type": "string", "description": "New match arm body"},
+                            "function": {"type": "string"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "pattern", "body"]
+                    }),
+                },
+                Tool {
+                    name: "remove_match_arm",
+                    description: "Remove a match arm from match expressions",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "pattern": {"type": "string", "description": "Pattern to remove"},
+                            "function": {"type": "string"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "pattern"]
+                    }),
+                },
+
+                // ============================================================
+                // TRANSFORM (1)
+                // ============================================================
                 Tool {
                     name: "transform",
-                    description: "Generic transformation tool - find and modify any AST nodes",
+                    description: "Generic transformation tool - comment, remove, or replace any AST nodes",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -174,13 +227,16 @@ impl ToolRegistry {
                             "action": {"type": "string", "enum": ["comment", "remove", "replace"]},
                             "name": {"type": "string"},
                             "content_filter": {"type": "string"},
-                            "with": {"type": "string", "description": "Replacement code (required if action is replace)"},
+                            "with": {"type": "string", "description": "Replacement code (required if action=replace)"},
                             "apply": {"type": "boolean", "default": false}
                         },
                         "required": ["paths", "node_type", "action"]
                     }),
                 },
-                // Other operations
+
+                // ============================================================
+                // CODE ORGANIZATION (3)
+                // ============================================================
                 Tool {
                     name: "add_derive",
                     description: "Add derive macros to structs or enums",
@@ -189,7 +245,7 @@ impl ToolRegistry {
                         "properties": {
                             "paths": {"type": "string"},
                             "target_type": {"type": "string", "enum": ["struct", "enum"]},
-                            "name": {"type": "string"},
+                            "name": {"type": "string", "description": "Name of the struct or enum"},
                             "derives": {"type": "string", "description": "Comma-separated derives (e.g., \"Clone,Debug,Serialize\")"},
                             "where": {"type": "string", "description": "Filter by traits (e.g., \"derives_trait:Clone\")"},
                             "apply": {"type": "boolean", "default": false}
@@ -197,27 +253,148 @@ impl ToolRegistry {
                         "required": ["paths", "target_type", "name", "derives"]
                     }),
                 },
-                // History and revert
                 Tool {
-                    name: "show_history",
-                    description: "Show recent rs-hack operations",
+                    name: "add_impl_method",
+                    description: "Add a method to an impl block",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
-                            "limit": {"type": "integer", "default": 10, "description": "Number of recent operations to show"}
+                            "paths": {"type": "string"},
+                            "target": {"type": "string", "description": "Target struct/enum name"},
+                            "method": {"type": "string", "description": "Method definition (e.g., \"pub fn get_id(&self) -> u64 { self.id }\")"},
+                            "position": {"type": "string", "description": "Position: \"first\", \"last\", \"after:method_name\""},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "target", "method"]
+                    }),
+                },
+                Tool {
+                    name: "add_use",
+                    description: "Add a use statement to a file",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "use_path": {"type": "string", "description": "Use path (e.g., \"serde::Serialize\")"},
+                            "position": {"type": "string", "description": "Position hint (e.g., \"after:collections\")"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "use_path"]
+                    }),
+                },
+
+                // ============================================================
+                // DOCUMENTATION (3)
+                // ============================================================
+                Tool {
+                    name: "add_doc_comment",
+                    description: "Add documentation comment to an item (struct, enum, function)",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "target_type": {"type": "string", "enum": ["struct", "enum", "function"]},
+                            "name": {"type": "string", "description": "Name of the item"},
+                            "doc_comment": {"type": "string", "description": "Documentation text"},
+                            "style": {"type": "string", "enum": ["line", "block"], "default": "line", "description": "Comment style: line (///) or block (/** */)"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "target_type", "name", "doc_comment"]
+                    }),
+                },
+                Tool {
+                    name: "update_doc_comment",
+                    description: "Update existing documentation comment",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "target_type": {"type": "string", "enum": ["struct", "enum", "function"]},
+                            "name": {"type": "string"},
+                            "doc_comment": {"type": "string"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "target_type", "name", "doc_comment"]
+                    }),
+                },
+                Tool {
+                    name: "remove_doc_comment",
+                    description: "Remove documentation comment from an item",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "target_type": {"type": "string", "enum": ["struct", "enum", "function"]},
+                            "name": {"type": "string"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "target_type", "name"]
+                    }),
+                },
+
+                // ============================================================
+                // REFACTORING (1)
+                // ============================================================
+                Tool {
+                    name: "rename_function",
+                    description: "Rename a function across the entire codebase",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string"},
+                            "old_name": {"type": "string", "description": "Current function name"},
+                            "new_name": {"type": "string", "description": "New function name"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["paths", "old_name", "new_name"]
+                    }),
+                },
+
+                // ============================================================
+                // BATCH & UTILITY (4)
+                // ============================================================
+                Tool {
+                    name: "batch",
+                    description: "Run multiple operations from JSON or YAML specification",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "spec": {"type": "string", "description": "Path to JSON/YAML specification file"},
+                            "apply": {"type": "boolean", "default": false}
+                        },
+                        "required": ["spec"]
+                    }),
+                },
+                Tool {
+                    name: "history",
+                    description: "Show history of rs-hack operations",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 10}
                         }
                     }),
                 },
                 Tool {
-                    name: "revert_operation",
-                    description: "Revert a previous rs-hack operation",
+                    name: "revert",
+                    description: "Revert a previous rs-hack operation by run ID",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
-                            "run_id": {"type": "string", "description": "The run ID from history (7-character hash)"},
-                            "force": {"type": "boolean", "default": false, "description": "If true, revert even if files have changed since"}
+                            "run_id": {"type": "string", "description": "Run ID from history (7-character hash)"},
+                            "force": {"type": "boolean", "default": false}
                         },
                         "required": ["run_id"]
+                    }),
+                },
+                Tool {
+                    name: "clean",
+                    description: "Clean old state data",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "keep_days": {"type": "integer", "default": 30, "description": "Keep state newer than this many days"}
+                        }
                     }),
                 },
             ],
@@ -264,45 +441,31 @@ impl ToolRegistry {
 
         // Map tool names to actual rs-hack commands
         let command = match tool_name {
-            // Inspection tools all use "inspect" command
-            "inspect_struct_literals" => {
-                args.push("--node-type".to_string());
-                args.push("struct-literal".to_string());
+            // Inspection uses "inspect" command
+            "inspect" => {
                 self.add_inspect_args(&arguments, &mut args);
                 "inspect"
             }
-            "inspect_match_arms" => {
-                args.push("--node-type".to_string());
-                args.push("match-arm".to_string());
-                self.add_inspect_args(&arguments, &mut args);
-                "inspect"
-            }
-            "inspect_enum_usage" => {
-                args.push("--node-type".to_string());
-                args.push("enum-usage".to_string());
-                self.add_inspect_args(&arguments, &mut args);
-                "inspect"
-            }
-            "inspect_macro_calls" => {
-                args.push("--node-type".to_string());
-                args.push("macro-call".to_string());
-                self.add_inspect_args(&arguments, &mut args);
-                "inspect"
+            // Find uses "find" command
+            "find" => {
+                self.add_find_args(&arguments, &mut args);
+                "find"
             }
             // Transform command
             "transform" => {
                 self.add_transform_args(&arguments, &mut args)?;
                 "transform"
             }
-            // History/revert
-            "show_history" => {
+            // History renamed to "history"
+            "history" => {
                 if let Some(limit) = arguments.get("limit").and_then(|v| v.as_i64()) {
                     args.push("--limit".to_string());
                     args.push(limit.to_string());
                 }
                 "history"
             }
-            "revert_operation" => {
+            // Revert
+            "revert" => {
                 if let Some(run_id) = arguments.get("run_id").and_then(|v| v.as_str()) {
                     args.push(run_id.to_string());
                 }
@@ -310,6 +473,25 @@ impl ToolRegistry {
                     args.push("--force".to_string());
                 }
                 "revert"
+            }
+            // Clean
+            "clean" => {
+                if let Some(days) = arguments.get("keep_days").and_then(|v| v.as_i64()) {
+                    args.push("--keep-days".to_string());
+                    args.push(days.to_string());
+                }
+                "clean"
+            }
+            // Batch
+            "batch" => {
+                if let Some(spec) = arguments.get("spec").and_then(|v| v.as_str()) {
+                    args.push("--spec".to_string());
+                    args.push(spec.to_string());
+                }
+                if self.get_bool(arguments, "apply") {
+                    args.push("--apply".to_string());
+                }
+                "batch"
             }
             // All other commands map 1:1 (with underscores -> dashes)
             _ => {
@@ -328,6 +510,12 @@ impl ToolRegistry {
             args.push(paths.to_string());
         }
 
+        // Add node-type
+        if let Some(node_type) = arguments.get("node_type").and_then(|v| v.as_str()) {
+            args.push("--node-type".to_string());
+            args.push(node_type.to_string());
+        }
+
         // Add name filter
         if let Some(name) = arguments.get("name").and_then(|v| v.as_str()) {
             args.push("--name".to_string());
@@ -344,6 +532,21 @@ impl ToolRegistry {
         if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
             args.push("--format".to_string());
             args.push(format.to_string());
+        }
+    }
+
+    fn add_find_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        if let Some(paths) = arguments.get("paths").and_then(|v| v.as_str()) {
+            args.push("--paths".to_string());
+            args.push(paths.to_string());
+        }
+        if let Some(node_type) = arguments.get("node_type").and_then(|v| v.as_str()) {
+            args.push("--node-type".to_string());
+            args.push(node_type.to_string());
+        }
+        if let Some(name) = arguments.get("name").and_then(|v| v.as_str()) {
+            args.push("--name".to_string());
+            args.push(name.to_string());
         }
     }
 
@@ -400,7 +603,6 @@ impl ToolRegistry {
 
                 match value {
                     Value::Bool(true) => {
-                        // Only add flag if it's not "apply" - we handle apply separately
                         if key == "apply" {
                             args.push("--apply".to_string());
                         }
