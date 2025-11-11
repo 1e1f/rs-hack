@@ -97,7 +97,7 @@ def inspect_struct_literals(
         - Find Shadow structs: inspect_struct_literals("src/**/*.rs", "Shadow")
         - Enum variants: inspect_struct_literals("src/**/*.rs", "View::Rectangle")
     """
-    args = ["inspect", "--path", path, "--node-type", "struct-literal", "--format", format]
+    args = ["inspect", "--paths", path, "--node-type", "struct-literal", "--format", format]
     if name:
         args.extend(["--name", name])
 
@@ -123,7 +123,7 @@ def inspect_match_arms(
     Returns:
         List of match arms with their patterns and code
     """
-    args = ["inspect", "--path", path, "--node-type", "match-arm", "--format", format]
+    args = ["inspect", "--paths", path, "--node-type", "match-arm", "--format", format]
     if name:
         args.extend(["--name", name])
 
@@ -152,7 +152,7 @@ def inspect_enum_usage(
     Example:
         Find all uses of Status::Active in the codebase
     """
-    args = ["inspect", "--path", path, "--node-type", "enum-usage",
+    args = ["inspect", "--paths", path, "--node-type", "enum-usage",
             "--name", name, "--format", format]
 
     result = run_rs_hack(args)
@@ -182,7 +182,7 @@ def inspect_macro_calls(
     Example:
         Find all debug prints: inspect_macro_calls("src/**/*.rs", "eprintln", "[DEBUG]")
     """
-    args = ["inspect", "--path", path, "--node-type", "macro-call",
+    args = ["inspect", "--paths", path, "--node-type", "macro-call",
             "--name", name, "--format", format]
     if content_filter:
         args.extend(["--content-filter", content_filter])
@@ -225,7 +225,7 @@ def add_struct_field(
         - Add to definition AND literals: add_struct_field("src/**/*.rs", "Config",
                                           "timeout: u64", literal_default="30")
     """
-    args = ["add-struct-field", "--path", path, "--struct-name", struct_name, "--field", field]
+    args = ["add-struct-field", "--paths", path, "--struct-name", struct_name, "--field", field]
 
     if position:
         args.extend(["--position", position])
@@ -261,7 +261,7 @@ def update_struct_field(
     Example:
         Make field public: update_struct_field("src/user.rs", "User", "pub age: u32", True)
     """
-    args = ["update-struct-field", "--path", path, "--struct-name", struct_name, "--field", field]
+    args = ["update-struct-field", "--paths", path, "--struct-name", struct_name, "--field", field]
     if apply:
         args.append("--apply")
 
@@ -297,7 +297,7 @@ def add_enum_variant(
         - Simple: add_enum_variant("src/types.rs", "Status", "Archived", True)
         - With data: add_enum_variant("src/types.rs", "Message", "Error { code: i32 }", True)
     """
-    args = ["add-enum-variant", "--path", path, "--enum-name", enum_name, "--variant", variant]
+    args = ["add-enum-variant", "--paths", path, "--enum-name", enum_name, "--variant", variant]
     if apply:
         args.append("--apply")
 
@@ -382,7 +382,7 @@ def add_match_arm(
         - Auto-detect missing: add_match_arm("src/handler.rs", "", "todo!()",
                                             "handle_status", "Status", auto_detect=True, apply=True)
     """
-    args = ["add-match-arm", "--path", path]
+    args = ["add-match-arm", "--paths", path]
 
     if auto_detect:
         args.extend(["--auto-detect", "--enum-name", enum_name or "",
@@ -445,7 +445,7 @@ def transform(
         - Replace function: transform("src/**/*.rs", "function-call", "replace",
                                      "old_fn", replacement="new_fn", apply=True)
     """
-    args = ["transform", "--path", path, "--node-type", node_type, "--action", action]
+    args = ["transform", "--paths", path, "--node-type", node_type, "--action", action]
 
     if name:
         args.extend(["--name", name])
@@ -494,7 +494,7 @@ def add_derive(
         - Conditional: add_derive("src/**/*.rs", "struct", "Config", "Serialize",
                                  "derives_trait:Clone", apply=True)
     """
-    args = ["add-derive", "--path", path, "--target-type", target_type,
+    args = ["add-derive", "--paths", path, "--target-type", target_type,
             "--name", name, "--derives", derives]
 
     if where_filter:
