@@ -216,6 +216,8 @@ pub struct InspectResult {
     pub identifier: String,      // "Shadow", "Config", etc.
     pub location: NodeLocation,
     pub snippet: String,         // Formatted code snippet
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preceding_comment: Option<String>,  // Doc comments + regular comments before the node
 }
 
 /// Generic transformation operation

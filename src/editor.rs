@@ -1704,7 +1704,7 @@ impl RustEditor {
     }
 
     /// Inspect and list AST nodes (e.g., struct literals) in the file
-    pub(crate) fn inspect(&self, node_type: &str, name_filter: Option<&str>) -> Result<Vec<crate::operations::InspectResult>> {
+    pub(crate) fn inspect(&self, node_type: &str, name_filter: Option<&str>, include_comments: bool) -> Result<Vec<crate::operations::InspectResult>> {
         use syn::visit::Visit;
         use crate::operations::InspectResult;
 
@@ -1717,6 +1717,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for StructLiteralVisitor<'a> {
@@ -1737,12 +1738,27 @@ impl RustEditor {
                                 let snippet = self.editor.format_expr_struct(node);
                                 let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                                // Extract preceding comment if requested
+                                let preceding_comment = if self.include_comments {
+                                    extract_preceding_comment(&self.editor.content, location.line)
+                                } else {
+                                    None
+                                };
+
                                 self.results.push(InspectResult {
                                     file_path: String::new(),
                                     node_type: "ExprStruct".to_string(),
                                     identifier: struct_name,
                                     location,
                                     snippet,
+                                    preceding_comment,
                                 });
 
                                 syn::visit::visit_expr_struct(self, node);
@@ -1788,12 +1804,27 @@ impl RustEditor {
                         let snippet = self.editor.format_expr_struct(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
                             node_type: "ExprStruct".to_string(),
                             identifier: struct_name,
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting nested expressions
@@ -1805,6 +1836,7 @@ impl RustEditor {
                     results: &mut results,
                     name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -1818,6 +1850,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     pattern_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for MatchArmVisitor<'a> {
@@ -1843,12 +1876,27 @@ impl RustEditor {
                             let snippet = self.editor.format_match_arm(arm);
                             let location = self.editor.span_to_location(arm.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                            // Extract preceding comment if requested
+                            let preceding_comment = if self.include_comments {
+                                extract_preceding_comment(&self.editor.content, location.line)
+                            } else {
+                                None
+                            };
+
                             self.results.push(InspectResult {
                                 file_path: String::new(), // Will be filled in by caller
                                 node_type: "MatchArm".to_string(),
                                 identifier: pattern_str.replace(" ", ""),
                                 location,
                                 snippet,
+                                preceding_comment,
                             });
                         }
 
@@ -1861,6 +1909,7 @@ impl RustEditor {
                     results: &mut results,
                     pattern_filter: name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -1874,6 +1923,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     path_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for EnumUsageVisitor<'a> {
@@ -1898,12 +1948,27 @@ impl RustEditor {
                         let snippet = self.editor.format_expr_path(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
                             node_type: "ExprPath".to_string(),
                             identifier: path_str.replace(" ", ""),
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting nested expressions
@@ -1915,6 +1980,7 @@ impl RustEditor {
                     results: &mut results,
                     path_filter: name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -1928,6 +1994,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for FunctionCallVisitor<'a> {
@@ -1955,12 +2022,27 @@ impl RustEditor {
                         let snippet = self.editor.format_expr_call(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
                             node_type: "ExprCall".to_string(),
                             identifier: func_name,
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting nested expressions
@@ -1972,6 +2054,7 @@ impl RustEditor {
                     results: &mut results,
                     name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -1985,6 +2068,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for MethodCallVisitor<'a> {
@@ -2004,12 +2088,20 @@ impl RustEditor {
                         let snippet = self.editor.format_expr_method_call(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
                             node_type: "ExprMethodCall".to_string(),
                             identifier: method_name,
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting nested expressions
@@ -2021,6 +2113,7 @@ impl RustEditor {
                     results: &mut results,
                     name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -2034,6 +2127,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for IdentifierVisitor<'a> {
@@ -2053,12 +2147,20 @@ impl RustEditor {
                         let snippet = self.editor.format_ident(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
                             node_type: "Ident".to_string(),
                             identifier: ident_name,
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting
@@ -2070,6 +2172,7 @@ impl RustEditor {
                     results: &mut results,
                     name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -2083,6 +2186,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for TypeRefVisitor<'a> {
@@ -2104,6 +2208,13 @@ impl RustEditor {
                         let snippet = self.editor.format_type_path(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         // Get full path for identifier
                         let path = &node.path;
                         let path_str = quote::quote!(#path).to_string();
@@ -2114,6 +2225,7 @@ impl RustEditor {
                             identifier: path_str.replace(" ", ""),
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting
@@ -2125,6 +2237,7 @@ impl RustEditor {
                     results: &mut results,
                     name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
@@ -2138,6 +2251,7 @@ impl RustEditor {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
                     editor: &'a RustEditor,
+                    include_comments: bool,
                 }
 
                 impl<'ast, 'a> Visit<'ast> for MacroCallVisitor<'a> {
@@ -2159,12 +2273,20 @@ impl RustEditor {
                         let snippet = self.editor.format_expr_macro(node);
                         let location = self.editor.span_to_location(node.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
                             node_type: "ExprMacro".to_string(),
                             identifier: macro_name,
                             location,
                             snippet,
+                            preceding_comment,
                         });
 
                         // Continue visiting nested expressions
@@ -2190,12 +2312,20 @@ impl RustEditor {
                             let snippet = self.editor.format_stmt_macro(macro_stmt);
                             let location = self.editor.span_to_location(macro_stmt.span());
 
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
                             self.results.push(InspectResult {
                                 file_path: String::new(), // Will be filled in by caller
                                 node_type: "StmtMacro".to_string(),
                                 identifier: macro_name,
                                 location,
                                 snippet,
+                                preceding_comment,
                             });
                         }
 
@@ -2208,9 +2338,541 @@ impl RustEditor {
                     results: &mut results,
                     name_filter,
                     editor: self,
+                    include_comments,
                 };
 
                 // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "struct" => {
+                // Find all struct definitions
+                struct StructDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for StructDefVisitor<'a> {
+                    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+                        let struct_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if struct_name != filter {
+                                syn::visit::visit_item_struct(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the struct definition
+                        let snippet = self.editor.format_item_struct(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemStruct".to_string(),
+                            identifier: struct_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_struct(self, node);
+                    }
+                }
+
+                let mut visitor = StructDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "enum" => {
+                // Find all enum definitions
+                struct EnumDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for EnumDefVisitor<'a> {
+                    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+                        let enum_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if enum_name != filter {
+                                syn::visit::visit_item_enum(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the enum definition
+                        let snippet = self.editor.format_item_enum(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemEnum".to_string(),
+                            identifier: enum_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_enum(self, node);
+                    }
+                }
+
+                let mut visitor = EnumDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "function" => {
+                // Find all function definitions
+                struct FunctionDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for FunctionDefVisitor<'a> {
+                    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+                        let fn_name = node.sig.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if fn_name != filter {
+                                syn::visit::visit_item_fn(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the function definition
+                        let snippet = self.editor.format_item_fn(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemFn".to_string(),
+                            identifier: fn_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_fn(self, node);
+                    }
+                }
+
+                let mut visitor = FunctionDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "impl-method" => {
+                // Find methods within impl blocks
+                struct ImplMethodVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                    current_impl_type: Option<String>,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for ImplMethodVisitor<'a> {
+                    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+                        // Track which type this impl is for
+                        let impl_type = if let syn::Type::Path(type_path) = &*node.self_ty {
+                            type_path.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                        } else {
+                            None
+                        };
+
+                        let prev_impl_type = self.current_impl_type.clone();
+                        self.current_impl_type = impl_type;
+
+                        syn::visit::visit_item_impl(self, node);
+
+                        self.current_impl_type = prev_impl_type;
+                    }
+
+                    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+                        let method_name = node.sig.ident.to_string();
+
+                        // Create identifier with impl type context if available
+                        let identifier = if let Some(ref impl_type) = self.current_impl_type {
+                            format!("{}::{}", impl_type, method_name)
+                        } else {
+                            method_name.clone()
+                        };
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            // Support filtering by "Type::method" or just "method"
+                            if !identifier.contains(filter) && method_name != filter {
+                                syn::visit::visit_impl_item_fn(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the method definition
+                        let snippet = self.editor.format_impl_item_fn(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ImplItemFn".to_string(),
+                            identifier,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_impl_item_fn(self, node);
+                    }
+                }
+
+                let mut visitor = ImplMethodVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                    current_impl_type: None,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "trait" => {
+                // Find all trait definitions
+                struct TraitDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for TraitDefVisitor<'a> {
+                    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+                        let trait_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if trait_name != filter {
+                                syn::visit::visit_item_trait(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the trait definition
+                        let snippet = self.editor.format_item_trait(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemTrait".to_string(),
+                            identifier: trait_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_trait(self, node);
+                    }
+                }
+
+                let mut visitor = TraitDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "const" => {
+                // Find all const definitions
+                struct ConstDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for ConstDefVisitor<'a> {
+                    fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
+                        let const_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if const_name != filter {
+                                syn::visit::visit_item_const(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the const definition
+                        let snippet = self.editor.format_item_const(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemConst".to_string(),
+                            identifier: const_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_const(self, node);
+                    }
+                }
+
+                let mut visitor = ConstDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "static" => {
+                // Find all static definitions
+                struct StaticDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for StaticDefVisitor<'a> {
+                    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+                        let static_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if static_name != filter {
+                                syn::visit::visit_item_static(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the static definition
+                        let snippet = self.editor.format_item_static(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemStatic".to_string(),
+                            identifier: static_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_static(self, node);
+                    }
+                }
+
+                let mut visitor = StaticDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "type-alias" => {
+                // Find all type alias definitions
+                struct TypeAliasVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for TypeAliasVisitor<'a> {
+                    fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
+                        let type_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if type_name != filter {
+                                syn::visit::visit_item_type(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the type alias definition
+                        let snippet = self.editor.format_item_type(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemType".to_string(),
+                            identifier: type_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_type(self, node);
+                    }
+                }
+
+                let mut visitor = TypeAliasVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "mod" => {
+                // Find all module definitions
+                struct ModDefVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for ModDefVisitor<'a> {
+                    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+                        let mod_name = node.ident.to_string();
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            if mod_name != filter {
+                                syn::visit::visit_item_mod(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the module definition
+                        let snippet = self.editor.format_item_mod(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "ItemMod".to_string(),
+                            identifier: mod_name,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_item_mod(self, node);
+                    }
+                }
+
+                let mut visitor = ModDefVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                };
+
                 for item in &self.syntax_tree.items {
                     syn::visit::visit_item(&mut visitor, item);
                 }
@@ -2330,6 +2992,78 @@ impl RustEditor {
         original.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
+    /// Format an ItemStruct node as a string - extracts original source
+    fn format_item_struct(&self, item: &syn::ItemStruct) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemEnum node as a string - extracts original source
+    fn format_item_enum(&self, item: &syn::ItemEnum) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemFn node as a string - extracts original source
+    fn format_item_fn(&self, item: &syn::ItemFn) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ImplItemFn node as a string - extracts original source
+    fn format_impl_item_fn(&self, item: &syn::ImplItemFn) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemTrait node as a string - extracts original source
+    fn format_item_trait(&self, item: &syn::ItemTrait) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemConst node as a string - extracts original source
+    fn format_item_const(&self, item: &syn::ItemConst) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemStatic node as a string - extracts original source
+    fn format_item_static(&self, item: &syn::ItemStatic) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemType node as a string - extracts original source
+    fn format_item_type(&self, item: &syn::ItemType) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format an ItemMod node as a string - extracts original source
+    fn format_item_mod(&self, item: &syn::ItemMod) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
     /// Find the index of an item by type and name
     #[allow(dead_code)]
     pub(crate) fn find_item_index(&self, node_type: &str, name: &str) -> Result<usize> {
@@ -2421,8 +3155,8 @@ impl RustEditor {
     pub(crate) fn transform(&mut self, op: &crate::operations::TransformOp) -> Result<ModificationResult> {
         use crate::operations::{InspectResult, TransformAction};
 
-        // First, use inspect to find all matching nodes
-        let matches = self.inspect(&op.node_type, op.name_filter.as_deref())?;
+        // First, use inspect to find all matching nodes (comments not needed for transform)
+        let matches = self.inspect(&op.node_type, op.name_filter.as_deref(), false)?;
 
         // Apply content filter if specified
         let filtered_matches: Vec<InspectResult> = if let Some(ref content_filter) = op.content_filter {
@@ -3471,6 +4205,66 @@ fn generate_doc_comment(text: &str, style: &DocCommentStyle) -> String {
                 format!("/** {} */", text)
             }
         }
+    }
+}
+
+/// Extract preceding comments (both doc and regular) before a given line
+/// Returns None if no comments found, Some(comment_text) if comments exist
+fn extract_preceding_comment(content: &str, start_line: usize) -> Option<String> {
+    if start_line == 0 {
+        return None;
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    if start_line > lines.len() {
+        return None;
+    }
+
+    let line_idx = start_line.saturating_sub(1); // Convert 1-based to 0-based
+
+    // Scan backwards from target to find comment lines
+    let mut comment_start = line_idx;
+    let mut found_any_comment = false;
+
+    while comment_start > 0 {
+        let prev_line = lines[comment_start - 1].trim();
+
+        // Check if this is a comment line
+        let is_comment = prev_line.starts_with("///")
+            || prev_line.starts_with("//!")
+            || prev_line.starts_with("//")
+            || prev_line.starts_with("/**")
+            || prev_line.starts_with("/*!")
+            || prev_line.starts_with("/*")
+            || (prev_line.starts_with("*") && !prev_line.starts_with("*/"))
+            || prev_line == "*/";
+
+        if is_comment {
+            comment_start -= 1;
+            found_any_comment = true;
+        } else if prev_line.is_empty() && found_any_comment {
+            // Allow blank lines within comment blocks, but don't continue past them
+            // unless we're in the middle of a block comment
+            comment_start -= 1;
+        } else {
+            break;
+        }
+    }
+
+    if !found_any_comment {
+        return None;
+    }
+
+    // Extract the comment lines and preserve original formatting
+    let comment_lines: Vec<String> = lines[comment_start..line_idx]
+        .iter()
+        .map(|&line| line.to_string())
+        .collect();
+
+    if comment_lines.is_empty() {
+        None
+    } else {
+        Some(comment_lines.join("\n"))
     }
 }
 

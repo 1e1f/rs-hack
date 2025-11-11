@@ -23,18 +23,19 @@ impl ToolRegistry {
                 // ============================================================
                 Tool {
                     name: "inspect",
-                    description: "Generic inspection tool - find and list any AST nodes (struct-literal, match-arm, enum-usage, function-call, method-call, macro-call, identifier, type-ref)",
+                    description: "Generic inspection tool - find and list any AST nodes with optional comment extraction. Expression-level: struct-literal, match-arm, enum-usage, function-call, method-call, macro-call, identifier, type-ref. Definition-level: struct, enum, function, impl-method, trait, const, static, type-alias, mod",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
                             "node_type": {
                                 "type": "string",
-                                "enum": ["struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref"],
+                                "enum": ["struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref", "struct", "enum", "function", "impl-method", "trait", "const", "static", "type-alias", "mod"],
                                 "description": "Type of AST node to inspect"
                             },
-                            "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\")"},
+                            "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\", \"MyStruct\", \"my_function\")"},
                             "content_filter": {"type": "string", "description": "Filter by content substring"},
+                            "include_comments": {"type": "boolean", "default": true, "description": "Include preceding comments (doc and regular) in output"},
                             "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"}
                         },
                         "required": ["paths", "node_type"]
@@ -526,6 +527,14 @@ impl ToolRegistry {
         if let Some(content) = arguments.get("content_filter").and_then(|v| v.as_str()) {
             args.push("--content-filter".to_string());
             args.push(content.to_string());
+        }
+
+        // Add include_comments (default is true, only add flag if explicitly set to false)
+        if let Some(include_comments) = arguments.get("include_comments").and_then(|v| v.as_bool()) {
+            if !include_comments {
+                args.push("--include-comments".to_string());
+                args.push("false".to_string());
+            }
         }
 
         // Add format

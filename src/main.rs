@@ -402,7 +402,7 @@ enum Commands {
         #[arg(short, long, num_args = 1..)]
         paths: Vec<PathBuf>,
 
-        /// Type of node: "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref"
+        /// Type of node: Expression-level: "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref". Definition-level: "struct", "enum", "function", "impl-method", "trait", "const", "static", "type-alias", "mod"
         #[arg(short = 't', long)]
         node_type: String,
 
@@ -413,6 +413,10 @@ enum Commands {
         /// Filter by content - only show nodes whose source contains this string (e.g., "[SHADOW RENDER]")
         #[arg(short = 'c', long)]
         content_filter: Option<String>,
+
+        /// Include preceding comments (doc and regular) in output
+        #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+        include_comments: bool,
 
         /// Output format: "json", "locations", "snippets"
         #[arg(short = 'f', long, default_value = "snippets")]
@@ -981,7 +985,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Inspect { paths, node_type, name, content_filter, format } => {
+        Commands::Inspect { paths, node_type, name, content_filter, include_comments, format } => {
             use operations::InspectResult;
 
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
@@ -992,7 +996,7 @@ fn main() -> Result<()> {
                     .context(format!("Failed to read file: {:?}", file))?;
 
                 let editor = RustEditor::new(&content)?;
-                let mut results = editor.inspect(&node_type, name.as_deref())?;
+                let mut results = editor.inspect(&node_type, name.as_deref(), include_comments)?;
 
                 // Fill in file paths
                 for result in &mut results {
@@ -1024,6 +1028,10 @@ fn main() -> Result<()> {
                             result.location.line,
                             result.location.column,
                             result.identifier);
+                        // Show preceding comment if present
+                        if let Some(ref comment) = result.preceding_comment {
+                            println!("{}", comment);
+                        }
                         println!("{}\n", result.snippet);
                     }
                 }

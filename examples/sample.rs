@@ -35,7 +35,7 @@ impl User {
     pub fn new(id: u64, name: String) -> Self {
         
         //l eaving a weird gap here
-        Self { 
+        User { 
             id, name }
     }
 }
