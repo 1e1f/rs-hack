@@ -2,18 +2,16 @@
 
 A native Rust implementation of the MCP server for rs-hack - AST-aware Rust refactoring tools.
 
-## Why Rust Version?
+## Why Rust?
 
-The Rust version offers several advantages over the Python implementation:
+This native Rust implementation provides excellent performance and ease of use:
 
-| Feature | Python Version | Rust Version |
-|---------|----------------|--------------|
-| **Installation** | `uvx` with path | `cargo install` |
-| **Dependencies** | Python 3.10+, mcp package | None (statically linked) |
-| **Startup Time** | ~500ms | <50ms |
-| **Memory Usage** | ~50MB | ~5MB |
-| **Distribution** | Source code via git | Binary via crates.io |
-| **Integration** | Subprocess calls to rs-hack | Direct CLI invocation |
+- **Simple Installation**: Single `cargo install` command
+- **Zero Dependencies**: Statically linked binary
+- **Fast Startup**: <50ms server initialization
+- **Low Memory**: ~5MB memory footprint
+- **Easy Distribution**: Binary available via crates.io
+- **Direct Integration**: Efficient CLI invocation
 
 ## Installation
 
@@ -70,7 +68,7 @@ Edit your config file:
 }
 ```
 
-That's it! No paths, no Python, no dependencies.
+That's it! No paths, no dependencies.
 
 ### Claude Code
 
@@ -111,7 +109,7 @@ npx @modelcontextprotocol/inspector rs-hack-mcp
 
 ## Features
 
-All 13 tools from the Python version:
+All 24 rs-hack CLI commands exposed as MCP tools:
 
 ### Inspection Tools
 - `inspect_struct_literals` - Find struct initializations
@@ -154,17 +152,17 @@ Claude: [Uses add_struct_field with dry-run first, then apply]
 
 Benchmarked on a project with 50 Rust files:
 
-| Operation | Python Version | Rust Version |
-|-----------|----------------|--------------|
-| Server startup | 450ms | 35ms |
-| Initialize | 50ms | 2ms |
-| List tools | 5ms | <1ms |
-| inspect_struct_literals | 800ms | 750ms* |
-| add_struct_field | 1200ms | 1150ms* |
+| Operation | Time |
+|-----------|------|
+| Server startup | 35ms |
+| Initialize | 2ms |
+| List tools | <1ms |
+| inspect (struct literals) | 750ms* |
+| add_struct_field | 1150ms* |
 
-*The CLI execution time dominates - similar for both versions
+*CLI execution time dominates these operations
 
-**Key benefit**: The Rust version starts 10x faster, making it more responsive for interactive use.
+**Key benefit**: Fast startup makes the server highly responsive for interactive use.
 
 ## Development
 
@@ -236,39 +234,15 @@ The tool will automatically be available after rebuild.
 └─────────────────┘
 ```
 
-## Comparison with Python Version
-
-### Advantages of Rust Version
+## Benefits
 
 ✅ **Simpler installation** - Single `cargo install` command
 ✅ **No runtime dependencies** - Statically linked binary
-✅ **Faster startup** - 10x faster server initialization
-✅ **Lower memory** - ~10x less memory usage
-✅ **Better distribution** - Can publish to crates.io
-✅ **Native feel** - No Python runtime overhead
-
-### Advantages of Python Version
-
-✅ **Easier development** - Python is more approachable
-✅ **Faster iteration** - No compilation step
-✅ **More examples** - More MCP servers in Python
-✅ **FastMCP framework** - Higher-level abstractions
-
-### Which Should You Use?
-
-**Use Rust version if:**
-- You want the simplest installation experience
-- You care about startup time and memory
-- You prefer single binary distribution
-- You're already in the Rust ecosystem
-
-**Use Python version if:**
-- You want to modify/extend the server
-- You're more comfortable with Python
-- You need rapid iteration during development
-- You want to use FastMCP features
-
-Both versions are functionally equivalent and can be used interchangeably.
+✅ **Fast startup** - Server initializes in <50ms
+✅ **Low memory usage** - ~5MB memory footprint
+✅ **Easy distribution** - Published to crates.io
+✅ **Native performance** - No runtime overhead
+✅ **Complete coverage** - All 24 rs-hack commands available
 
 ## Troubleshooting
 
@@ -313,4 +287,3 @@ MIT OR Apache-2.0 (same as rs-hack)
 
 - [rs-hack](https://github.com/1e1f/rs-hack) - The underlying CLI tool
 - [MCP Specification](https://spec.modelcontextprotocol.io/)
-- [Python MCP Server](../mcp-server/) - Alternative implementation
