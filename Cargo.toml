@@ -1,45 +1,20 @@
-[package]
-name = "rs-hack"
-version = "0.4.3"
+[workspace]
+members = [
+    "rs-hack",
+    "rshack",
+    "rs-hack-mcp",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.5.1"
 edition = "2021"
-authors = ["Leif Shackelford<structuresound@gmail.com>"]
-description = "AST-aware Rust refactoring tool for AI agents - transform, rename, inspect & more"
+authors = ["Leif Shackelford <structuresound@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/1e1f/rs-hack"
-keywords = ["ast", "refactoring", "code-generation", "ai", "automation"]
-categories = ["command-line-utilities", "development-tools"]
-readme = "README.md"
 
-[lib]
-name = "rs_hack"
-path = "src/lib.rs"
-
-[[bin]]
-name = "rs-hack"
-path = "src/main.rs"
-
-[dependencies]
-syn = { version = "2.0", features = [
-    "full",
-    "extra-traits",
-    "visit",
-    "visit-mut",
-] }
-quote = "1.0"
-proc-macro2 = { version = "1.0", features = ["span-locations"] }
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
-walkdir = "2.5"
-prettyplease = "0.2"
-glob = "0.3"
-blake3 = "1.8"
-chrono = { version = "0.4", features = ["serde"] }
-directories = "6.0"
-similar = "2.3"
-strsim = "0.11"
-
-[dev-dependencies]
-tempfile = "3.23"
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

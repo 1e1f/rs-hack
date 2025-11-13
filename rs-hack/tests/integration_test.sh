@@ -1,6 +1,6 @@
 #!/bin/bash
-# Integration test for rs-hack v0.4.2
-# Tests all operations + state management + advanced features + transform/inspect + rename + path resolution
+# Integration test for rs-hack v0.5.0
+# Tests all operations + state management + advanced features + transform/inspect + rename + path resolution + discovery mode + variant filtering
 
 set -e
 
@@ -39,7 +39,7 @@ cd "$PROJECT_DIR" && cargo build 2>&1 | grep -v "warning:" || true
 
 echo ""
 echo "======================================"
-echo "   rs-hack v0.4.2 Integration Tests  "
+echo "   rs-hack v0.5.0 Integration Tests  "
 echo "======================================"
 echo ""
 
@@ -461,8 +461,8 @@ run_test "position-control-after" \
 
 # Test 26: Find operation (utility)
 run_test "find-struct-location" \
-    "$BINARY find --paths $INPUT --node-type struct --name User > $TEMP_DIR/find_output.json" \
-    "grep -q 'line' $TEMP_DIR/find_output.json" \
+    "$BINARY find --paths $INPUT --node-type struct --name User --format json > $TEMP_DIR/find_output.json" \
+    "grep -q 'location' $TEMP_DIR/find_output.json" \
     "true"
 
 # Test 27: Batch operations (utility)
@@ -497,11 +497,11 @@ run_test "batch-operations" \
     "true"
 
 # ============================================================================
-section "INSPECT & TRANSFORM OPERATIONS (NEW)"
+section "FIND & TRANSFORM OPERATIONS (NEW)"
 # ============================================================================
 
-# Test 28: Inspect macro-call (NEW FEATURE)
-cat > "$TEMP_DIR/inspect_macro_test.rs" << 'EOF'
+# Test 28: Find macro-call (NEW FEATURE)
+cat > "$TEMP_DIR/find_macro_test.rs" << 'EOF'
 fn main() {
     println!("Hello");
     eprintln!("[DEBUG] Some debug message");
@@ -511,15 +511,15 @@ fn main() {
 }
 EOF
 
-run_test "inspect-macro-call" \
-    "$BINARY inspect --paths $TEMP_DIR/inspect_macro_test.rs --node-type macro-call --name eprintln --format locations" \
-    "grep -q 'inspect_macro_test.rs:3:4' $TEMP_DIR/cmd_output.txt && grep -q 'inspect_macro_test.rs:4:4' $TEMP_DIR/cmd_output.txt && grep -q 'inspect_macro_test.rs:5:4' $TEMP_DIR/cmd_output.txt" \
+run_test "find-macro-call" \
+    "$BINARY find --paths $TEMP_DIR/find_macro_test.rs --node-type macro-call --name eprintln --format locations" \
+    "grep -q 'find_macro_test.rs:3:4' $TEMP_DIR/cmd_output.txt && grep -q 'find_macro_test.rs:4:4' $TEMP_DIR/cmd_output.txt && grep -q 'find_macro_test.rs:5:4' $TEMP_DIR/cmd_output.txt" \
     "true"
 
-# Test 29: Inspect with content filter (NEW FEATURE)
-run_test "inspect-content-filter" \
-    "$BINARY inspect --paths $TEMP_DIR/inspect_macro_test.rs --node-type macro-call --name eprintln --content-filter '[SHADOW RENDER]' --format locations" \
-    "grep -q 'inspect_macro_test.rs:4:4' $TEMP_DIR/cmd_output.txt && grep -q 'inspect_macro_test.rs:5:4' $TEMP_DIR/cmd_output.txt && ! grep -q 'inspect_macro_test.rs:3:4' $TEMP_DIR/cmd_output.txt" \
+# Test 29: Find with content filter (NEW FEATURE)
+run_test "find-content-filter" \
+    "$BINARY find --paths $TEMP_DIR/find_macro_test.rs --node-type macro-call --name eprintln --content-filter '[SHADOW RENDER]' --format locations" \
+    "grep -q 'find_macro_test.rs:4:4' $TEMP_DIR/cmd_output.txt && grep -q 'find_macro_test.rs:5:4' $TEMP_DIR/cmd_output.txt && ! grep -q 'find_macro_test.rs:3:4' $TEMP_DIR/cmd_output.txt" \
     "true"
 
 # Test 30: Transform comment action (NEW FEATURE)
@@ -847,6 +847,72 @@ run_test "json-batch-still-works" \
     "true"
 
 # ============================================================================
+section "FIND: DISCOVERY MODE & VARIANT FILTERING (NEW v0.5.0)"
+# ============================================================================
+
+# Test: Findsearch all types (omit --node-type)
+cat > "$TEMP_DIR/find_discovery.rs" << 'EOF'
+pub struct Rectangle {
+    width: f32,
+    height: f32,
+}
+
+pub enum View {
+    Rectangle {
+        color: String,
+    },
+    Circle {
+        radius: f32,
+    },
+}
+
+pub fn main() {
+    let r = Rectangle { width: 10.0, height: 20.0 };
+}
+EOF
+
+run_test "find-discovery-mode-all-types" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --name Rectangle" \
+    "grep -q 'struct:' $TEMP_DIR/cmd_output.txt && grep -q 'struct-literal:' $TEMP_DIR/cmd_output.txt && grep -q 'identifier' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test: Enum variant filtering with --variant flag
+run_test "find-enum-variant-filter-flag" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --node-type enum --variant Rectangle" \
+    "grep -q 'View' $TEMP_DIR/cmd_output.txt && grep -q 'Rectangle' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test: Enum variant filtering with :: syntax
+run_test "find-enum-variant-double-colon-syntax" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --node-type enum --name View::Rectangle" \
+    "grep -q 'View' $TEMP_DIR/cmd_output.txt && grep -q 'Rectangle' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test: Enum variant filtering with wildcard
+run_test "find-enum-variant-wildcard" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --node-type enum --name '*::Rectangle'" \
+    "grep -q 'View' $TEMP_DIR/cmd_output.txt && grep -q 'Rectangle' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test: Hints system when search fails
+run_test "find-hints-system" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --node-type function --name Rectangle 2>&1" \
+    "grep -q 'Hint:' $TEMP_DIR/cmd_output.txt && grep -q 'struct' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test: Canonical names in output (struct not ItemStruct)
+run_test "find-canonical-names" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --name Rectangle" \
+    "grep -q 'struct:' $TEMP_DIR/cmd_output.txt && ! grep -q 'ItemStruct' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# Test: Grouped output format
+run_test "find-grouped-output" \
+    "$BINARY find --paths $TEMP_DIR/find_discovery.rs --name Rectangle" \
+    "grep -q 'Found \"Rectangle\" in' $TEMP_DIR/cmd_output.txt" \
+    "true"
+
+# ============================================================================
 section "DOC COMMENT OPERATIONS"
 # ============================================================================
 
@@ -898,15 +964,16 @@ if [ $FAILED -eq 0 ]; then
     echo "  ✅ 1 Position control test"
     echo "  ✅ 1 Glob pattern test"
     echo "  ✅ 2 Utility operations (find, batch)"
-    echo "  ✅ 6 Inspect & Transform operations (inspect, filter, comment, remove, replace, method-call)"
+    echo "  ✅ 6 Find & Transform operations (find, filter, comment, remove, replace, method-call)"
     echo "  ✅ 3 Pattern matching tests (pure, wildcard, exact)"
     echo "  ✅ 3 Validation mode tests (enum before/after, function) ⭐ Sprint 2"
     echo "  ✅ 3 Summary format tests (enum, function, with-apply) ⭐ Sprint 2"
     echo "  ✅ 1 Exclude patterns test (glob matching) ⭐ NEW Sprint 3"
     echo "  ✅ 2 YAML batch operations tests (yaml, json-backwards-compat) ⭐ NEW Sprint 3"
+    echo "  ✅ 7 Find discovery & variant filtering (all-types, variant-flag, ::, wildcard, hints, canonical, grouped) ⭐ NEW v0.5.0"
     echo "  ✅ 3 Doc comment operations (add, update, remove) ⭐ NEW"
     echo ""
-    printf "Total: %b54 tests%b\n" "$BLUE" "$NC"
+    printf "Total: %b61 tests%b\n" "$BLUE" "$NC"
 
     # STATE AUDIT
     section "STATE AUDIT"

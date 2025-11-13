@@ -122,6 +122,50 @@ impl RustEditor {
     pub(crate) fn add_struct_field(&mut self, op: &AddStructFieldOp) -> Result<ModificationResult> {
         let mut modified_nodes = Vec::new();
 
+        // Check if this is an enum variant struct literal (contains ::)
+        let is_enum_variant = op.struct_name.contains("::");
+
+        // For enum variant literals, automatically operate on literals only
+        // (since we can't modify the enum variant definition without the full enum context)
+        if is_enum_variant {
+            // Parse the field_def to extract field name and value/type
+            // field_def can be:
+            // - "layer: None" (with explicit value)
+            // - "layer: Option<Layer>" (with type, needs literal_default)
+            // - "layer" (just name, needs literal_default)
+
+            let final_field_def = if let Some(literal_default) = &op.literal_default {
+                // literal_default provided - use it
+                let field_name = op.field_def.split(':')
+                    .next()
+                    .map(|s| s.trim().to_string())
+                    .context("Failed to extract field name")?;
+                format!("{}: {}", field_name, literal_default)
+            } else if op.field_def.contains(':') {
+                // field_def already contains a value (e.g., "layer: None")
+                op.field_def.clone()
+            } else {
+                anyhow::bail!(
+                    "For enum variant literals, field definition must include a value.\n\
+                     Either use: --field \"layer: None\" or --field \"layer\" --literal-default \"None\""
+                );
+            };
+
+            // Create the AddStructLiteralFieldOp
+            let literal_op = AddStructLiteralFieldOp {
+                struct_name: op.struct_name.clone(),
+                field_def: final_field_def,
+                position: op.position.clone(),
+                struct_path: None,
+            };
+
+            // Update all struct literals
+            let literal_result = self.add_struct_literal_field(&literal_op)
+                .context("Failed to update struct literals")?;
+
+            return Ok(literal_result);
+        }
+
         // Find the struct and clone it to avoid borrowing issues
         let item_struct = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -149,7 +193,7 @@ impl RustEditor {
         if op.literal_default.is_none() {
             // Create backup of original struct before modification
             let backup_node = BackupNode {
-                node_type: "ItemStruct".to_string(),
+                node_type: "struct".to_string(),
                 identifier: op.struct_name.clone(),
                 original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
                 location: self.span_to_location(item_struct.span()),
@@ -185,7 +229,7 @@ impl RustEditor {
         if has_type {
             // Create backup before any modifications
             let backup_node = BackupNode {
-                node_type: "ItemStruct".to_string(),
+                node_type: "struct".to_string(),
                 identifier: op.struct_name.clone(),
                 original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
                 location: self.span_to_location(item_struct.span()),
@@ -311,6 +355,20 @@ impl RustEditor {
     }
 
     pub(crate) fn update_struct_field(&mut self, op: &UpdateStructFieldOp) -> Result<ModificationResult> {
+        // Check if this is an enum variant struct literal (contains ::)
+        let is_enum_variant = op.struct_name.contains("::");
+
+        // For enum variant literals, we can't update the enum variant definition
+        // (would need full enum context), so bail with helpful message
+        if is_enum_variant {
+            anyhow::bail!(
+                "Cannot update field in enum variant definition '{}'.\n\
+                 To update fields in enum variant struct literals, use the transform command:\n\
+                 rs-hack transform --node-type struct-literal --name {} --action replace --with <new_pattern> --paths ... --apply",
+                op.struct_name, op.struct_name
+            );
+        }
+
         // Find the struct and clone it to avoid borrowing issues
         let item_struct = self.syntax_tree.items.iter()
             .find_map(|item| {
@@ -336,7 +394,7 @@ impl RustEditor {
 
         // Create backup of original struct before modification
         let backup_node = BackupNode {
-            node_type: "ItemStruct".to_string(),
+            node_type: "struct".to_string(),
             identifier: op.struct_name.clone(),
             original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
             location: self.span_to_location(item_struct.span()),
@@ -395,8 +453,15 @@ impl RustEditor {
         let mut modified_nodes = Vec::new();
         let mut changed = false;
 
-        // Step 1: Remove from struct definition (unless literal_only is true)
-        if !op.literal_only {
+        // Check if this is an enum variant struct literal (contains ::)
+        let is_enum_variant = op.struct_name.contains("::");
+
+        // For enum variant literals, automatically operate on literals only
+        // (since we can't modify the enum variant definition without the full enum context)
+        let effective_literal_only = op.literal_only || is_enum_variant;
+
+        // Step 1: Remove from struct definition (unless literal_only is true or it's an enum variant)
+        if !effective_literal_only {
             // Find the struct and clone it to avoid borrowing issues
             let item_struct = self.syntax_tree.items.iter()
                 .find_map(|item| {
@@ -422,7 +487,7 @@ impl RustEditor {
 
             // Create backup of original struct before modification
             let backup_node = BackupNode {
-                node_type: "ItemStruct".to_string(),
+                node_type: "struct".to_string(),
                 identifier: op.struct_name.clone(),
                 original_content: self.unparse_item(&Item::Struct(item_struct.clone())),
                 location: self.span_to_location(item_struct.span()),
@@ -511,77 +576,123 @@ impl RustEditor {
             }
         }
 
-        // Step 2: Remove from all struct literal expressions
+        // Step 2: Remove from all struct literal expressions using surgical editing
         // Collect backups of struct literals before modification
         let literal_backups = self.collect_struct_literal_backups(&op.struct_name, None);
 
-        // Use a visitor to remove the field from all struct literals
-        use syn::visit_mut::VisitMut;
+        // Find all field deletions (surgical approach)
+        use syn::visit::Visit;
 
-        struct FieldRemover {
+        struct FieldDeletionFinder<'a> {
             struct_name: String,
             field_name: String,
-            modified: bool,
+            deletion_ranges: Vec<(usize, usize)>, // (start_byte, end_byte)
+            editor: &'a RustEditor,
         }
 
-        impl VisitMut for FieldRemover {
-            fn visit_expr_mut(&mut self, node: &mut Expr) {
-                if let Expr::Struct(expr_struct) = node {
-                    // Check if this struct literal matches our target struct
-                    let matches = if self.struct_name.contains("::") {
-                        // Handle enum variants or module paths
-                        if self.struct_name.starts_with("*::") {
-                            let target_name = &self.struct_name[3..];
-                            expr_struct.path.segments.last()
-                                .map(|seg| seg.ident.to_string() == target_name)
-                                .unwrap_or(false)
-                        } else {
-                            let path_str = expr_struct.path.segments.iter()
-                                .map(|seg| seg.ident.to_string())
-                                .collect::<Vec<_>>()
-                                .join("::");
-                            path_str == self.struct_name
-                        }
+        impl<'ast, 'a> Visit<'ast> for FieldDeletionFinder<'a> {
+            fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+                // Check if this matches our target
+                let matches = if self.struct_name.contains("::") {
+                    if self.struct_name.starts_with("*::") {
+                        let target_name = &self.struct_name[3..];
+                        node.path.segments.last()
+                            .map(|seg| seg.ident.to_string() == target_name)
+                            .unwrap_or(false)
                     } else {
-                        // Simple struct name
-                        expr_struct.path.segments.len() == 1
-                            && expr_struct.path.segments.last()
-                                .map(|seg| seg.ident.to_string() == self.struct_name)
-                                .unwrap_or(false)
-                    };
+                        let path_str = node.path.segments.iter()
+                            .map(|seg| seg.ident.to_string())
+                            .collect::<Vec<_>>()
+                            .join("::");
+                        path_str == self.struct_name
+                    }
+                } else {
+                    node.path.segments.len() == 1
+                        && node.path.segments.last()
+                            .map(|seg| seg.ident.to_string())
+                            .as_ref() == Some(&self.struct_name)
+                };
 
-                    if matches {
-                        // Remove the field from this struct literal
-                        let mut new_fields = syn::punctuated::Punctuated::new();
-                        for field_value in expr_struct.fields.iter() {
-                            if let syn::Member::Named(ident) = &field_value.member {
-                                if ident.to_string() == self.field_name {
-                                    self.modified = true;
-                                    continue;
-                                }
-                            }
-                            new_fields.push(field_value.clone());
+                if matches {
+                    // Find the field to remove
+                    let field_idx = node.fields.iter().position(|fv| {
+                        if let syn::Member::Named(ident) = &fv.member {
+                            ident.to_string() == self.field_name
+                        } else {
+                            false
                         }
-                        expr_struct.fields = new_fields;
+                    });
+
+                    if let Some(idx) = field_idx {
+                        let field = &node.fields[idx];
+                        let start = self.editor.span_to_byte_offset(field.span().start());
+                        let mut end = self.editor.span_to_byte_offset(field.span().end());
+
+                        // Include the trailing comma if present
+                        // Look ahead for comma and optional whitespace
+                        let content_bytes = self.editor.content.as_bytes();
+                        while end < content_bytes.len() {
+                            match content_bytes[end] {
+                                b',' => {
+                                    end += 1;
+                                    // Also consume the newline after comma if present
+                                    if end < content_bytes.len() && content_bytes[end] == b'\n' {
+                                        end += 1;
+                                    }
+                                    break;
+                                }
+                                b' ' | b'\t' => {
+                                    end += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+
+                        // Also include leading whitespace/newline on the same line
+                        let mut line_start = start;
+                        while line_start > 0 {
+                            let ch = content_bytes[line_start - 1];
+                            if ch == b'\n' {
+                                break;
+                            } else if ch == b' ' || ch == b'\t' {
+                                line_start -= 1;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        self.deletion_ranges.push((line_start, end));
                     }
                 }
 
-                // Continue visiting nested expressions
-                syn::visit_mut::visit_expr_mut(self, node);
+                syn::visit::visit_expr_struct(self, node);
             }
         }
 
-        let mut remover = FieldRemover {
+        let mut finder = FieldDeletionFinder {
             struct_name: op.struct_name.clone(),
             field_name: op.field_name.clone(),
-            modified: false,
+            deletion_ranges: Vec::new(),
+            editor: self,
         };
 
-        remover.visit_file_mut(&mut self.syntax_tree);
+        finder.visit_file(&self.syntax_tree);
 
-        if remover.modified {
-            // Reformat using prettyplease to apply the changes
-            self.content = prettyplease::unparse(&self.syntax_tree);
+        if !finder.deletion_ranges.is_empty() {
+            // Sort ranges in reverse order to preserve offsets
+            let mut ranges = finder.deletion_ranges;
+            ranges.sort_by_key(|(start, _)| std::cmp::Reverse(*start));
+
+            // Perform surgical deletions
+            for (start, end) in ranges {
+                self.content.drain(start..end);
+            }
+
+            // Re-parse to update syntax_tree
+            self.syntax_tree = syn::parse_str(&self.content)
+                .context("Failed to re-parse after removing struct literal fields")?;
+            self.line_offsets = Self::compute_line_offsets(&self.content);
+
             modified_nodes.extend(literal_backups);
             changed = true;
         }
@@ -614,42 +725,131 @@ impl RustEditor {
         // Collect backups of all struct literal expressions that will be modified
         let backup_nodes = self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
 
-        // Use a visitor to find and modify all struct literals
-        let mut visitor = StructLiteralFieldAdder {
+        // Find all struct literals and their field insertion points (surgical approach)
+        use syn::visit::Visit;
+
+        struct LiteralFieldInserter<'a> {
+            struct_name: String,
+            field_name: String,
+            path_resolver: Option<&'a PathResolver>,
+            insertion_points: Vec<(usize, usize)>, // (byte_offset, indentation_spaces)
+            editor: &'a RustEditor,
+        }
+
+        impl<'ast, 'a> Visit<'ast> for LiteralFieldInserter<'a> {
+            fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+                // Check if this matches our target
+                let is_match = if let Some(resolver) = &self.path_resolver {
+                    resolver.matches_target(&node.path)
+                } else {
+                    // Legacy matching logic
+                    if self.struct_name.contains("::") {
+                        if self.struct_name.starts_with("*::") {
+                            let target_name = &self.struct_name[3..];
+                            node.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == target_name)
+                                .unwrap_or(false)
+                        } else {
+                            let path_str = node.path.segments.iter()
+                                .map(|seg| seg.ident.to_string())
+                                .collect::<Vec<_>>()
+                                .join("::");
+                            path_str == self.struct_name
+                        }
+                    } else {
+                        node.path.segments.len() == 1
+                            && node.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                                .as_ref() == Some(&self.struct_name)
+                    }
+                };
+
+                if is_match {
+                    // Check if field already exists
+                    let field_exists = node.fields.iter().any(|fv| {
+                        fv.member.to_token_stream().to_string() == self.field_name
+                    });
+
+                    if !field_exists {
+                        // Find insertion point after last field or after opening brace
+                        let insert_offset = if let Some(last_field) = node.fields.last() {
+                            // Insert after last field
+                            self.editor.span_to_byte_offset(last_field.span().end())
+                        } else {
+                            // No fields, insert after opening brace
+                            let brace_pos = self.editor.span_to_byte_offset(node.brace_token.span.join().start());
+                            brace_pos + 1 // After the '{'
+                        };
+
+                        // Determine indentation from the last field or struct context
+                        let indent = if let Some(last_field) = node.fields.last() {
+                            let line_start = self.editor.span_to_byte_offset(last_field.span().start());
+                            self.editor.get_indentation(line_start).len()
+                        } else {
+                            // Use struct opening indentation + 4 spaces
+                            let struct_start = self.editor.span_to_byte_offset(node.span().start());
+                            self.editor.get_indentation(struct_start).len() + 4
+                        };
+
+                        self.insertion_points.push((insert_offset, indent));
+                    }
+                }
+
+                syn::visit::visit_expr_struct(self, node);
+            }
+        }
+
+        let mut inserter = LiteralFieldInserter {
             struct_name: op.struct_name.clone(),
-            field_def: op.field_def.clone(),
-            field_name,
-            position: op.position.clone(),
-            path_resolver,
-            modified: false,
+            field_name: field_name.clone(),
+            path_resolver: path_resolver.as_ref(),
+            insertion_points: Vec::new(),
+            editor: self,
         };
 
-        visitor.visit_file_mut(&mut self.syntax_tree);
+        inserter.visit_file(&self.syntax_tree);
 
-        if visitor.modified {
-            // Reformat the entire file for struct literals
-            self.content = prettyplease::unparse(&self.syntax_tree);
-            Ok(ModificationResult {
-                changed: true,
-                modified_nodes: backup_nodes,
-            })
-        } else {
-            Ok(ModificationResult {
+        if inserter.insertion_points.is_empty() {
+            return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
-            })
+            });
         }
+
+        // Sort insertion points in reverse order so we can insert from end to beginning
+        // (this way earlier offsets don't get invalidated by later insertions)
+        let mut points = inserter.insertion_points;
+        points.sort_by_key(|(offset, _)| std::cmp::Reverse(*offset));
+
+        // Perform surgical insertions
+        for (insert_offset, indent_spaces) in points {
+            let indent = " ".repeat(indent_spaces);
+            let field_str = format!(",\n{}{}", indent, op.field_def);
+            self.content.insert_str(insert_offset, &field_str);
+        }
+
+        // Re-parse to update syntax_tree
+        self.syntax_tree = syn::parse_str(&self.content)
+            .context("Failed to re-parse after adding struct literal fields")?;
+        self.line_offsets = Self::compute_line_offsets(&self.content);
+
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: backup_nodes,
+        })
     }
 
     /// Collect backups of all struct literal expressions for a given struct name
     fn collect_struct_literal_backups(&self, struct_name: &str, path_resolver: Option<&PathResolver>) -> Vec<BackupNode> {
         use syn::visit::Visit;
+        use syn::spanned::Spanned;
 
         struct LiteralCollector<'a> {
             struct_name: String,
             path_resolver: Option<&'a PathResolver>,
             backups: Vec<BackupNode>,
             counter: usize,
+            editor: &'a RustEditor,
         }
 
         impl<'ast, 'a> Visit<'ast> for LiteralCollector<'a> {
@@ -690,10 +890,15 @@ impl RustEditor {
                     };
 
                     if matches {
+                        // Extract original source text with formatting preserved
+                        let start = self.editor.span_to_byte_offset(expr_struct.span().start());
+                        let end = self.editor.span_to_byte_offset(expr_struct.span().end());
+                        let original_source = &self.editor.content[start..end];
+
                         self.backups.push(BackupNode {
-                            node_type: "ExprStruct".to_string(),
+                            node_type: "struct-literal".to_string(),
                             identifier: format!("{}#{}", self.struct_name, self.counter),
-                            original_content: expr_struct.to_token_stream().to_string(),
+                            original_content: original_source.to_string(),
                             location: NodeLocation {
                                 line: 0, // We don't have precise location info in visitor
                                 column: 0,
@@ -713,6 +918,7 @@ impl RustEditor {
             path_resolver,
             backups: Vec::new(),
             counter: 0,
+            editor: self,
         };
 
         collector.visit_file(&self.syntax_tree);
@@ -745,7 +951,7 @@ impl RustEditor {
 
         // Create backup of original enum before modification
         let backup_node = BackupNode {
-            node_type: "ItemEnum".to_string(),
+            node_type: "enum".to_string(),
             identifier: op.enum_name.clone(),
             original_content: self.unparse_item(&Item::Enum(item_enum.clone())),
             location: self.span_to_location(item_enum.span()),
@@ -844,7 +1050,7 @@ impl RustEditor {
 
         // Create backup of original enum before modification
         let backup_node = BackupNode {
-            node_type: "ItemEnum".to_string(),
+            node_type: "enum".to_string(),
             identifier: op.enum_name.clone(),
             original_content: self.unparse_item(&Item::Enum(item_enum.clone())),
             location: self.span_to_location(item_enum.span()),
@@ -906,7 +1112,7 @@ impl RustEditor {
 
         // Create backup of original enum before modification
         let backup_node = BackupNode {
-            node_type: "ItemEnum".to_string(),
+            node_type: "enum".to_string(),
             identifier: op.enum_name.clone(),
             original_content: self.unparse_item(&Item::Enum(item_enum.clone())),
             location: self.span_to_location(item_enum.span()),
@@ -1038,13 +1244,52 @@ impl RustEditor {
         prettyplease::unparse(&temp_file).trim().to_string()
     }
 
+    /// Isolated prettyplease: Reformat only a specific item, preserving the rest of the file
+    /// This finds an item in the original syntax tree, formats it with prettyplease, and surgically replaces it
+    fn reformat_item_isolated<F>(&mut self, predicate: F) -> Result<bool>
+    where
+        F: Fn(&Item) -> bool,
+    {
+        // Find the item index in the ORIGINAL syntax tree (before mutations)
+        let original_syntax_tree: syn::File = syn::parse_str(&self.content)
+            .context("Failed to parse original content")?;
+
+        let (item_index, original_item) = original_syntax_tree.items.iter()
+            .enumerate()
+            .find(|(_, item)| predicate(item))
+            .ok_or_else(|| anyhow::anyhow!("Item not found"))?;
+
+        // Get the byte range of the original item
+        let start = self.span_to_byte_offset(original_item.span().start());
+        let end = self.span_to_byte_offset(original_item.span().end());
+
+        // Get the modified item from the current syntax tree
+        if item_index >= self.syntax_tree.items.len() {
+            anyhow::bail!("Item index out of bounds after modification");
+        }
+        let modified_item = &self.syntax_tree.items[item_index];
+
+        // Format just this item with prettyplease
+        let formatted_item = self.unparse_item(modified_item);
+
+        // Surgically replace the old item with the formatted version
+        self.content.replace_range(start..end, &formatted_item);
+
+        // Re-parse to update syntax_tree
+        self.syntax_tree = syn::parse_str(&self.content)
+            .context("Failed to re-parse after isolated prettyplease")?;
+        self.line_offsets = Self::compute_line_offsets(&self.content);
+
+        Ok(true)
+    }
+
     /// Get backup of a function before modification
     fn get_function_backup(&self, fn_name: &str) -> Result<BackupNode> {
         for item in &self.syntax_tree.items {
             if let Item::Fn(f) = item {
                 if f.sig.ident == fn_name {
                     return Ok(BackupNode {
-                        node_type: "ItemFn".to_string(),
+                        node_type: "function".to_string(),
                         identifier: fn_name.to_string(),
                         original_content: self.unparse_item(&Item::Fn(f.clone())),
                         location: self.span_to_location(f.span()),
@@ -1551,7 +1796,7 @@ impl RustEditor {
 
         // Create backup of original item before modification
         let backup_node = BackupNode {
-            node_type: if op.target_type == "struct" { "ItemStruct" } else { "ItemEnum" }.to_string(),
+            node_type: if op.target_type == "struct" { "struct" } else { "enum" }.to_string(),
             identifier: op.target_name.clone(),
             original_content: self.unparse_item(&self.syntax_tree.items[item_index].clone()),
             location: self.span_to_location(item_span),
@@ -1721,8 +1966,10 @@ impl RustEditor {
 
     /// Replace the modified function(s) in the content with formatted versions
     fn replace_modified_functions(&mut self, modified_function: &Option<String>) -> Result<()> {
-        // If no specific function was targeted, format the entire file
+        // If no specific function was targeted, use isolated prettyplease for all modified functions
         if modified_function.is_none() {
+            // This case shouldn't happen in practice, but if it does, fall back to whole-file format
+            // TODO: Track which functions were modified and format only those
             self.content = prettyplease::unparse(&self.syntax_tree);
             return Ok(());
         }
@@ -1778,8 +2025,8 @@ impl RustEditor {
 
         Ok(())
     }
-    
-    fn span_to_byte_offset(&self, pos: LineColumn) -> usize {
+
+    pub fn span_to_byte_offset(&self, pos: LineColumn) -> usize {
         let line_idx = pos.line.saturating_sub(1);
         if line_idx < self.line_offsets.len() {
             self.line_offsets[line_idx] + pos.column
@@ -1833,8 +2080,29 @@ impl RustEditor {
         self.content.clone()
     }
 
+    /// Get a reference to the syntax tree (for revert operations)
+    pub fn get_syntax_tree(&self) -> &syn::File {
+        &self.syntax_tree
+    }
+
+    /// Replace a range of bytes with new content (for revert operations)
+    pub fn replace_range(&mut self, start: usize, end: usize, new_content: &str) -> Result<()> {
+        if start > end || end > self.content.len() {
+            anyhow::bail!("Invalid range: {}..{} (content length: {})", start, end, self.content.len());
+        }
+
+        self.content.replace_range(start..end, new_content);
+
+        // Re-parse the syntax tree
+        self.syntax_tree = syn::parse_str(&self.content)
+            .context("Failed to re-parse after replace_range")?;
+        self.line_offsets = Self::compute_line_offsets(&self.content);
+
+        Ok(())
+    }
+
     /// Find all locations where a field appears in the codebase
-    pub(crate) fn find_field_locations(&self, field_name: &str) -> Result<Vec<crate::operations::FieldLocation>> {
+    pub fn find_field_locations(&self, field_name: &str) -> Result<Vec<crate::operations::FieldLocation>> {
         use syn::visit::Visit;
         use crate::operations::{FieldLocation, FieldContext};
 
@@ -1941,11 +2209,26 @@ impl RustEditor {
     }
 
     /// Inspect and list AST nodes (e.g., struct literals) in the file
-    pub(crate) fn inspect(&self, node_type: &str, name_filter: Option<&str>, include_comments: bool) -> Result<Vec<crate::operations::InspectResult>> {
+    pub fn inspect(&self, node_type: Option<&str>, name_filter: Option<&str>, variant_filter: Option<&str>, include_comments: bool) -> Result<Vec<crate::operations::InspectResult>> {
         use syn::visit::Visit;
         use crate::operations::InspectResult;
 
         let mut results = Vec::new();
+
+        // If node_type is None, search all node types
+        if node_type.is_none() {
+            let all_types = vec![
+                "struct", "enum", "function", "impl-method", "trait", "const", "static", "type-alias", "mod",
+                "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref",
+            ];
+            for nt in all_types {
+                let mut type_results = self.inspect(Some(nt), name_filter, variant_filter, include_comments)?;
+                results.append(&mut type_results);
+            }
+            return Ok(results);
+        }
+
+        let node_type = node_type.unwrap(); // Safe because we checked is_none above
 
         match node_type {
             "struct-literal" => {
@@ -1991,7 +2274,7 @@ impl RustEditor {
 
                                 self.results.push(InspectResult {
                                     file_path: String::new(),
-                                    node_type: "ExprStruct".to_string(),
+                                    node_type: "struct-literal".to_string(),
                                     identifier: struct_name,
                                     location,
                                     snippet,
@@ -2057,7 +2340,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "ExprStruct".to_string(),
+                            node_type: "struct-literal".to_string(),
                             identifier: struct_name,
                             location,
                             snippet,
@@ -2129,7 +2412,7 @@ impl RustEditor {
 
                             self.results.push(InspectResult {
                                 file_path: String::new(), // Will be filled in by caller
-                                node_type: "MatchArm".to_string(),
+                                node_type: "match-arm".to_string(),
                                 identifier: pattern_str.replace(" ", ""),
                                 location,
                                 snippet,
@@ -2201,7 +2484,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "ExprPath".to_string(),
+                            node_type: "enum-usage".to_string(),
                             identifier: path_str.replace(" ", ""),
                             location,
                             snippet,
@@ -2275,7 +2558,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "ExprCall".to_string(),
+                            node_type: "function-call".to_string(),
                             identifier: func_name,
                             location,
                             snippet,
@@ -2295,6 +2578,82 @@ impl RustEditor {
                 };
 
                 // Visit all items in the file
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "trait-method" => {
+                // Find methods within trait definitions
+                struct TraitMethodVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                    include_comments: bool,
+                    current_trait_name: Option<String>,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for TraitMethodVisitor<'a> {
+                    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+                        // Track which trait this is
+                        let prev_trait_name = self.current_trait_name.clone();
+                        self.current_trait_name = Some(node.ident.to_string());
+
+                        syn::visit::visit_item_trait(self, node);
+
+                        self.current_trait_name = prev_trait_name;
+                    }
+
+                    fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+                        let method_name = node.sig.ident.to_string();
+
+                        // Create identifier with trait context if available
+                        let identifier = if let Some(ref trait_name) = self.current_trait_name {
+                            format!("{}::{}", trait_name, method_name)
+                        } else {
+                            method_name.clone()
+                        };
+
+                        // Apply name filter if specified
+                        if let Some(filter) = self.name_filter {
+                            // Support filtering by "Trait::method" or just "method"
+                            if !identifier.contains(filter) && method_name != filter {
+                                syn::visit::visit_trait_item_fn(self, node);
+                                return;
+                            }
+                        }
+
+                        // Format the method definition
+                        let snippet = self.editor.format_trait_item_fn(node);
+                        let location = self.editor.span_to_location(node.span());
+
+                        // Extract preceding comment if requested
+                        let preceding_comment = if self.include_comments {
+                            extract_preceding_comment(&self.editor.content, location.line)
+                        } else {
+                            None
+                        };
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "trait-method".to_string(),
+                            identifier,
+                            location,
+                            snippet,
+                            preceding_comment,
+                        });
+
+                        syn::visit::visit_trait_item_fn(self, node);
+                    }
+                }
+
+                let mut visitor = TraitMethodVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
+                    include_comments,
+                    current_trait_name: None,
+                };
+
                 for item in &self.syntax_tree.items {
                     syn::visit::visit_item(&mut visitor, item);
                 }
@@ -2334,7 +2693,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "ExprMethodCall".to_string(),
+                            node_type: "method-call".to_string(),
                             identifier: method_name,
                             location,
                             snippet,
@@ -2393,7 +2752,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "Ident".to_string(),
+                            node_type: "identifier".to_string(),
                             identifier: ident_name,
                             location,
                             snippet,
@@ -2458,7 +2817,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "TypePath".to_string(),
+                            node_type: "type-ref".to_string(),
                             identifier: path_str.replace(" ", ""),
                             location,
                             snippet,
@@ -2519,7 +2878,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(), // Will be filled in by caller
-                            node_type: "ExprMacro".to_string(),
+                            node_type: "macro-call".to_string(),
                             identifier: macro_name,
                             location,
                             snippet,
@@ -2558,7 +2917,7 @@ impl RustEditor {
 
                             self.results.push(InspectResult {
                                 file_path: String::new(), // Will be filled in by caller
-                                node_type: "StmtMacro".to_string(),
+                                node_type: "macro-call".to_string(),
                                 identifier: macro_name,
                                 location,
                                 snippet,
@@ -2617,7 +2976,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemStruct".to_string(),
+                            node_type: "struct".to_string(),
                             identifier: struct_name,
                             location,
                             snippet,
@@ -2641,9 +3000,15 @@ impl RustEditor {
             }
             "enum" => {
                 // Find all enum definitions
+                // Supports:
+                // 1. --variant Rectangle (all enums with Rectangle variant)
+                // 2. --name View --variant Rectangle (View enum, Rectangle variant only)
+                // 3. --name View::Rectangle (:: syntax auto-detects variant filter)
+                // 4. --name *::Rectangle (wildcard: any enum with Rectangle variant)
                 struct EnumDefVisitor<'a> {
                     results: &'a mut Vec<InspectResult>,
                     name_filter: Option<&'a str>,
+                    variant_filter: Option<&'a str>,
                     editor: &'a RustEditor,
                     include_comments: bool,
                 }
@@ -2652,16 +3017,59 @@ impl RustEditor {
                     fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
                         let enum_name = node.ident.to_string();
 
-                        // Apply name filter if specified
-                        if let Some(filter) = self.name_filter {
+                        // Parse name_filter for :: syntax
+                        let (enum_name_filter, implicit_variant_filter) = if let Some(filter) = self.name_filter {
+                            if filter.contains("::") {
+                                // View::Rectangle or *::Rectangle
+                                let parts: Vec<&str> = filter.split("::").collect();
+                                if parts.len() == 2 {
+                                    if parts[0] == "*" {
+                                        // *::Rectangle - match any enum with this variant
+                                        (None, Some(parts[1]))
+                                    } else {
+                                        // View::Rectangle - match specific enum with this variant
+                                        (Some(parts[0]), Some(parts[1]))
+                                    }
+                                } else {
+                                    // Invalid :: syntax, treat as exact enum name
+                                    (Some(filter), None)
+                                }
+                            } else {
+                                // Simple enum name filter
+                                (Some(filter), None)
+                            }
+                        } else {
+                            (None, None)
+                        };
+
+                        // Determine which variant filter to use (explicit --variant flag or implicit from ::)
+                        let effective_variant_filter = self.variant_filter.or(implicit_variant_filter);
+
+                        // Apply enum name filter if specified
+                        if let Some(filter) = enum_name_filter {
                             if enum_name != filter {
                                 syn::visit::visit_item_enum(self, node);
                                 return;
                             }
                         }
 
+                        // If variant filter is specified, check if this enum has that variant
+                        if let Some(variant_name) = effective_variant_filter {
+                            let has_variant = node.variants.iter().any(|v| v.ident.to_string() == variant_name);
+                            if !has_variant {
+                                syn::visit::visit_item_enum(self, node);
+                                return;
+                            }
+                        }
+
                         // Format the enum definition
-                        let snippet = self.editor.format_item_enum(node);
+                        let snippet = if let Some(variant_name) = effective_variant_filter {
+                            // Filter to show only the matching variant
+                            self.editor.format_item_enum_variant_only(node, variant_name)
+                        } else {
+                            self.editor.format_item_enum(node)
+                        };
+
                         let location = self.editor.span_to_location(node.span());
 
                         // Extract preceding comment if requested
@@ -2673,7 +3081,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemEnum".to_string(),
+                            node_type: "enum".to_string(),
                             identifier: enum_name,
                             location,
                             snippet,
@@ -2687,6 +3095,7 @@ impl RustEditor {
                 let mut visitor = EnumDefVisitor {
                     results: &mut results,
                     name_filter,
+                    variant_filter,
                     editor: self,
                     include_comments,
                 };
@@ -2729,7 +3138,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemFn".to_string(),
+                            node_type: "function".to_string(),
                             identifier: fn_name,
                             location,
                             snippet,
@@ -2811,7 +3220,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ImplItemFn".to_string(),
+                            node_type: "impl-method".to_string(),
                             identifier,
                             location,
                             snippet,
@@ -2868,7 +3277,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemTrait".to_string(),
+                            node_type: "trait".to_string(),
                             identifier: trait_name,
                             location,
                             snippet,
@@ -2924,7 +3333,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemConst".to_string(),
+                            node_type: "const".to_string(),
                             identifier: const_name,
                             location,
                             snippet,
@@ -2980,7 +3389,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemStatic".to_string(),
+                            node_type: "static".to_string(),
                             identifier: static_name,
                             location,
                             snippet,
@@ -3036,7 +3445,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemType".to_string(),
+                            node_type: "type-alias".to_string(),
                             identifier: type_name,
                             location,
                             snippet,
@@ -3092,7 +3501,7 @@ impl RustEditor {
 
                         self.results.push(InspectResult {
                             file_path: String::new(),
-                            node_type: "ItemMod".to_string(),
+                            node_type: "mod".to_string(),
                             identifier: mod_name,
                             location,
                             snippet,
@@ -3245,6 +3654,42 @@ impl RustEditor {
         original.to_string()
     }
 
+    /// Format an ItemEnum showing only a specific variant
+    fn format_item_enum_variant_only(&self, item: &syn::ItemEnum, variant_name: &str) -> String {
+        // Find the matching variant
+        let variant = item.variants.iter()
+            .find(|v| v.ident.to_string() == variant_name);
+
+        if let Some(variant) = variant {
+            // Extract the enum header (visibility, enum keyword, name, generics, where clause)
+            let enum_start = self.span_to_byte_offset(item.span().start());
+            let variants_start = if !item.variants.is_empty() {
+                self.span_to_byte_offset(item.variants.first().unwrap().span().start())
+            } else {
+                self.span_to_byte_offset(item.span().end())
+            };
+
+            // Get everything before the first variant (header)
+            let header = &self.content[enum_start..variants_start].trim_end();
+
+            // Extract the specific variant source
+            let variant_start = self.span_to_byte_offset(variant.span().start());
+            let variant_end = self.span_to_byte_offset(variant.span().end());
+            let variant_source = &self.content[variant_start..variant_end];
+
+            // Build the filtered output
+            format!("{}\n    {},\n    // ... {} other variant{}\n}}",
+                header,
+                variant_source,
+                item.variants.len() - 1,
+                if item.variants.len() - 1 == 1 { "" } else { "s" }
+            )
+        } else {
+            // Fallback: show full enum if variant not found
+            self.format_item_enum(item)
+        }
+    }
+
     /// Format an ItemFn node as a string - extracts original source
     fn format_item_fn(&self, item: &syn::ItemFn) -> String {
         let start = self.span_to_byte_offset(item.span().start());
@@ -3255,6 +3700,14 @@ impl RustEditor {
 
     /// Format an ImplItemFn node as a string - extracts original source
     fn format_impl_item_fn(&self, item: &syn::ImplItemFn) -> String {
+        let start = self.span_to_byte_offset(item.span().start());
+        let end = self.span_to_byte_offset(item.span().end());
+        let original = &self.content[start..end];
+        original.to_string()
+    }
+
+    /// Format a TraitItemFn node as a string - extracts original source
+    fn format_trait_item_fn(&self, item: &syn::TraitItemFn) -> String {
         let start = self.span_to_byte_offset(item.span().start());
         let end = self.span_to_byte_offset(item.span().end());
         let original = &self.content[start..end];
@@ -3351,31 +3804,6 @@ impl RustEditor {
         Ok(())
     }
 
-    pub fn find_node(&self, node_type: &str, name: &str) -> Result<Vec<NodeLocation>> {
-        let mut locations = Vec::new();
-        
-        for item in &self.syntax_tree.items {
-            match (node_type, item) {
-                ("struct", Item::Struct(s)) if s.ident == name => {
-                    locations.push(self.span_to_location(s.span()));
-                }
-                ("enum", Item::Enum(e)) if e.ident == name => {
-                    locations.push(self.span_to_location(e.span()));
-                }
-                ("fn", Item::Fn(f)) if f.sig.ident == name => {
-                    locations.push(self.span_to_location(f.span()));
-                }
-                _ => {}
-            }
-        }
-        
-        if locations.is_empty() {
-            anyhow::bail!("Node '{}' of type '{}' not found", name, node_type);
-        }
-        
-        Ok(locations)
-    }
-    
     fn span_to_location(&self, span: Span) -> NodeLocation {
         let start = span.start();
         let end = span.end();
@@ -3393,7 +3821,7 @@ impl RustEditor {
         use crate::operations::{InspectResult, TransformAction};
 
         // First, use inspect to find all matching nodes (comments not needed for transform)
-        let matches = self.inspect(&op.node_type, op.name_filter.as_deref(), false)?;
+        let matches = self.inspect(Some(&op.node_type), op.name_filter.as_deref(), None, false)?;
 
         // Apply content filter if specified
         let filtered_matches: Vec<InspectResult> = if let Some(ref content_filter) = op.content_filter {
@@ -4308,6 +4736,18 @@ impl VisitMut for FunctionRenamer {
         syn::visit_mut::visit_item_fn_mut(self, node);
     }
 
+    fn visit_impl_item_fn_mut(&mut self, node: &mut syn::ImplItemFn) {
+        // Rename impl method definition
+        self.rename_ident(&mut node.sig.ident);
+        syn::visit_mut::visit_impl_item_fn_mut(self, node);
+    }
+
+    fn visit_trait_item_fn_mut(&mut self, node: &mut syn::TraitItemFn) {
+        // Rename trait method definition
+        self.rename_ident(&mut node.sig.ident);
+        syn::visit_mut::visit_trait_item_fn_mut(self, node);
+    }
+
     fn visit_expr_mut(&mut self, expr: &mut syn::Expr) {
         match expr {
             syn::Expr::Call(call) => {
@@ -4374,6 +4814,18 @@ impl<'ast> syn::visit::Visit<'ast> for FunctionReplacementCollector {
         // Collect function definition rename
         self.collect_replacement(&node.sig.ident);
         syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        // Collect impl method definition rename
+        self.collect_replacement(&node.sig.ident);
+        syn::visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+        // Collect trait method definition rename
+        self.collect_replacement(&node.sig.ident);
+        syn::visit::visit_trait_item_fn(self, node);
     }
 
     fn visit_expr(&mut self, expr: &'ast syn::Expr) {

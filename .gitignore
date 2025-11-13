@@ -4,4 +4,7 @@
 !README.md
 !HUMAN.md
 .claude
-Cargo.lock
+
+# Cargo.lock is committed at workspace root but ignored in sub-crates
+/rs-hack/Cargo.lock
+/rs-hack-mcp/Cargo.lock

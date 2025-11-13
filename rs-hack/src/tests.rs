@@ -418,14 +418,14 @@ pub fn handle_status(status: Status) -> String {
     }
 
     #[test]
-    fn test_find_node() {
+    fn test_inspect_node() {
         let editor = RustEditor::new(SAMPLE_STRUCT).unwrap();
-        let result = editor.find_node("struct", "User");
+        let result = editor.inspect(Some("struct"), Some("User"), None, false);
 
         assert!(result.is_ok());
-        let locations = result.unwrap();
-        assert_eq!(locations.len(), 1);
-        assert!(locations[0].line > 0);
+        let results = result.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].location.line > 0);
     }
 
     #[test]

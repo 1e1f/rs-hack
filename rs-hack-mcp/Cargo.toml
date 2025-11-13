@@ -1,13 +1,14 @@
 [package]
 name = "rs-hack-mcp"
 version = "0.1.0"
-edition = "2021"
-authors = ["Leif Shackelford <structuresound@gmail.com>"]
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "MCP server for rs-hack - AST-aware Rust refactoring tools"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/1e1f/rs-hack"
 keywords = ["mcp", "ai", "rust", "refactoring", "ast"]
 categories = ["development-tools", "command-line-utilities"]
+readme = "../README.md"
 
 [[bin]]
 name = "rs-hack-mcp"

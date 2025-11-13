@@ -225,8 +225,25 @@ pub fn restore_from_nodes(
     // Parse into AST
     let mut editor = RustEditor::new(&content)?;
 
-    // For each backup node, find and replace in AST
-    for backup in nodes {
+    // Separate struct-literal backups from others (they need special ordering)
+    let (mut struct_literal_backups, other_backups): (Vec<_>, Vec<_>) = nodes.iter()
+        .partition(|b| b.node_type == "struct-literal");
+
+    // Sort struct-literal backups by counter in REVERSE order (process from end of file to beginning)
+    // This ensures byte offsets remain valid as we restore
+    struct_literal_backups.sort_by(|a, b| {
+        let counter_a = a.identifier.split('#').nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+        let counter_b = b.identifier.split('#').nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+        counter_b.cmp(&counter_a) // Reverse order
+    });
+
+    // Process struct-literal backups first (in reverse order)
+    for backup in &struct_literal_backups {
+        restore_struct_literal(&mut editor, backup)?;
+    }
+
+    // Then process other backups
+    for backup in other_backups {
         match backup.node_type.as_str() {
             "ItemStruct" => {
                 restore_struct(&mut editor, backup)?;
@@ -244,6 +261,10 @@ pub fn restore_from_nodes(
             "ExprStruct" => {
                 // Struct literals are handled as part of the parent function
                 // Skip individual struct literal restoration
+            }
+            "struct-literal" => {
+                // Already handled above in the separate struct-literal processing
+                // This case should never be reached
             }
             "ItemUse" => {
                 // Use statements are simple, we can skip restoration
@@ -329,6 +350,81 @@ fn restore_function(editor: &mut crate::editor::RustEditor, backup: &BackupNode)
     editor.replace_item_at_index(fn_index, backup_item)?;
 
     Ok(())
+}
+
+fn restore_struct_literal(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> Result<()> {
+    use syn::{visit::Visit, ExprStruct, spanned::Spanned};
+    use quote::ToTokens;
+
+    // Extract the struct name and counter from the identifier (format: "StructName#counter" or "Enum::Variant#counter")
+    let parts: Vec<&str> = backup.identifier.split('#').collect();
+    if parts.len() != 2 {
+        anyhow::bail!("Invalid struct literal identifier: {}", backup.identifier);
+    }
+    let struct_name = parts[0];
+    let target_counter: usize = parts[1].parse()
+        .context("Invalid counter in struct literal identifier")?;
+
+    // Parse the backup content as an expression
+    let _backup_expr: ExprStruct = syn::parse_str(&backup.original_content)
+        .context("Failed to parse backup struct literal content")?;
+
+    // Find matching struct literal in the current file
+    struct LiteralFinder<'a> {
+        struct_name: &'a str,
+        current_literals: Vec<(usize, usize, String)>, // (start_byte, end_byte, content)
+        editor: &'a crate::editor::RustEditor,
+    }
+
+    impl<'ast, 'a> Visit<'ast> for LiteralFinder<'a> {
+        fn visit_expr_struct(&mut self, node: &'ast ExprStruct) {
+            // Check if this matches our target struct name
+            let matches = if self.struct_name.contains("::") {
+                // Enum variant case
+                let path_str = node.path.segments.iter()
+                    .map(|seg| seg.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::");
+                path_str == self.struct_name
+            } else {
+                // Simple struct case
+                node.path.segments.len() == 1
+                    && node.path.segments.last()
+                        .map(|seg| seg.ident.to_string())
+                        .as_ref() == Some(&self.struct_name.to_string())
+            };
+
+            if matches {
+                let start = self.editor.span_to_byte_offset(node.span().start());
+                let end = self.editor.span_to_byte_offset(node.span().end());
+                let content = node.to_token_stream().to_string();
+                self.current_literals.push((start, end, content));
+            }
+
+            syn::visit::visit_expr_struct(self, node);
+        }
+    }
+
+    let mut finder = LiteralFinder {
+        struct_name,
+        current_literals: Vec::new(),
+        editor,
+    };
+
+    let syntax_tree = editor.get_syntax_tree();
+    finder.visit_file(syntax_tree);
+
+    // Restore the specific occurrence identified by the counter
+    if target_counter < finder.current_literals.len() {
+        let (start, end, _) = finder.current_literals[target_counter];
+        let backup_content = backup.original_content.trim();
+        editor.replace_range(start, end, backup_content)?;
+        Ok(())
+    } else {
+        // Struct literal no longer exists, which is okay for revert
+        // (it might have been removed by the operation we're reverting)
+        Ok(())
+    }
 }
 
 /// Save run metadata

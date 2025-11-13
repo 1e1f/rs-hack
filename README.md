@@ -44,101 +44,192 @@ Three levels of documentation for different needs:
 
 ## Installation
 
-### From crates.io
+This project is organized as a Cargo workspace with three crates:
+- **rs-hack** - The main CLI tool for AST-aware refactoring
+- **rshack** - Convenient alias (no hyphens!) - same tool, easier to type
+- **rs-hack-mcp** - MCP server for AI agent integration (Claude Desktop, etc.)
 
+### CLI Tool
+
+From crates.io (choose one):
 ```bash
-cargo install rs-hack
+cargo install rs-hack    # Full name
+cargo install rshack     # Alias (no hyphens!)
 ```
 
-### From source
+Both install the same tool - `rshack` is just easier to type!
 
+From source:
 ```bash
 git clone https://github.com/1e1f/rs-hack
 cd rs-hack
-cargo install --path .
+cargo install --path rs-hack  # or --path rshack
 ```
 
-The binary will be installed to `~/.cargo/bin/rs-hack`.
+### MCP Server (for AI agents)
+
+From crates.io:
+```bash
+cargo install rs-hack-mcp
+```
+
+From source:
+```bash
+git clone https://github.com/1e1f/rs-hack
+cd rs-hack
+cargo install --path rs-hack-mcp
+```
+
+Binaries will be installed to `~/.cargo/bin/`.
+
+## What's New in 0.5.1
+
+**🎉 Major Enhancements:**
+
+1. **Unified Field API** - Explicit, self-documenting flags
+   - `--field-name` + `--field-type` for struct definitions
+   - `--field-name` + `--field-value` for struct literals
+   - `--field-name` + both for adding to both
+   - No more parsing `"name: Type"` strings!
+
+2. **Enum Variant Struct Literal Support** - Operations on `View::Grid { ... }` style patterns
+   - `--kind struct` now includes enum variant struct literals
+   - Automatic literal-only mode for `::` targets
+   - Example: `rs-hack add --name View::Grid --field-name layer --field-value None --kind struct --apply`
+
+3. **Trait Method Support** - Complete function coverage
+   - `--kind function` now includes trait method definitions
+   - Rename works on trait methods, impl methods, and standalone functions
+   - Example: `rs-hack rename --kind function --name immediate_mode --to impulse_mode --apply`
+
+4. **100% Formatting Preservation** - Surgical editing everywhere
+   - Struct literal add/remove uses surgical editing (no more prettyplease!)
+   - Revert now preserves exact original formatting
+   - Defaults to surgical mode for all rename operations
+
+5. **Full Revert Support** - All operations are now revertible
+   - Struct-literal operations fully supported
+   - `rs-hack revert <run-id>` works for all commands
+   - Preserves formatting on revert
 
 ## Quick Start
 
 ```bash
-# Comment out all eprintln! macros containing "[SHADOW RENDER]"
+# v0.5.1: Enhanced field operations + formatting preservation
+
+# NEW: Unified field API with explicit flags
+rs-hack add --name User --field-name email --field-type String --paths src --apply
+
+# Add field to enum variant struct literals
+rs-hack add --name View::Grid --field-name gap --field-value "Some((0.0, 0.0))" --kind struct --paths src --apply
+
+# Add variant to enum (auto-detects it's an enum)
+rs-hack add --name Status --variant "Archived" --paths src --apply
+
+# Rename enum variant across entire codebase (preserves formatting!)
+rs-hack rename --name Status::Draft --to Pending --paths src --apply
+
+# Discover what exists (new discovery workflow)
+rs-hack find --name Rectangle --paths src
+# Shows: struct definitions, struct literals, identifiers, etc. (grouped by type)
+
+# Then operate on what you found (using same --name syntax)
+rs-hack add --name Rectangle --field "color: String" --paths src --apply
+
+# Use --kind for semantic grouping (struct = struct + struct-literal)
+rs-hack find --kind struct --name Config --paths src
+
+# Use --node-type for granular control (only struct definitions)
+rs-hack find --node-type struct --name Config --paths src
+
+# Transform: Generic find-and-modify for any AST node
 rs-hack transform \
-  --path "src/**/*.rs" \
+  --paths "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
   --content-filter "[SHADOW RENDER]" \
   --action comment \
   --apply
-
-# Add derive macros with glob pattern
-rs-hack add-derive --path "src/**/*.rs" \
-  --target-type struct --name User \
-  --derives "Clone,Debug,Serialize" --apply
-
-# Auto-detect and add missing match arms
-rs-hack add-match-arm --path src/handler.rs \
-  --pattern "Status" \
-  --auto-detect \
-  --body "todo!()" \
-  --enum-name Status \
-  --function handle_status \
-  --apply
-
-# Add a method to an impl block
-rs-hack add-impl-method --path src/user.rs \
-  --target User \
-  --method 'pub fn get_id(&self) -> u64 { self.id }' --apply
-
-# Add a use statement
-rs-hack add-use --path src/lib.rs \
-  --use-path "serde::Serialize" --apply
 ```
 
-## Supported Operations (21 commands)
+## v0.5.0 Highlights ⭐ NEW
 
-### Generic Transform (1) ⭐ NEW
+**Unified Commands** - 20+ specialized commands → 5 intuitive verbs:
+- `find` - Discover what exists (with auto-grouped output)
+- `add` - Add fields, variants, methods, derives (auto-detects target type)
+- `remove` - Remove fields, variants, methods (auto-detects target type)
+- `update` - Update fields, variants (auto-detects target type)
+- `rename` - Rename functions, enum variants (AST-aware)
+
+**Semantic Grouping with `--kind`:**
+```bash
+--kind struct      # Both struct definitions AND struct literals
+--kind function    # Both function definitions AND function calls
+--kind enum        # Both enum definitions AND enum usages
+```
+
+**Granular Control with `--node-type`:**
+```bash
+--node-type struct          # Only struct definitions
+--node-type struct-literal  # Only struct initialization expressions
+--node-type function        # Only function definitions
+--node-type function-call   # Only function invocations
+```
+
+**Discovery Workflow:**
+```bash
+# 1. Find what exists (omit --node-type to search everything)
+rs-hack find --name Rectangle --paths src
+
+# 2. Operate on it (same --name syntax)
+rs-hack add --name Rectangle --field "color: String" --paths src --apply
+```
+
+**Benefits:**
+- ✅ Consistent `--name` syntax across all commands
+- ✅ Auto-detection: less typing, fewer flags to remember
+- ✅ Helpful hints when targets aren't found
+- ✅ Same mental model as Unix tools (find → operate)
+
+## Supported Operations
+
+### Unified Commands (5) ⭐ v0.5.0
+- ✅ **find**: Discover AST nodes with powerful search
+  - Omit `--node-type` to search ALL types (auto-grouped output)
+  - Use `--kind` for semantic grouping (struct, function, enum, etc.)
+  - Use `--node-type` for granular control
+  - Helpful hints when searches fail
+- ✅ **add**: Add fields, variants, methods, derives, use statements
+  - Auto-detects target type from context
+  - `--field` → struct field, `--variant` → enum variant, etc.
+- ✅ **remove**: Remove fields, variants, methods, derives
+  - Auto-detects target type from context
+- ✅ **update**: Update fields, variants, match arms
+  - Auto-detects target type from context
+- ✅ **rename**: Rename functions and enum variants (AST-aware)
+  - Use `--kind` or `--node-type` for disambiguation
+
+### Legacy Commands (Deprecated, use unified commands above)
+- ⚠️ **add-struct-field**, **update-struct-field**, **remove-struct-field**
+- ⚠️ **add-enum-variant**, **update-enum-variant**, **remove-enum-variant**
+- ⚠️ **add-match-arm**, **update-match-arm**, **remove-match-arm**
+- ⚠️ **add-derive**, **add-impl-method**, **add-use**
+- See [MIGRATION_v0.5.0.md](MIGRATION_v0.5.0.md) for migration guide
+
+### Generic Transform (1)
 - ✅ **transform**: Find and modify any AST nodes (comment, remove, or replace)
-  - Works with all node types from `inspect`
+  - Works with all node types
   - Content filtering for precise targeting
-  - Single command replaces many specialized operations
-
-### Struct Operations (3) ⭐ CONSOLIDATED
-- ✅ **add-struct-field**: Add fields to definitions, literals, or both
-  - (default) → definition only
-  - `--literal-default VALUE` → definition + literals
-  - `--literal-only` → literals only (replaces old `add-struct-literal-field`)
-- ✅ **update-struct-field**: Update field types/visibility
-- ✅ **remove-struct-field**: Remove fields from definitions AND all literals (also works on enum variant fields using `EnumName::VariantName` syntax)
-
-### Enum Operations (4)
-- ✅ **add-enum-variant**, **update-enum-variant**, **remove-enum-variant**
-- ✅ **rename-enum-variant**: Rename enum variants across entire codebase ⭐ NEW
-
-### Match Operations (3)
-- ✅ **add-match-arm** (with `--auto-detect` for missing variants)
-- ✅ **update-match-arm**, **remove-match-arm**
-
-### Code Organization (3)
-- ✅ **add-derive**: Derive macros (with `--where` filter support)
-- ✅ **add-impl-method**: Methods to impl blocks
-- ✅ **add-use**: Use statements
-
-### Inspection & Search (2)
-- ✅ **find**: Locate AST node definitions (structs, enums, functions)
-- ✅ **inspect**: List and view AST nodes with glob support (now includes macro-call)
 
 ### State & Utilities (5)
 - ✅ **history**: View past operations
 - ✅ **revert**: Undo specific changes
 - ✅ **clean**: Remove old state
-- ✅ **batch**: Run multiple operations from JSON
+- ✅ **batch**: Run multiple operations from JSON/YAML
 - ✅ `--format diff`: Generate git-compatible patches
 
-### Pattern-Based Filtering (NEW!)
+### Pattern-Based Filtering
 - ✅ **`--where`**: Filter targets by traits or attributes
-  - Supported on: `add-struct-field`, `update-struct-field`, `remove-struct-field`, `add-enum-variant`, `update-enum-variant`, `remove-enum-variant`, `add-derive`
   - Example: `--where "derives_trait:Clone"` or `--where "derives_trait:Clone,Debug"`
 
 ## Usage
@@ -224,48 +315,132 @@ rs-hack remove-enum-variant \
 - **Safe migrations**: Add fields only to serializable types, etc.
 - **Powerful combinations**: Combine with glob patterns for precise bulk operations
 
-### Struct Operations
+### Unified Commands Examples (v0.5.0+)
 
-#### Add Field to Struct Definition
+#### Add Operations
+
 ```bash
-# Add field to struct definition only (idempotent - skips if exists)
+# Add field to struct (auto-detects it's a struct)
+rs-hack add --name User --field "email: String" --paths src --apply
+
+# Add field with position control
+rs-hack add --name Config --field "timeout_ms: u64" \
+  --position "after:port" --paths src --apply
+
+# Add field to BOTH definition AND all literals
+rs-hack add --name IRCtx --field "return_type: Option<Type>" \
+  --position "after:current_function_frame" \
+  --literal-default "None" --paths "src/**/*.rs" --apply
+
+# Add enum variant (auto-detects it's an enum)
+rs-hack add --name Status --variant "Archived" --paths src --apply
+
+# Add derive macro (auto-detects target type)
+rs-hack add --name User --derive "Clone,Debug,Serialize" --paths src --apply
+
+# Add method to impl block
+rs-hack add --name User \
+  --method 'pub fn get_id(&self) -> u64 { self.id }' \
+  --paths src --apply
+
+# Add use statement
+rs-hack add --use "serde::Serialize" --paths src --apply
+
+# Add documentation comment (requires --node-type or --kind)
+rs-hack add --name User --node-type struct \
+  --doc-comment "Represents a user in the system" --paths src --apply
+```
+
+#### Remove Operations
+
+```bash
+# Remove struct field (auto-detects it's a struct)
+rs-hack remove --name User --field-name email --paths src --apply
+
+# Remove enum variant field (from variant definition AND all literals)
+rs-hack remove --name View::Rectangle --field-name color --paths src --apply
+
+# Remove enum variant field (literals only)
+rs-hack remove --name View::Rectangle --field-name color \
+  --literal-only --paths src --apply
+
+# Remove enum variant
+rs-hack remove --name Status --variant Draft --paths src --apply
+
+# Remove derive
+rs-hack remove --name User --derive Clone --paths src --apply
+```
+
+#### Update Operations
+
+```bash
+# Update struct field visibility
+rs-hack update --name User --field "pub email: String" --paths src --apply
+
+# Update struct field type
+rs-hack update --name User --field "id: i64" --paths src --apply
+
+# Update enum variant
+rs-hack update --name Status \
+  --variant "Draft { created_at: u64 }" --paths src --apply
+
+# Update match arm
+rs-hack update --name Status --match-arm "Status::Draft" \
+  --body '"pending".to_string()' --paths src --apply
+```
+
+#### Rename Operations
+
+```bash
+# Rename enum variant across entire codebase
+rs-hack rename --name Status::Draft --to Pending --paths "src/**/*.rs" --apply
+
+# Rename function across entire codebase
+rs-hack rename --name process_v2 --to process --paths "src/**/*.rs" --apply
+
+# Validate rename (check for remaining references)
+rs-hack rename --name Status::Draft --to Pending \
+  --validate --paths "src/**/*.rs"
+
+# Use --kind for disambiguation
+rs-hack rename --name handle_error --to process_error \
+  --kind function --paths src --apply
+```
+
+#### Find Operations
+
+```bash
+# Discover what exists (searches ALL types, auto-grouped)
+rs-hack find --name Rectangle --paths src
+
+# Use --kind for semantic grouping
+rs-hack find --kind struct --name Config --paths src  # Both definitions and literals
+
+# Use --node-type for granular control
+rs-hack find --node-type struct --name Config --paths src  # Only definitions
+
+# Find with variant filtering
+rs-hack find --kind enum --variant Rectangle --paths src
+rs-hack find --name View::Rectangle --paths src  # Same using :: syntax
+
+# Find with content filtering
+rs-hack find --node-type macro-call --name eprintln \
+  --content-filter "[DEBUG]" --paths src
+```
+
+### Legacy Commands (Deprecated)
+
+The following commands still work but are deprecated in favor of unified commands:
+
+#### Struct Operations (Legacy - use `add/remove/update` instead)
+
+```bash
+# DEPRECATED: Use rs-hack add --name User --field "email: String"
 rs-hack add-struct-field \
   --path src/models.rs \
   --struct-name User \
   --field "email: String" \
   --apply
-
-# With position control
-rs-hack add-struct-field \
-  --path src/models.rs \
-  --struct-name Config \
-  --field "timeout_ms: u64" \
-  --position "after:port" \
-  --apply
-
-# NEW: Add field to BOTH struct definition AND all struct literals in one command!
-rs-hack add-struct-field \
-  --path "src/**/*.rs" \
-  --struct-name IRCtx \
-  --field "return_type: Option<Type>" \
-  --position "after:current_function_frame" \
-  --literal-default "None" \
-  --apply
-
-# This updates BOTH:
-# 1. The struct definition:
-#    pub struct IRCtx {
-#        ...
-#        current_function_frame: Option<Frame>,
-#        return_type: Option<Type>,  ← Added
-#    }
-#
-# 2. All struct initialization expressions:
-#    IRCtx {
-#        ...
-#        current_function_frame: None,
-#        return_type: None,  ← Added
-#    }
 ```
 
 **Note**: The `--literal-default` flag is optional. When omitted, only the struct definition is updated (original behavior). When provided, it also updates all struct literals with the given default value.
@@ -629,7 +804,7 @@ List and view AST nodes (struct literals, etc.) across multiple files with glob 
 
 ```bash
 # List all Shadow struct initializations
-rs-hack inspect \
+rs-hack find \
   --path "tests/shadow_*.rs" \
   --node-type struct-literal \
   --name Shadow \
@@ -643,7 +818,7 @@ rs-hack inspect \
 # Shadow { offset: Vec2::ZERO, blur: 0.0, color: Color32::WHITE, }
 
 # Get locations only (like grep -n but AST-aware)
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type struct-literal \
   --name Config \
@@ -655,20 +830,20 @@ rs-hack inspect \
 # src/main.rs:10:21
 
 # Get structured JSON output
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type struct-literal \
   --name User \
   --format json
 
 # List ALL struct literals (no name filter)
-rs-hack inspect \
+rs-hack find \
   --path "src/models.rs" \
   --node-type struct-literal \
   --format snippets
 
 # Find match arms for specific enum variant (better than grep!)
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type match-arm \
   --name "Operator::AssertSome" \
@@ -682,13 +857,13 @@ rs-hack inspect \
 # Operator::AssertSome => self.unwrap_or_panic(value),
 
 # Find ALL match arms in a file
-rs-hack inspect \
+rs-hack find \
   --path "src/handler.rs" \
   --node-type match-arm \
   --format locations
 
 # Find enum variant usages (better than grep!)
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type enum-usage \
   --name "Operator::PropagateError" \
@@ -702,14 +877,14 @@ rs-hack inspect \
 # Operator::PropagateError
 
 # Find ALL usages of any Operator variant
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type enum-usage \
   --name "Operator::" \
   --format locations | wc -l
 
 # Find all calls to a specific function
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type function-call \
   --name "handle_error" \
@@ -723,21 +898,21 @@ rs-hack inspect \
 # handle_error(err)
 
 # Find all .unwrap() calls (great for auditing!)
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type method-call \
   --name "unwrap" \
   --format locations
 
 # Find all references to a variable/identifier
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type identifier \
   --name "config" \
   --format snippets
 
 # Find all usages of a type
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type type-ref \
   --name "Vec" \
@@ -751,19 +926,92 @@ rs-hack inspect \
 # Vec<i32>
 
 # Find all eprintln! macros (NEW!)
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name "eprintln" \
   --format snippets
 
 # Find eprintln! macros with specific content (NEW!)
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name "eprintln" \
   --content-filter "[SHADOW RENDER]" \
   --format locations
+```
+
+### NEW: Discovery Mode (v0.5.0+)
+
+When exploring unfamiliar code, you often don't know what node-type something is. Simply **omit `--node-type`** to search ALL types with auto-grouped output:
+
+```bash
+# Find "Rectangle" anywhere - don't know if it's a struct, enum variant, or what?
+rs-hack find --path "src/**/*.rs" --name Rectangle
+
+# Output (auto-grouped by type):
+# Found "Rectangle" in 3 contexts:
+#
+# struct:
+#   // src/shapes.rs:10:0 - Rectangle
+#   pub struct Rectangle { width: f32, height: f32 }
+#
+# struct-literal (2 matches):
+#   // src/main.rs:15:12 - Rectangle
+#   Rectangle { width: 10.0, height: 5.0 }
+#
+#   // src/tests.rs:42:20 - Rectangle
+#   Rectangle { width: 0.0, height: 0.0 }
+#
+# identifier (5 matches):
+#   // src/shapes.rs:10:11 - Rectangle
+#   Rectangle
+#   ... (4 more)
+```
+
+**Hints System:** If a specific search finds nothing, but matches exist in other node types, you'll get helpful hints:
+
+```bash
+$ rs-hack find --path src --node-type struct --name Rectangle
+No struct found named "Rectangle"
+
+Hint: Found "Rectangle" in other contexts:
+  - identifier (5 matches): src/shapes.rs:2:4
+  - struct-literal (2 matches): src/main.rs:15:12
+
+To see all matches, run without --node-type:
+  rs-hack find --paths src --name Rectangle
+```
+
+### NEW: Enum Variant Filtering (v0.5.0+)
+
+Four flexible ways to filter enum variants:
+
+```bash
+# 1. Find ANY enum with a Rectangle variant
+rs-hack find --path "src/**/*.rs" --node-type enum --variant Rectangle
+
+# Output:
+# // src/view.rs:3:0 - View
+# pub enum View {
+#     Rectangle { color: String, ... },
+#     // ... 7 other variants
+# }
+#
+# // src/shapes.rs:17:0 - Shape
+# pub enum Shape {
+#     Rectangle { width: f32, height: f32 },
+#     // ... 2 other variants
+# }
+
+# 2. Find specific enum + variant
+rs-hack find --path "src/**/*.rs" --node-type enum --name View --variant Rectangle
+
+# 3. Same using :: syntax (more concise)
+rs-hack find --path "src/**/*.rs" --node-type enum --name View::Rectangle
+
+# 4. Wildcard: any enum with Rectangle variant (same as #1, different syntax)
+rs-hack find --path "src/**/*.rs" --node-type enum --name "*::Rectangle"
 ```
 
 **Supported Node Types:**
@@ -920,7 +1168,7 @@ rs-hack transform \
 **Workflow**: Use `inspect` first to see what matches, then `transform` to modify:
 ```bash
 # 1. See what will be affected
-rs-hack inspect \
+rs-hack find \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1306,7 +1554,7 @@ User: "Rename the enum variant IRValue::HashMapV2 to HashMap across all files"
 
 Claude: I'll use rs-hack to safely rename that enum variant.
 
-*Runs: rs-hack inspect to find usages*
+*Runs: rs-hack find to find usages*
 *Runs: rs-hack rename-enum-variant with --format diff to preview*
 *Shows you the diff*
 *Runs: rs-hack rename-enum-variant --apply*
@@ -1331,7 +1579,7 @@ Claude: I'll use rs-hack to safely rename that enum variant.
 User: "Add a return_type field to all IRCtx struct literals"
 
 Claude:
-1. Inspects struct literals: rs-hack inspect --node-type struct-literal --name IRCtx
+1. Inspects struct literals: rs-hack find --node-type struct-literal --name IRCtx
 2. Previews changes: rs-hack add-struct-field ... --format diff
 3. Shows you the diff for approval
 4. Applies: rs-hack add-struct-field ... --apply
@@ -1344,7 +1592,7 @@ Claude:
 User: "Comment out all eprintln! macros with [DEBUG] in them"
 
 Claude:
-1. Finds matches: rs-hack inspect --node-type macro-call --name eprintln --content-filter "[DEBUG]"
+1. Finds matches: rs-hack find --node-type macro-call --name eprintln --content-filter "[DEBUG]"
 2. Previews: rs-hack transform ... --action comment --format diff
 3. Applies: rs-hack transform ... --action comment --apply
 4. Reports: ✓ Commented out 42 debug statements
@@ -1531,7 +1779,30 @@ Safe, semantic, and correct every time. 🦀
 
 ## Features by Version
 
-### v0.4.2 - Enum Variant Renaming (Current) ⭐
+### v0.5.0 - Unified Commands & Semantic Grouping (Current) ⭐
+- **Unified Commands**: 20+ specialized commands → 5 intuitive verbs
+  - `find` - Discover what exists (with auto-grouped output)
+  - `add` - Add fields, variants, methods, derives (auto-detects target type)
+  - `remove` - Remove fields, variants, methods (auto-detects target type)
+  - `update` - Update fields, variants (auto-detects target type)
+  - `rename` - Rename functions, enum variants (AST-aware)
+- **`--kind` flag**: Semantic grouping for related node types
+  - `struct` → struct definitions + struct literals
+  - `function` → function definitions + function calls
+  - `enum` → enum definitions + enum usages
+  - Plus: `match`, `identifier`, `type`, `macro`, `const`, `trait`, `mod`, `use`
+- **`--node-type` flag**: Granular control for specific AST node types
+  - Conflicts with `--kind` for explicit control
+  - Works on `find`, `add`, `remove`, `update`, `rename` commands
+- **Auto-detection**: Commands infer target type from context
+  - `--field` → struct operation, `--variant` → enum operation
+  - Less typing, fewer flags to remember
+- **Helpful hints**: When searches fail, suggests alternatives
+- **Discovery workflow**: `find` → discover, then operate with same `--name`
+- **Legacy commands deprecated**: Old commands still work with migration hints
+- **Consistent `--name` syntax**: Same pattern across all operations
+
+### v0.4.2 - Enum Variant Renaming ⭐
 - **`rename-enum-variant` command**: Type-safe enum variant renaming across entire codebase
   - Renames variant in enum definitions, match patterns, constructors, and all usages
   - Handles fully qualified (`Enum::Variant`) and imported (`Variant`) paths

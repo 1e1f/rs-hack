@@ -1,0 +1,33 @@
+[package]
+name = "rshack"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Alias for rs-hack - AST-aware Rust refactoring tool (install with: cargo install rshack)"
+keywords = ["ast", "refactoring", "code-generation", "ai", "automation"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../README.md"
+
+[[bin]]
+name = "rshack"
+path = "src/main.rs"
+
+[dependencies]
+# Main dependency - use rs-hack as a library
+rs-hack = { path = "../rs-hack", version = "0.5.0" }
+
+# CLI dependencies (same as rs-hack for the main.rs logic)
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+walkdir = "2.5"
+glob = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6.0"
+syn = { version = "2.0", features = ["full", "extra-traits", "visit", "visit-mut"] }
+quote = "1.0"
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
