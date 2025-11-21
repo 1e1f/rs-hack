@@ -112,6 +112,16 @@ Binaries will be installed to `~/.cargo/bin/`.
    - `rs-hack revert <run-id>` works for all commands
    - Preserves formatting on revert
 
+6. **Better UX** - Improved error messages and result limiting
+   - `--limit N` for limiting find results (no need for `| head -20`)
+   - Helpful error messages for common mistakes (e.g., `--in` → `--paths`)
+   - Find command supports `--field-name` for field discovery
+
+7. **Cleaner Interface** - Removed all deprecated commands
+   - Only modern unified commands (`add`, `remove`, `update`, `rename`)
+   - Deprecated hyphenated commands removed from help and MCP
+   - Simplified command list for better discoverability
+
 ## Quick Start
 
 ```bash
@@ -132,6 +142,12 @@ rs-hack rename --name Status::Draft --to Pending --paths src --apply
 # Discover what exists (new discovery workflow)
 rs-hack find --name Rectangle --paths src
 # Shows: struct definitions, struct literals, identifiers, etc. (grouped by type)
+
+# NEW: Limit results (no need for | head)
+rs-hack find --name unwrap --paths src --limit 20
+
+# NEW: Find all uses of a field
+rs-hack find --field-name debug_mode --paths src
 
 # Then operate on what you found (using same --name syntax)
 rs-hack add --name Rectangle --field "color: String" --paths src --apply

@@ -20,8 +20,8 @@ Use rs-hack for all Rust code transformations. It's type-safe and AST-aware—ne
 ## Core Philosophy
 
 **Always preview, then apply:**
-1. Use `inspect` to find what will be affected
-2. Run command without `--apply` to see diff
+1. Use `find` to discover what will be affected
+2. Run command without `--apply` to see diff (or use `--format diff`)
 3. Apply changes with `--apply`
 4. Check with `cargo check` or `cargo test`
 5. Revert if needed: `rs-hack revert <run-id>`
@@ -34,7 +34,7 @@ Perfect for large-scale refactoring across many files:
 
 ```bash
 # Step 1: Check what exists
-rs-hack inspect --paths "src/**/*.rs" --node-type enum-usage \
+rs-hack find --paths "src/**/*.rs" --node-type enum-usage \
   --name "EnumName::OldVariant" --format locations
 
 # Step 2: Preview changes
@@ -64,22 +64,37 @@ rs-hack rename-enum-variant \
 ### Add Struct Field
 
 ```bash
-# Add to definition AND all literals in one command
-rs-hack add-struct-field \
+# Add to struct definition AND all literals (v0.5.1+)
+rs-hack add \
+  --name StructName \
+  --field-name "field_name" \
+  --field-type "Type" \
+  --field-value "default_value" \
+  --kind struct \
   --paths "src/**/*.rs" \
-  --struct-name StructName \
-  --field "field_name: Type" \
-  --literal-default "default_value" \
-  --position "after:existing_field" \
   --apply
 
-# Add to literals only (field already in definition)
-rs-hack add-struct-field \
+# Add to literals only (field already exists in definition)
+rs-hack add \
+  --name StructName \
+  --field-name "field_name" \
+  --field-value "default_value" \
+  --kind struct \
   --paths "src/**/*.rs" \
-  --struct-name StructName \
-  --field "field_name" \
-  --literal-default "default_value" \
   --apply
+
+# Add field to ENUM VARIANT struct literals (use Enum::Variant syntax)
+rs-hack add \
+  --name "View::Grid" \
+  --field-name "drag_clip_behavior" \
+  --field-value "None" \
+  --kind struct \
+  --paths "src/**/*.rs" \
+  --apply
+
+# ⚠️  IMPORTANT: --variant is for adding a NEW variant to an enum, NOT for adding fields!
+# WRONG:  rs-hack add --name View --variant Grid --field-name foo
+# RIGHT:  rs-hack add --name "View::Grid" --field-name foo --field-value bar --kind struct
 ```
 
 ### Transform: Generic Find & Modify
@@ -103,22 +118,27 @@ rs-hack transform \
   --apply
 ```
 
-### Inspect: Better than grep
+### Find: Better than grep
 
 ```bash
 # Find all struct literals
-rs-hack inspect --paths "src/**/*.rs" \
+rs-hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name StructName \
   --format snippets
 
 # Find all enum usages
-rs-hack inspect --paths "src/**/*.rs" \
+rs-hack find --paths "src/**/*.rs" \
   --node-type enum-usage --name "Enum::Variant" \
   --format locations
 
 # Find all match arms
-rs-hack inspect --paths "src/**/*.rs" \
+rs-hack find --paths "src/**/*.rs" \
   --node-type match-arm --name "Enum::Variant" \
+  --format snippets
+
+# Discovery mode: omit --node-type to search ALL types (auto-grouped!)
+rs-hack find --paths "src/**/*.rs" \
+  --name Rectangle \
   --format snippets
 ```
 
@@ -164,8 +184,8 @@ rs-hack revert <run-id> --force
 # Example: Rename IRValue::HashMapV2 → HashMap
 # (This is what the tool was designed for!)
 
-# 1. Inspect current usage
-rs-hack inspect --paths "src/**/*.rs" \
+# 1. Find current usage
+rs-hack find --paths "src/**/*.rs" \
   --node-type enum-usage --name "IRValue::HashMapV2" \
   --format locations | wc -l
 
@@ -194,8 +214,8 @@ cargo check
 ```bash
 # Add field to both definition and all initialization sites
 
-# 1. Inspect struct literals
-rs-hack inspect --paths "src/**/*.rs" \
+# 1. Find struct literals
+rs-hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name IRCtx \
   --format locations
 
@@ -225,8 +245,8 @@ cargo check
 # Remove field from BOTH definitions AND all literal expressions
 # This is what confused users - remove-struct-field does both automatically!
 
-# 1. Inspect where field is used
-rs-hack inspect --paths "src/**/*.rs" \
+# 1. Find where field is used
+rs-hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name Config \
   --content-filter "debug_mode" \
   --format locations
@@ -257,7 +277,7 @@ rs-hack remove-struct-field \
 
 ```bash
 # 1. Find debug macros
-rs-hack inspect --paths "src/**/*.rs" \
+rs-hack find --paths "src/**/*.rs" \
   --node-type macro-call --name eprintln \
   --content-filter "[DEBUG]" \
   --format locations
@@ -284,6 +304,7 @@ rs-hack transform \
 ✅ **DO use rs-hack for:**
 - Renaming enum variants across multiple files
 - Adding fields to struct definitions and literals
+- Adding fields to enum variant struct literals (use `Enum::Variant` syntax!)
 - Removing fields from struct definitions AND literals (both happen automatically!)
 - Removing fields from enum variant fields (use `EnumName::VariantName` syntax)
 - Adding match arms for enum variants
@@ -297,7 +318,57 @@ rs-hack transform \
 - Non-Rust files
 - Changes requiring semantic/type analysis
 
-## Key Flags
+## Common Pitfall: --variant vs Enum::Variant
+
+**⚠️ The #1 mistake: Confusing adding a variant vs adding fields to a variant**
+
+```bash
+# ❌ WRONG - Trying to add field to enum variant
+rs-hack add --name "View" --variant "Grid" --field-name "foo" --field-value "bar"
+# Error: Cannot combine --variant with --field-name
+
+# ✅ RIGHT - Add a NEW variant to an enum
+rs-hack add --name "View" --variant "Grid { columns: u32, rows: u32 }" --paths src --apply
+
+# ✅ RIGHT - Add field to existing enum variant struct literals
+rs-hack add --name "View::Grid" --field-name "foo" --field-value "bar" --kind struct --paths src --apply
+```
+
+**Remember:**
+- `--variant` = Add a **new** variant to an enum definition
+- `--name "Enum::Variant"` = Target existing enum variant **literals** (for adding/removing fields)
+
+## Quick Reference
+
+### Field API (v0.5.1+)
+
+| What You Want | Flags to Use | Example |
+|--------------|--------------|---------|
+| Add to struct **definition** only | `--field-name` + `--field-type` | `--field-name email --field-type String` |
+| Add to struct **literals** only | `--field-name` + `--field-value` | `--field-name email --field-value "\"\"" ` |
+| Add to **both** definition + literals | `--field-name` + `--field-type` + `--field-value` | `--field-name email --field-type String --field-value "\"\"" ` |
+| Add to enum variant **literals** | `--name "Enum::Variant"` + `--field-name` + `--field-value` + `--kind struct` | `--name "View::Grid" --field-name gap --field-value None --kind struct` |
+
+### --kind vs --node-type
+
+| Flag | Purpose | When to Use |
+|------|---------|-------------|
+| `--kind struct` | Semantic grouping: includes struct definitions AND struct literals | When you want to operate on all struct-related nodes |
+| `--node-type struct` | Granular control: ONLY struct definitions | When you want to target just definitions |
+| `--node-type struct-literal` | Granular control: ONLY struct initialization expressions | When you want to target just literals |
+
+**Rule of thumb:** Use `--kind` for broad operations, `--node-type` for surgical precision.
+
+### Glob Patterns
+
+```bash
+"src/**/*.rs"          # All .rs files in src and subdirectories (most common)
+"src/models/*.rs"      # All .rs files directly in src/models
+"src/**/handler.rs"    # All handler.rs files anywhere under src
+"**/*.rs"              # All .rs files in entire project (careful!)
+```
+
+### Key Flags
 
 ```bash
 --paths "pattern"      # File/dir/glob: "src/**/*.rs"
@@ -305,12 +376,14 @@ rs-hack transform \
 --summary              # Show stats (files/lines changed)
 --apply                # Actually modify (dry-run by default)
 --where "filter"       # Filter by traits: "derives_trait:Clone"
+--kind <type>          # Semantic grouping (struct, enum, function)
+--node-type <type>     # Granular AST node type (struct-literal, enum-usage)
 ```
 
 ## Best Practices
 
-1. **Always inspect first** - Know what you're changing
-2. **Always dry-run** - Preview with `--format diff`
+1. **Always find first** - Know what you're changing with `rs-hack find`
+2. **Always dry-run** - Preview with `--format diff` before `--apply`
 3. **Use glob patterns** - Target multiple files: `"src/**/*.rs"`
 4. **Check after apply** - Run `cargo check` or tests
 5. **Save run IDs** - `rs-hack history` shows recent changes
@@ -341,4 +414,4 @@ rs-hack revert <run-id> --force
 - ❌ Never corrupt strings or comments
 - ❌ Never make partial matches like sed
 
-**When in doubt:** `inspect` → preview → `apply` → `cargo check` → revert if needed
+**When in doubt:** `find` → preview with `--format diff` → `apply` → `cargo check` → revert if needed

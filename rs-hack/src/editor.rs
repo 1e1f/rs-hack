@@ -737,6 +737,21 @@ impl RustEditor {
         }
 
         impl<'ast, 'a> Visit<'ast> for LiteralFieldInserter<'a> {
+            fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+                // Parse macro contents to find struct literals inside (e.g., vec![...])
+                use syn::parse::Parser;
+
+                if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                    .parse2(node.mac.tokens.clone())
+                {
+                    for expr in exprs.iter() {
+                        syn::visit::visit_expr(self, expr);
+                    }
+                }
+
+                syn::visit::visit_expr_macro(self, node);
+            }
+
             fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
                 // Check if this matches our target
                 let is_match = if let Some(resolver) = &self.path_resolver {
@@ -853,6 +868,21 @@ impl RustEditor {
         }
 
         impl<'ast, 'a> Visit<'ast> for LiteralCollector<'a> {
+            fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+                // Parse macro contents to find struct literals inside (e.g., vec![...])
+                use syn::parse::Parser;
+
+                if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                    .parse2(node.mac.tokens.clone())
+                {
+                    for expr in exprs.iter() {
+                        syn::visit::visit_expr(self, expr);
+                    }
+                }
+
+                syn::visit::visit_expr_macro(self, node);
+            }
+
             fn visit_expr(&mut self, node: &'ast Expr) {
                 if let Expr::Struct(expr_struct) = node {
                     let matches = if let Some(resolver) = self.path_resolver {
@@ -2241,6 +2271,24 @@ impl RustEditor {
                 }
 
                 impl<'ast, 'a> Visit<'ast> for StructLiteralVisitor<'a> {
+                    fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+                        // Try to parse macro contents as expressions to find struct literals inside
+                        // This handles cases like: vec![View::Rectangle { ... }]
+                        use syn::parse::Parser;
+
+                        // Try to parse the macro tokens as a punctuated list of expressions (common in vec!, etc.)
+                        if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                            .parse2(node.mac.tokens.clone())
+                        {
+                            for expr in exprs.iter() {
+                                syn::visit::visit_expr(self, expr);
+                            }
+                        }
+
+                        // Continue with default visit behavior
+                        syn::visit::visit_expr_macro(self, node);
+                    }
+
                     fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
                         // Match based on pattern:
                         // - "Rectangle" → only Rectangle { ... } (no :: prefix)
@@ -2304,9 +2352,10 @@ impl RustEditor {
                                 path_str == filter
                             }
                         } else {
-                            // No :: in pattern - only match pure struct literals (no path qualifier)
-                            node.path.get_ident()
-                                .map(|ident| ident.to_string() == filter)
+                            // No :: in pattern - eagerly match any path ending with this name
+                            // This matches both "Rectangle" and "View::Rectangle" when searching for "Rectangle"
+                            node.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == filter)
                                 .unwrap_or(false)
                         };
 

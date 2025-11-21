@@ -87,6 +87,7 @@ impl User {
             struct_name: "User".to_string(),
             field_name: "name".to_string(),
             where_filter: None,
+            literal_only: false,
         };
 
         let result = editor.remove_struct_field(&op);
@@ -937,7 +938,7 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("struct-literal", Some("User"), false).unwrap();
+        let results = editor.inspect(Some("struct-literal"), Some("User"), None, false).unwrap();
 
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].identifier, "User");
@@ -956,7 +957,7 @@ fn handle(op: Operator) {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("match-arm", Some("Error"), false).unwrap();
+        let results = editor.inspect(Some("match-arm"), Some("Error"), None, false).unwrap();
 
         assert_eq!(results.len(), 1);
         assert!(results[0].identifier.contains("Error"));
@@ -978,7 +979,7 @@ fn check() -> Operator {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("enum-usage", Some("Operator::Error"), false).unwrap();
+        let results = editor.inspect(Some("enum-usage"), Some("Operator::Error"), None, false).unwrap();
 
         // Should find both: in match arm and in return
         assert!(results.len() >= 2);
@@ -995,7 +996,7 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("function-call", Some("handle_error"), false).unwrap();
+        let results = editor.inspect(Some("function-call"), Some("handle_error"), None, false).unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].snippet.contains("handle_error"));
@@ -1011,7 +1012,7 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("method-call", Some("unwrap"), false).unwrap();
+        let results = editor.inspect(Some("method-call"), Some("unwrap"), None, false).unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].snippet.contains("unwrap"));
@@ -1027,7 +1028,7 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("identifier", Some("config"), false).unwrap();
+        let results = editor.inspect(Some("identifier"), Some("config"), None, false).unwrap();
 
         // Should find: let binding, println argument, process argument
         // Note: May find more instances as identifiers appear in various contexts
@@ -1044,7 +1045,7 @@ fn process(items: Vec<String>) -> Option<i32> {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("type-ref", Some("Vec"), false).unwrap();
+        let results = editor.inspect(Some("type-ref"), Some("Vec"), None, false).unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.identifier.contains("Vec")));
@@ -1059,7 +1060,7 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect("struct-literal", None, false).unwrap();
+        let results = editor.inspect(Some("struct-literal"), None, None, false).unwrap();
 
         // Should find both User and Config
         assert_eq!(results.len(), 2);
@@ -1069,7 +1070,7 @@ fn main() {
     fn test_inspect_invalid_node_type() {
         let code = "fn main() {}";
         let editor = RustEditor::new(code).unwrap();
-        let result = editor.inspect("invalid-type", None, false);
+        let result = editor.inspect(Some("invalid-type"), None, None, false);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Unsupported node type"));

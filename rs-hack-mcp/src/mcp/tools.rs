@@ -19,11 +19,11 @@ impl ToolRegistry {
         Self {
             tools: vec![
                 // ============================================================
-                // INSPECTION TOOLS (2)
+                // INSPECTION TOOLS (1)
                 // ============================================================
                 Tool {
                     name: "find",
-                    description: "Find and list AST nodes with powerful discovery mode. Omit node_type to search ALL types (auto-grouped output). v0.5.1: trait-method support. Expression-level: struct-literal, match-arm, enum-usage, function-call, method-call, macro-call, identifier, type-ref. Definition-level: struct, enum, function, impl-method, trait-method, trait, const, static, type-alias, mod",
+                    description: "Find and list AST nodes. DISCOVERY MODE: Omit --node-type to search ALL types with auto-grouped output (recommended for exploration). TARGETED MODE: Specify --node-type for precise searches. v0.5.1: --limit for result limiting, --field-name to find all uses of a field. Use --format snippets (shows code), locations (grep-like), or json (structured). Better than grep: AST-aware, no false positives from comments/strings.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -36,23 +36,12 @@ impl ToolRegistry {
                             "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\", \"View::Rectangle\", \"*::Rectangle\")"},
                             "variant": {"type": "string", "description": "Filter enum variants by name (only valid with --node-type enum)"},
                             "content_filter": {"type": "string", "description": "Filter by content substring"},
+                            "field_name": {"type": "string", "description": "Find all occurrences of a field across struct definitions, enum variants, and struct literals"},
                             "include_comments": {"type": "boolean", "default": true, "description": "Include preceding comments (doc and regular) in output"},
-                            "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"}
+                            "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"},
+                            "limit": {"type": "integer", "description": "Limit number of results (like 'head -N')"}
                         },
                         "required": ["paths"]
-                    }),
-                },
-                Tool {
-                    name: "find_field",
-                    description: "Find all occurrences of a field across the codebase (struct definitions, enum variant definitions, and struct literal expressions). Provides suggested commands for removing the field.",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
-                            "field_name": {"type": "string", "description": "Name of the field to search for"},
-                            "summary": {"type": "boolean", "default": false, "description": "Show summary only (limit literal occurrences to 5)"}
-                        },
-                        "required": ["paths", "field_name"]
                     }),
                 },
 
@@ -62,19 +51,19 @@ impl ToolRegistry {
                 // ============================================================
                 Tool {
                     name: "add",
-                    description: "Unified add command - auto-detects operation type. Add struct fields, enum variants, impl methods, derives, use statements, match arms, or doc comments. v0.5.1: NEW unified field API with --field-name, --field-type, --field-value. Use --kind struct to include enum variant literals.",
+                    description: "Unified add command - auto-detects operation type. Add struct fields, enum variants, impl methods, derives, use statements, match arms, or doc comments. v0.5.1 Field API: Use --field-name + --field-type (definition only), --field-name + --field-value (literals only), or all three (both). For enum variant literals: --name \"Enum::Variant\" --field-name --field-value --kind struct. IMPORTANT: --variant is for adding NEW variants, not for targeting existing variant literals.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
                             "name": {"type": "string", "description": "Name of the target (struct/enum/function name). Required for most operations except --use. Use Enum::Variant for enum variant struct literals."},
-                            "kind": {"type": "string", "enum": ["struct", "function", "enum", "impl", "trait", "mod"], "description": "Semantic grouping. 'struct' includes enum variant literals. Mutually exclusive with --node-type."},
-                            "node_type": {"type": "string", "description": "Granular AST node type (e.g., 'struct-field', 'enum-variant'). Mutually exclusive with --kind."},
+                            "kind": {"type": "string", "enum": ["struct", "function", "enum", "impl", "trait", "mod"], "description": "Semantic grouping for broad operations. 'struct' = struct definitions + struct literals + enum variant literals. Use this for operations affecting all instances. Mutually exclusive with --node-type."},
+                            "node_type": {"type": "string", "description": "Granular AST node type for surgical precision (e.g., 'struct' = definitions only, 'struct-literal' = initialization expressions only). Use this when you need fine control. Mutually exclusive with --kind."},
                             "field": {"type": "string", "description": "[DEPRECATED] Field definition (e.g., \"email: String\"). Use --field-name + --field-type instead."},
-                            "field_name": {"type": "string", "description": "[v0.5.1] Field name (e.g., \"email\"). Use with --field-type and/or --field-value"},
+                            "field_name": {"type": "string", "description": "[v0.5.1] Field name (e.g., \"email\"). Use with --field-type and/or --field-value. For enum variant literals, use --name \"Enum::Variant\" syntax instead of --variant."},
                             "field_type": {"type": "string", "description": "[v0.5.1] Field type (e.g., \"String\"). Adds to struct definition."},
                             "field_value": {"type": "string", "description": "[v0.5.1] Field value (e.g., \"None\", \"vec![]\"). Adds to struct literals."},
-                            "variant": {"type": "string", "description": "Variant definition for enum variants (e.g., \"Pending\" or \"Error { code: i32 }\")"},
+                            "variant": {"type": "string", "description": "Add a NEW variant to an enum definition (e.g., \"Pending\" or \"Error { code: i32 }\"). IMPORTANT: This is NOT for adding fields to existing enum variants - for that, use --name \"Enum::Variant\" --field-name instead. Cannot be combined with --field-name/--field-type/--field-value."},
                             "method": {"type": "string", "description": "Method definition for impl methods (e.g., \"pub fn get_id(&self) -> u64 { self.id }\")"},
                             "derive": {"type": "string", "description": "Comma-separated derive macros (e.g., \"Clone,Debug,Serialize\")"},
                             "use": {"type": "string", "description": "Use statement path (e.g., \"serde::Serialize\"). Omit --name when using --use."},
@@ -276,11 +265,6 @@ impl ToolRegistry {
                 self.add_find_args(&arguments, &mut args);
                 "find"
             }
-            // Find field uses "find-field" command
-            "find_field" => {
-                self.add_find_field_args(&arguments, &mut args);
-                "find-field"
-            }
             // Unified CRUD commands (v0.5.0)
             "add" => {
                 self.add_add_args(&arguments, &mut args);
@@ -394,21 +378,17 @@ impl ToolRegistry {
             args.push("--format".to_string());
             args.push(format.to_string());
         }
-    }
 
-    fn add_find_field_args(&self, arguments: &Value, args: &mut Vec<String>) {
-        if let Some(paths) = arguments.get("paths").and_then(|v| v.as_str()) {
-            args.push("--paths".to_string());
-            args.push(paths.to_string());
-        }
+        // Add field_name (for field finding)
         if let Some(field_name) = arguments.get("field_name").and_then(|v| v.as_str()) {
             args.push("--field-name".to_string());
             args.push(field_name.to_string());
         }
-        if let Some(summary) = arguments.get("summary").and_then(|v| v.as_bool()) {
-            if summary {
-                args.push("--summary".to_string());
-            }
+
+        // Add limit (for result limiting)
+        if let Some(limit) = arguments.get("limit").and_then(|v| v.as_i64()) {
+            args.push("--limit".to_string());
+            args.push(limit.to_string());
         }
     }
 

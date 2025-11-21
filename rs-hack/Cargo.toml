@@ -9,6 +9,7 @@ description = "AST-aware Rust refactoring tool for AI agents - transform, rename
 keywords = ["ast", "refactoring", "code-generation", "ai", "automation"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "../README.md"
+default-run = "rs-hack"
 
 [lib]
 name = "rs_hack"

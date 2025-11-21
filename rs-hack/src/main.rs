@@ -23,6 +23,7 @@ use diff::{print_diff, print_summary_diff, DiffStats};
 #[derive(Parser)]
 #[command(name = "rs-hack")]
 #[command(about = "AST-aware Rust code editing tool for AI agents", long_about = None)]
+#[command(after_help = "For detailed help on any command, use: rs-hack <COMMAND> --help\n\nExamples:\n  rs-hack find --help\n  rs-hack add --help\n  rs-hack rename --help")]
 #[command(version)]
 struct Cli {
     /// Use project-local state directory (.rs-hack) instead of ~/.rs-hack
@@ -51,7 +52,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Add a field to a struct (idempotent - skips if field already exists)
+    /// [LEGACY] Add a field to a struct - use 'rs-hack add' instead
+    #[command(hide = true)]
     #[command(after_help = "EXAMPLES:
     # Add field to struct definition only
     rs-hack add-struct-field --struct-name Config --field \"timeout: Duration\" --paths src --apply
@@ -111,6 +113,7 @@ BEHAVIOR WITH --literal-default:
     },
 
     /// [DEPRECATED] Update an existing struct field (changes type/visibility) - use 'rs-hack update' instead
+    #[command(hide = true)]
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --name <NAME> --field <FIELD>' instead
 
 MIGRATION:
@@ -145,6 +148,7 @@ EXAMPLES:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Remove a field from struct definitions and all struct literal expressions - use 'rs-hack remove' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --name <NAME> --field-name <FIELD>' instead
 
@@ -205,6 +209,7 @@ WHAT IT DOES:
     /// DEPRECATED: Use add-struct-field --literal-only instead
     /// Add a field to struct literal expressions (initialization)
     #[deprecated]
+    #[command(hide = true)]
     AddStructLiteralField {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -227,7 +232,8 @@ WHAT IT DOES:
         apply: bool,
     },
 
-    /// Add a variant to an enum (skips if variant already exists)
+    /// [LEGACY] Add a variant to an enum - use 'rs-hack add' instead
+    #[command(hide = true)]
     AddEnumVariant {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -254,6 +260,7 @@ WHAT IT DOES:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Update an existing enum variant - use 'rs-hack update' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --name <NAME> --variant <VARIANT>' instead
 
@@ -289,6 +296,7 @@ EXAMPLES:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Remove a variant from an enum - use 'rs-hack remove' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --name <NAME> --variant <VARIANT>' instead
 
@@ -317,6 +325,7 @@ MIGRATION:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Rename an enum variant across the codebase - use 'rs-hack rename' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack rename --name <NAME> --to <NEW_NAME>' instead
 
@@ -362,6 +371,7 @@ EXAMPLES:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Rename a function across the codebase - use 'rs-hack rename' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack rename --name <NAME> --to <NEW_NAME>' instead
 
@@ -403,7 +413,8 @@ EXAMPLES:
         apply: bool,
     },
 
-    /// Unified rename command - auto-detects function or enum variant rename (v0.5.0)
+    /// Rename across codebase (example: rs-hack rename --name old_func --to new_func --paths src --apply)
+    #[command(display_order = 3)]
     #[command(after_help = "EXAMPLES:
     # Rename function
     rs-hack rename --name process_v2 --to process --paths src --apply
@@ -492,6 +503,7 @@ NOTES:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Add a match arm for a specific pattern - use 'rs-hack add' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack add --match-arm <PATTERN> --body <BODY>' instead
 
@@ -531,6 +543,7 @@ MIGRATION:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Update an existing match arm - use 'rs-hack update' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --match-arm <PATTERN> --body <BODY>' instead
 
@@ -559,6 +572,7 @@ MIGRATION:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Remove a match arm - use 'rs-hack remove' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --match-arm <PATTERN>' instead
 
@@ -594,7 +608,8 @@ MIGRATION:
         apply: bool,
     },
 
-    /// Find and list AST nodes - search all types, filter variants, get hints (v0.5.0: powerful discovery mode)
+    /// Search code (example: rs-hack find --name unwrap --paths src --limit 20)
+    #[command(display_order = 1)]
     #[command(after_help = "EXAMPLES:
     # NEW: Search all node types when you don't know what you're looking for
     rs-hack find --paths src --name Rectangle
@@ -678,7 +693,8 @@ OUTPUT FORMATS:
         format: String,
     },
 
-    /// Add derive macros to a struct or enum
+    /// [LEGACY] Add derive macros - use 'rs-hack add' instead
+    #[command(hide = true)]
     AddDerive {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -701,7 +717,8 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// Add a method to an impl block
+    /// [LEGACY] Add a method to an impl block - use 'rs-hack add' instead
+    #[command(hide = true)]
     AddImplMethod {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -724,7 +741,8 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// Add a use statement
+    /// [LEGACY] Add a use statement - use 'rs-hack add' instead
+    #[command(hide = true)]
     AddUse {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -743,7 +761,8 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// Unified add command - auto-detects operation type from flags (v0.5.0)
+    /// Insert text (example: rs-hack add --name User --field-name email --field-type String --paths src --apply)
+    #[command(display_order = 2)]
     #[command(after_help = "EXAMPLES:
     # Add struct field
     rs-hack add --name User --field \"email: String\" --paths src --apply
@@ -869,7 +888,8 @@ NOTES:
         apply: bool,
     },
 
-    /// Unified remove command - auto-detects operation type from flags (v0.5.0)
+    /// Delete text (example: rs-hack remove --name User --field-name deprecated_field --paths src --apply)
+    #[command(display_order = 4)]
     #[command(after_help = "EXAMPLES:
     # Remove struct field (from definition AND all literals)
     rs-hack remove --name User --field-name email --paths src --apply
@@ -964,7 +984,8 @@ NOTES:
         apply: bool,
     },
 
-    /// Unified update command - auto-detects operation type from flags (v0.5.0)
+    /// Modify text (example: rs-hack update --name User --field "pub email: String" --paths src --apply)
+    #[command(display_order = 5)]
     #[command(after_help = "EXAMPLES:
     # Update struct field type/visibility
     rs-hack update --name User --field \"pub email: String\" --paths src --apply
@@ -1073,8 +1094,32 @@ NOTES:
         keep_days: u32,
     },
 
-    /// Transform AST nodes (generic find-and-transform operation)
-    #[command(after_help = "SUPPORTED NODE TYPES:
+    /// Bulk modify expressions (comment out unwraps, remove debug macros, replace calls)
+    #[command(after_help = "WHAT IS TRANSFORM?
+    Transform is for bulk code cleanup and refactoring of EXPRESSIONS (how code is used).
+    Unlike add/remove/update which modify DEFINITIONS (structs, enums, functions),
+    transform finds and modifies expressions like method calls, macros, and literals.
+
+    Think: 'find + sed' but AST-aware.
+
+WHEN TO USE TRANSFORM:
+    - Comment out all .unwrap() calls for safety audit
+    - Remove all debug println!/eprintln! statements
+    - Replace deprecated function calls across codebase
+    - Clean up todo!() placeholders
+    - Remove test-only code markers
+
+WHEN TO USE OTHER COMMANDS:
+    - add/remove/update: Modify struct/enum definitions (add fields, change types)
+    - rename: Change names everywhere (rename functions, variants)
+    - transform: Bulk modify how code is called/used (this command!)
+
+ACTIONS:
+    comment     Wrap code in /* ... */ (preserves it for reference)
+    remove      Delete code entirely
+    replace     Swap with new code (use --with to specify replacement)
+
+SUPPORTED NODE TYPES:
 
 Expression-level nodes (8 types):
     struct-literal      Struct initialization (e.g., Config { field: value })
@@ -1145,6 +1190,7 @@ EXAMPLES:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Add documentation comment to an item - use 'rs-hack add' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack add --name <NAME> --node-type <TYPE> --doc-comment <TEXT>' instead
 
@@ -1177,6 +1223,7 @@ MIGRATION:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Update existing documentation comment - use 'rs-hack update' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --name <NAME> --node-type <TYPE> --doc-comment <TEXT>' instead
 
@@ -1205,6 +1252,7 @@ MIGRATION:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Remove documentation comment from an item - use 'rs-hack remove' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --name <NAME> --node-type <TYPE> --doc-comment' instead
 
@@ -1229,6 +1277,7 @@ MIGRATION:
         apply: bool,
     },
 
+    #[command(hide = true)]
     /// [DEPRECATED] Find all occurrences of a field across the codebase - use 'rs-hack find' instead
     #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack find --field-name <FIELD>' instead
 
@@ -2125,6 +2174,54 @@ fn main() -> Result<()> {
                 }
             }
 
+            // Fallback: If we still found nothing with a name filter, do a text search
+            if all_results.is_empty() && name.is_some() {
+                let search_name = name.as_ref().unwrap();
+                let mut text_matches: Vec<(String, usize)> = Vec::new();
+
+                for file in &files {
+                    let content = std::fs::read_to_string(&file)
+                        .context(format!("Failed to read file: {:?}", file))?;
+
+                    let count = content.lines().filter(|line| line.contains(search_name)).count();
+                    if count > 0 {
+                        text_matches.push((file.to_string_lossy().to_string(), count));
+                    }
+                }
+
+                if !text_matches.is_empty() {
+                    let total_matches: usize = text_matches.iter().map(|(_, c)| c).sum();
+
+                    eprintln!("No AST nodes found for \"{}\"", search_name);
+                    eprintln!();
+                    eprintln!("However, found {} non-AST text occurrence{} of \"{}\":",
+                        total_matches,
+                        if total_matches == 1 { "" } else { "s" },
+                        search_name
+                    );
+
+                    for (file_path, count) in &text_matches {
+                        eprintln!("  - {} ({} line{})",
+                            file_path,
+                            count,
+                            if *count == 1 { "" } else { "s" }
+                        );
+                    }
+
+                    eprintln!();
+                    eprintln!("Note: These occurrences may be:");
+                    eprintln!("  - Inside macro invocations (e.g., vec![YourStruct {{ ... }}])");
+                    eprintln!("  - In comments or strings");
+                    eprintln!("  - Part of a qualified path (e.g., module::{})", search_name);
+                    eprintln!();
+                    eprintln!("rs-hack's AST visitor cannot see inside macro expansions.");
+                    eprintln!("Try searching without --name to see all struct literals,");
+                    eprintln!("or use --name with a different pattern (e.g., \"*::{}\").", search_name);
+
+                    return Ok(());
+                }
+            }
+
             // Format output based on format flag
             match format.as_str() {
                 "json" => {
@@ -2270,6 +2367,17 @@ fn main() -> Result<()> {
             }
 
             if op_count > 1 {
+                // Special hint for common mistake: using --variant with --field-name
+                if variant.is_some() && (field_name.is_some() || field.is_some()) {
+                    anyhow::bail!(
+                        "Cannot combine --variant with --field-name/--field.\n\n\
+                         Hint: To add a field to enum variant struct literals, use:\n  \
+                         rs-hack add --name \"{}::{}\" --field-name <FIELD> --field-value <VALUE> --kind struct --paths <PATHS>\n\n\
+                         Note: --variant is for adding a NEW variant to an enum, not for adding fields to existing variants.",
+                        name.as_deref().unwrap_or("EnumName"),
+                        variant.as_deref().unwrap_or("VariantName")
+                    );
+                }
                 anyhow::bail!("Can only specify one operation flag at a time (--field/--field-name, --variant, --method, --derive, --use, --match-arm, or --doc-comment)");
             }
 
@@ -2378,29 +2486,35 @@ fn main() -> Result<()> {
                     (field.clone().unwrap(), literal_default.clone())
                 };
 
-                // First check if target exists using kind expansion if provided
-                let exists = if let Some(k) = &kind {
-                    // Use kind expansion to check multiple node types
-                    let node_types = expand_kind_to_node_types(k);
-                    let mut found = false;
-                    for nt in node_types {
-                        if target_exists(&files, target_name, Some(nt))? {
-                            found = true;
-                            break;
-                        }
-                    }
-                    found
-                } else if let Some(nt) = &node_type {
-                    // Use specific node type
-                    target_exists(&files, target_name, Some(nt))?
-                } else {
-                    // Default to struct
-                    target_exists(&files, target_name, Some("struct"))?
-                };
+                // For literal-only operations (field_value without field_type), skip struct definition check
+                // Only check if struct exists when we're modifying the definition
+                let is_literal_only = field_type.is_none() && field_value.is_some();
 
-                if !exists {
-                    show_target_hints(&files, target_name, "struct", &paths)?;
-                    return Ok(());
+                if !is_literal_only {
+                    // Check if target exists using kind expansion if provided
+                    let exists = if let Some(k) = &kind {
+                        // Use kind expansion to check multiple node types
+                        let node_types = expand_kind_to_node_types(k);
+                        let mut found = false;
+                        for nt in node_types {
+                            if target_exists(&files, target_name, Some(nt))? {
+                                found = true;
+                                break;
+                            }
+                        }
+                        found
+                    } else if let Some(nt) = &node_type {
+                        // Use specific node type
+                        target_exists(&files, target_name, Some(nt))?
+                    } else {
+                        // Default to struct
+                        target_exists(&files, target_name, Some("struct"))?
+                    };
+
+                    if !exists {
+                        show_target_hints(&files, target_name, "struct", &paths)?;
+                        return Ok(());
+                    }
                 }
 
                 let op = Operation::AddStructField(AddStructFieldOp {
@@ -3075,7 +3189,7 @@ fn execute_operation(
         // Print summary for diff mode
         total_stats.print_summary();
     } else if format == "default" && !apply {
-        println!("\n🔍 Dry run complete. Use --apply to make changes.");
+        println!("\n🔍 Dry run complete. Use --apply to make changes, or --format diff to generate a patch.");
         println!("Summary: {} file(s) would be modified", changes.len());
     }
 

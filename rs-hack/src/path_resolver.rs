@@ -51,6 +51,7 @@ impl PathResolver {
     ///
     /// # Example
     /// ```
+    /// use rs_hack::path_resolver::PathResolver;
     /// let resolver = PathResolver::new("crate::compiler::types::IRValue");
     /// ```
     pub fn new(canonical_path: &str) -> Option<Self> {

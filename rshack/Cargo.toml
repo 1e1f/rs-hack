@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Main dependency - use rs-hack as a library
-rs-hack = { path = "../rs-hack", version = "0.5.0" }
+rs-hack = { path = "../rs-hack", version = "0.5.1" }
 
 # CLI dependencies (same as rs-hack for the main.rs logic)
 clap = { version = "4.5", features = ["derive"] }

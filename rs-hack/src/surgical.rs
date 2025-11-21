@@ -73,7 +73,7 @@ impl PartialOrd for Replacement {
 /// ];
 ///
 /// let result = apply_surgical_edits(source, replacements);
-/// assert_eq!(result, "fn foo() {\n    let x = 42;\n}\n");
+/// assert_eq!(result, "fn foo() {\n    let x = 42;\n}");
 /// ```
 pub fn apply_surgical_edits(
     original_source: &str,
