@@ -46,6 +46,10 @@ struct Cli {
     #[arg(long, global = true, num_args = 0..)]
     exclude: Vec<String>,
 
+    /// Limit the number of instances to modify (stops after N modifications)
+    #[arg(long, global = true)]
+    limit: Option<usize>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -1596,7 +1600,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::UpdateStructField { paths, struct_name, field, output, apply } => {
@@ -1607,7 +1611,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::RemoveStructField { paths, struct_name, field_name, literal_only, output, apply } => {
@@ -1619,7 +1623,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::AddStructLiteralField { paths, struct_name, field, position, apply } => {
@@ -1631,7 +1635,7 @@ fn main() -> Result<()> {
                 struct_path: None,  // Deprecated command doesn't support path resolution
             });
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::AddEnumVariant { paths, enum_name, variant, position, output, apply } => {
@@ -1643,7 +1647,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::UpdateEnumVariant { paths, enum_name, variant, output, apply } => {
@@ -1654,7 +1658,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::RemoveEnumVariant { paths, enum_name, variant_name, output, apply } => {
@@ -1665,7 +1669,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::RenameEnumVariant { paths, enum_name, old_variant, new_variant, enum_path, edit_mode, validate, apply } => {
@@ -1687,7 +1691,7 @@ fn main() -> Result<()> {
                     edit_mode,
                 });
 
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             }
         }
 
@@ -1709,7 +1713,7 @@ fn main() -> Result<()> {
                     edit_mode,
                 });
 
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             }
         }
 
@@ -1733,7 +1737,7 @@ fn main() -> Result<()> {
                         content_filter: None,
                         action: TransformAction::Replace { with: to.clone() },
                     });
-                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                     return Ok(());
                 }
             }
@@ -1757,7 +1761,7 @@ fn main() -> Result<()> {
                         content_filter: None,
                         action: TransformAction::Replace { with: to.clone() },
                     });
-                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                     return Ok(());
                 } else {
                     anyhow::bail!("Rename with --kind is only supported for 'function' and 'identifier' kinds. For other kinds, use --node-type.");
@@ -1793,7 +1797,7 @@ fn main() -> Result<()> {
                         edit_mode,
                     });
 
-                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 }
             } else {
                 // No :: syntax - need to discover if it's a function or enum variant
@@ -1850,7 +1854,7 @@ fn main() -> Result<()> {
                             edit_mode,
                         });
 
-                        execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                        execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                     }
                 } else if found_as_enum_variant {
                     // Found as enum variant, but need to know which enum
@@ -1869,7 +1873,7 @@ fn main() -> Result<()> {
                                 edit_mode,
                             });
 
-                            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                         }
                     } else {
                         // Multiple enums have this variant
@@ -1913,7 +1917,7 @@ fn main() -> Result<()> {
                 enum_name,
             });
 
-            execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+            execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::UpdateMatchArm { paths, pattern, body, function, apply } => {
@@ -1924,7 +1928,7 @@ fn main() -> Result<()> {
                 function_name: function,
             });
 
-            execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+            execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::RemoveMatchArm { paths, pattern, function, apply } => {
@@ -1934,7 +1938,7 @@ fn main() -> Result<()> {
                 function_name: function,
             });
 
-            execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+            execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::Batch { spec, apply } => {
@@ -2294,6 +2298,47 @@ fn main() -> Result<()> {
                                 println!();
                             }
                         }
+
+                        // Add hints for struct-literal searches with simple names
+                        if let Some(ref search_name) = name {
+                            if !search_name.contains("::") &&
+                               (node_type.as_deref() == Some("struct-literal") ||
+                                kind.as_deref() == Some("struct")) {
+                                // Check if we found struct literals with qualified paths
+                                if let Some(struct_lit_results) = by_type.get("struct-literal") {
+                                    use std::collections::HashMap;
+                                    let mut qualified_paths: HashMap<String, usize> = HashMap::new();
+
+                                    for result in struct_lit_results {
+                                        // Check if identifier contains :: (qualified path)
+                                        if result.identifier.contains("::") {
+                                            *qualified_paths.entry(result.identifier.clone()).or_insert(0) += 1;
+                                        }
+                                    }
+
+                                    if !qualified_paths.is_empty() {
+                                        println!("💡 Hint: Found {} struct literal(s) with fully qualified paths:",
+                                            qualified_paths.values().sum::<usize>());
+
+                                        let mut paths: Vec<_> = qualified_paths.iter().collect();
+                                        paths.sort_by_key(|(path, _)| *path);
+
+                                        for (path, count) in &paths {
+                                            println!("   {} ({} instance{})", path, count, if **count == 1 { "" } else { "s" });
+                                        }
+
+                                        println!("\nTo find only these:");
+                                        for (path, _) in paths.iter().take(3) {
+                                            println!("   rs-hack find --name \"{}\" --node-type struct-literal --paths ...", path);
+                                        }
+                                        if paths.len() > 3 {
+                                            println!("   (and {} more...)", paths.len() - 3);
+                                        }
+                                        println!();
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         // Standard non-grouped output
                         for result in &all_results {
@@ -2330,7 +2375,7 @@ fn main() -> Result<()> {
                 where_filter: cli.r#where.clone(),
             });
 
-            execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+            execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::AddImplMethod { paths, target, method, position, apply } => {
@@ -2342,7 +2387,7 @@ fn main() -> Result<()> {
                 position: parse_position(&position)?,
             });
 
-            execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+            execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::AddUse { paths, use_path, position, apply } => {
@@ -2353,7 +2398,7 @@ fn main() -> Result<()> {
                 position: parse_position(&position)?,
             });
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only, position, apply } => {
@@ -2399,7 +2444,7 @@ fn main() -> Result<()> {
                         auto_detect: true,
                         enum_name: enum_name.clone(),
                     });
-                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 } else {
                     let op = Operation::AddMatchArm(AddMatchArmOp {
                         pattern: match_arm.clone().unwrap(),
@@ -2408,7 +2453,7 @@ fn main() -> Result<()> {
                         auto_detect: false,
                         enum_name: None,
                     });
-                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                    execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 }
                 return Ok(());
             }
@@ -2441,7 +2486,7 @@ fn main() -> Result<()> {
                     doc_comment: doc_text.clone(),
                     style: DocCommentStyle::Line,
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 return Ok(());
             }
 
@@ -2451,7 +2496,7 @@ fn main() -> Result<()> {
                     use_path: use_path.clone(),
                     position: parse_position(&position)?,
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 return Ok(());
             }
 
@@ -2524,7 +2569,7 @@ fn main() -> Result<()> {
                     literal_default: final_literal_default,
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             } else if let Some(variant_def) = variant {
                 // Adding enum variant
                 if !target_exists(&files, target_name, Some("enum"))? {
@@ -2538,7 +2583,7 @@ fn main() -> Result<()> {
                     position: parse_position(&position)?,
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             } else if let Some(method_def) = method {
                 // Adding impl method
                 // Note: impl methods target the type name, not "impl TypeName"
@@ -2552,7 +2597,7 @@ fn main() -> Result<()> {
                     method_def: method_def.clone(),
                     position: parse_position(&position)?,
                 });
-                execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+                execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
             } else if let Some(derives) = derive {
                 // Adding derive macros
                 // Need to detect if target is struct or enum
@@ -2574,7 +2619,7 @@ fn main() -> Result<()> {
                     derives: derive_vec,
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation(&files, &op, apply, None, &cli.format, cli.summary)?;
+                execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
             }
         }
 
@@ -2598,7 +2643,7 @@ fn main() -> Result<()> {
                     pattern: pattern.clone(),
                     function_name: function.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 return Ok(());
             }
 
@@ -2628,7 +2673,7 @@ fn main() -> Result<()> {
                     target_type,
                     name: name.clone().unwrap(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 return Ok(());
             }
 
@@ -2641,8 +2686,11 @@ fn main() -> Result<()> {
             // Auto-detect operation type and execute
             if let Some(field) = field_name {
                 // Removing struct/enum-variant field
-                // Check if target exists using kind expansion if provided
-                let exists = if let Some(k) = &kind {
+                // Check if target exists using kind expansion if provided (skip for literal-only)
+                let exists = if literal_only {
+                    // For literal-only operations, skip definition check
+                    true
+                } else if let Some(k) = &kind {
                     // Use kind expansion to check multiple node types
                     let node_types = expand_kind_to_node_types(k);
                     let mut found = false;
@@ -2684,7 +2732,7 @@ fn main() -> Result<()> {
                     literal_only,
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             } else if let Some(variant_name) = variant {
                 // Removing enum variant
                 if !target_exists(&files, target_name, Some("enum"))? {
@@ -2697,7 +2745,7 @@ fn main() -> Result<()> {
                     variant_name: variant_name.clone(),
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             } else if let Some(method_name) = method {
                 // Removing impl method
                 // Note: We don't have RemoveImplMethod operation yet, so bail with helpful message
@@ -2734,7 +2782,7 @@ fn main() -> Result<()> {
                     new_body: body.clone().unwrap(),
                     function_name: function.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 return Ok(());
             }
 
@@ -2765,7 +2813,7 @@ fn main() -> Result<()> {
                     name: name.clone().unwrap(),
                     doc_comment: doc_text.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
                 return Ok(());
             }
 
@@ -2821,7 +2869,7 @@ fn main() -> Result<()> {
                     field_def: final_field_def,
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             } else if let Some(variant_def) = variant {
                 // Updating enum variant
                 if !target_exists(&files, target_name, Some("enum"))? {
@@ -2834,7 +2882,7 @@ fn main() -> Result<()> {
                     variant_def: variant_def.clone(),
                     where_filter: cli.r#where.clone(),
                 });
-                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
             }
         }
 
@@ -2875,7 +2923,7 @@ fn main() -> Result<()> {
                 action: transform_action,
             });
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::AddDocComment { paths, target_type, name, doc_comment, style, apply } => {
@@ -2892,7 +2940,7 @@ fn main() -> Result<()> {
                 style: doc_style,
             });
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::UpdateDocComment { paths, target_type, name, doc_comment, apply } => {
@@ -2904,7 +2952,7 @@ fn main() -> Result<()> {
                 doc_comment: doc_comment.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::RemoveDocComment { paths, target_type, name, apply } => {
@@ -2915,7 +2963,7 @@ fn main() -> Result<()> {
                 name: name.clone(),
             });
 
-            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary)?;
+            execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
         Commands::FindField { paths, field_name, summary } => {
@@ -3111,9 +3159,12 @@ fn execute_operation(
     output: Option<&PathBuf>,
     format: &str,
     show_summary: bool,
+    limit: Option<usize>,
 ) -> Result<()> {
     let mut changes = Vec::new();
     let mut total_stats = DiffStats::default();
+    let mut total_modifications = 0;
+    let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
 
     for file_path in files {
         let content = std::fs::read_to_string(file_path)
@@ -3123,7 +3174,18 @@ fn execute_operation(
 
         match editor.apply_operation(op) {
             Ok(result) => {
+                // Collect unmatched qualified paths
+                if let Some(unmatched) = result.unmatched_qualified_paths {
+                    for (path, count) in unmatched {
+                        *all_unmatched_paths.entry(path).or_insert(0) += count;
+                    }
+                }
+
                 if result.changed {
+                    // Track total modifications across all files
+                    let modifications_in_file = result.modified_nodes.len();
+                    total_modifications += modifications_in_file;
+
                     let new_content = editor.to_string();
                     changes.push(FileChange {
                         path: file_path.clone(),
@@ -3172,6 +3234,14 @@ fn execute_operation(
                             }
                         }
                     }
+
+                    // Check if we've hit the limit
+                    if let Some(limit) = limit {
+                        if total_modifications >= limit {
+                            println!("\n⚠️  Limit reached: {} modifications made (limit: {})", total_modifications, limit);
+                            break;
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -3183,9 +3253,42 @@ fn execute_operation(
         }
     }
 
-    if changes.is_empty() {
+    // Show hint if we found unmatched qualified paths (even if we made some changes)
+    if !all_unmatched_paths.is_empty() {
+        if !changes.is_empty() {
+            println!("\n⚠️  Note: Some instances were not matched:");
+        }
+
+        println!("\n💡 Hint: Found {} struct literal(s) with fully qualified paths that didn't match:",
+            all_unmatched_paths.values().sum::<usize>());
+
+        let mut paths: Vec<_> = all_unmatched_paths.iter().collect();
+        paths.sort_by_key(|(path, _)| *path);
+
+        for (path, count) in &paths {
+            println!("   {} ({} instance{})", path, count, if **count == 1 { "" } else { "s" });
+        }
+
+        println!("\nTo match all of these, use:");
+
+        // Extract the simple name from the first path for the suggestion
+        if let Some((first_path, _)) = paths.first() {
+            if let Some(simple_name) = first_path.split("::").last() {
+                println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
+                println!("\nOr match specific paths:");
+                for (path, _) in paths.iter().take(3) {
+                    println!("   rs-hack ... --name \"{}\" ...", path);
+                }
+                if paths.len() > 3 {
+                    println!("   (and {} more...)", paths.len() - 3);
+                }
+            }
+        }
+    } else if changes.is_empty() {
         println!("No changes made - target not found in any files");
-    } else if format == "diff" && show_summary {
+    }
+
+    if format == "diff" && show_summary {
         // Print summary for diff mode
         total_stats.print_summary();
     } else if format == "default" && !apply {
@@ -3199,7 +3302,7 @@ fn execute_operation(
 fn execute_batch(batch: &BatchSpec, apply: bool, exclude_patterns: &[String]) -> Result<()> {
     for op in &batch.operations {
         let files = collect_rust_files_with_exclusions(&[batch.base_path.clone()], exclude_patterns)?;
-        execute_operation(&files, op, apply, None, "default", false)?;
+        execute_operation(&files, op, apply, None, "default", false, None)?;
     }
     Ok(())
 }
@@ -3212,10 +3315,11 @@ fn execute_operation_with_state(
     local_state: &bool,
     format: &str,
     show_summary: bool,
+    limit: Option<usize>,
 ) -> Result<()> {
     // If not applying or output is specified (not in-place), don't track state
     if !apply || output.is_some() {
-        return execute_operation(files, op, apply, output, format, show_summary);
+        return execute_operation(files, op, apply, output, format, show_summary, limit);
     }
 
     // Generate run ID and get state dir
@@ -3250,6 +3354,8 @@ fn execute_operation_with_state(
     let mut file_modifications = Vec::new();
     let mut changes_made = false;
     let mut total_stats = DiffStats::default();
+    let mut total_modifications = 0;
+    let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
 
     for file_path in files {
         let content = std::fs::read_to_string(file_path)
@@ -3259,7 +3365,18 @@ fn execute_operation_with_state(
 
         match editor.apply_operation(op) {
             Ok(result) => {
+                // Collect unmatched qualified paths
+                if let Some(unmatched) = result.unmatched_qualified_paths {
+                    for (path, count) in unmatched {
+                        *all_unmatched_paths.entry(path).or_insert(0) += count;
+                    }
+                }
+
                 if result.changed {
+                    // Track total modifications across all files
+                    let modifications_in_file = result.modified_nodes.len();
+                    total_modifications += modifications_in_file;
+
                     let new_content = editor.to_string();
 
                     // Print diff if format is "diff" or "summary"
@@ -3292,6 +3409,14 @@ fn execute_operation_with_state(
                         println!("✓ Modified: {}", file_path.display());
                     }
                     changes_made = true;
+
+                    // Check if we've hit the limit
+                    if let Some(limit) = limit {
+                        if total_modifications >= limit {
+                            println!("\n⚠️  Limit reached: {} modifications made (limit: {})", total_modifications, limit);
+                            break;
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -3324,6 +3449,39 @@ fn execute_operation_with_state(
         println!("\n📝 Run ID: {} (use 'rs-hack revert {}' to undo)", run_id, run_id);
     } else if !changes_made {
         println!("No changes made - target not found in any files");
+    }
+
+    // Show hint if we found unmatched qualified paths (even if we made some changes)
+    if !all_unmatched_paths.is_empty() {
+        if changes_made {
+            println!("\n⚠️  Note: Some instances were not matched:");
+        }
+
+        println!("\n💡 Hint: Found {} struct literal(s) with fully qualified paths that didn't match:",
+            all_unmatched_paths.values().sum::<usize>());
+
+        let mut paths: Vec<_> = all_unmatched_paths.iter().collect();
+        paths.sort_by_key(|(path, _)| *path);
+
+        for (path, count) in &paths {
+            println!("   {} ({} instance{})", path, count, if **count == 1 { "" } else { "s" });
+        }
+
+        println!("\nTo match all of these, use:");
+
+        // Extract the simple name from the first path for the suggestion
+        if let Some((first_path, _)) = paths.first() {
+            if let Some(simple_name) = first_path.split("::").last() {
+                println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
+                println!("\nOr match specific paths:");
+                for (path, _) in paths.iter().take(3) {
+                    println!("   rs-hack ... --name \"{}\" ...", path);
+                }
+                if paths.len() > 3 {
+                    println!("   (and {} more...)", paths.len() - 3);
+                }
+            }
+        }
     }
 
     Ok(())

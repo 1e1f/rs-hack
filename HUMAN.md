@@ -80,6 +80,11 @@ rs-hack find --node-type function-call --name handle --paths src    # Only calls
 rs-hack find --kind enum --variant Rectangle --paths src        # Any enum with Rectangle
 rs-hack find --name View::Rectangle --paths src                 # View enum, Rectangle variant
 
+# Wildcard patterns for qualified paths (v0.5.3+)
+rs-hack find --name "TouchableProps" --paths src                # Only simple paths
+rs-hack find --name "*::TouchableProps" --paths src             # All qualified paths
+rs-hack find --name "crate::view::builder::TouchableProps" --paths src  # Exact path
+
 # Find with content filtering
 rs-hack find --node-type macro-call --name eprintln \
   --content-filter "[DEBUG]" --paths src
@@ -121,6 +126,10 @@ rs-hack add --name IRCtx --field "return_type: Option<Type>" \
 # Add to literals only (omit type)
 rs-hack add --name IRCtx --field "return_type" \
   --literal-default "None" --paths "src/**/*.rs" --apply
+
+# Wildcard patterns for qualified paths (v0.5.3+)
+rs-hack add --name "*::TouchableProps" --field-name "on_long_press" \
+  --field-value "None" --paths src --apply  # Matches all qualified paths
 
 # Add enum variant (auto-detects it's an enum)
 rs-hack add --name Status --variant "Archived" --paths src --apply
@@ -169,6 +178,10 @@ rs-hack add --name Config --kind struct --derive "Debug" --paths src --apply
 ```bash
 # Remove struct field (auto-detects it's a struct)
 rs-hack remove --name User --field-name email --paths src --apply
+
+# Wildcard patterns for qualified paths (v0.5.3+)
+rs-hack remove --name "*::TouchableProps" --field-name "on_tap" \
+  --literal-only --paths src --apply  # Matches all qualified paths
 
 # Remove enum variant field (definition + all literals)
 rs-hack remove --name View::Rectangle --field-name color --paths src --apply

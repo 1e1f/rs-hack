@@ -5,11 +5,15 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$SCRIPT_DIR/.."
-BINARY="$PROJECT_DIR/target/release/rs-hack"
-# Alternative: BINARY="cargo run --release --quiet --"
+# Go up one level to workspace root
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Use debug build for faster iteration during development
+BINARY="$PROJECT_DIR/target/debug/rs-hack"
+# Alternative: BINARY="cargo run --quiet --"
 # Alternative: BINARY="rs-hack"  # if installed globally
-INPUT="$PROJECT_DIR/examples/sample.rs"
+# Alternative: BINARY="$PROJECT_DIR/target/release/rs-hack"  # for release builds
+# Sample input file is in the rs-hack subdirectory
+INPUT="$SCRIPT_DIR/examples/sample.rs"
 TEMP_DIR="$PROJECT_DIR/target/test-output"
 STATE_DIR="$TEMP_DIR/.rs-hack"  # State in test output directory
 
@@ -35,11 +39,11 @@ mkdir -p "$TEMP_DIR"
 
 # Build the binary
 echo "Building rs-hack..."
-cd "$PROJECT_DIR" && cargo build 2>&1 | grep -v "warning:" || true
+cd "$PROJECT_DIR" && ~/.cargo/bin/cargo build 2>&1 | grep -v "warning:" || true
 
 echo ""
 echo "======================================"
-echo "   rs-hack v0.5.0 Integration Tests  "
+echo "   rs-hack v0.5.3 Integration Tests  "
 echo "======================================"
 echo ""
 

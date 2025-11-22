@@ -125,9 +125,15 @@ impl RustEditor {
         // Check if this is an enum variant struct literal (contains ::)
         let is_enum_variant = op.struct_name.contains("::");
 
-        // For enum variant literals, automatically operate on literals only
-        // (since we can't modify the enum variant definition without the full enum context)
-        if is_enum_variant {
+        // Check if this is literal-only mode (has literal_default but field_def has no type)
+        // This allows operating on imported structs without needing the struct definition
+        let has_type = op.field_def.contains(':');
+        let is_literal_only = op.literal_default.is_some() && !has_type;
+
+        // For enum variant literals OR literal-only operations, operate on struct literals only
+        // (enum variants: can't modify definition without full enum context)
+        // (literal-only: struct might be imported, don't need definition)
+        if is_enum_variant || is_literal_only {
             // Parse the field_def to extract field name and value/type
             // field_def can be:
             // - "layer: None" (with explicit value)
@@ -185,6 +191,7 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
         }
@@ -207,12 +214,14 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
 
             return Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
+                unmatched_qualified_paths: None,
             });
         }
 
@@ -271,6 +280,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes,
+            unmatched_qualified_paths: None,
         })
     }
     
@@ -388,6 +398,7 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
         }
@@ -405,6 +416,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: modified,
             modified_nodes: if modified { vec![backup_node] } else { vec![] },
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -481,6 +493,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
+            unmatched_qualified_paths: None,
                     });
                 }
             }
@@ -587,6 +600,7 @@ impl RustEditor {
             struct_name: String,
             field_name: String,
             deletion_ranges: Vec<(usize, usize)>, // (start_byte, end_byte)
+            unmatched_paths: std::collections::HashMap<String, usize>, // Collect qualified paths that didn't match
             editor: &'a RustEditor,
         }
 
@@ -607,10 +621,25 @@ impl RustEditor {
                         path_str == self.struct_name
                     }
                 } else {
-                    node.path.segments.len() == 1
+                    // Simple name (no ::) - only match single-segment paths
+                    let matches = node.path.segments.len() == 1
                         && node.path.segments.last()
                             .map(|seg| seg.ident.to_string())
-                            .as_ref() == Some(&self.struct_name)
+                            .as_ref() == Some(&self.struct_name);
+
+                    // If doesn't match but last segment equals our struct name, track as unmatched
+                    if !matches && node.path.segments.len() > 1 {
+                        if let Some(last_seg) = node.path.segments.last() {
+                            if last_seg.ident.to_string() == self.struct_name {
+                                let qualified_path = node.path.segments.iter()
+                                    .map(|seg| seg.ident.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("::");
+                                *self.unmatched_paths.entry(qualified_path).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                    matches
                 };
 
                 if matches {
@@ -673,10 +702,18 @@ impl RustEditor {
             struct_name: op.struct_name.clone(),
             field_name: op.field_name.clone(),
             deletion_ranges: Vec::new(),
+            unmatched_paths: std::collections::HashMap::new(),
             editor: self,
         };
 
         finder.visit_file(&self.syntax_tree);
+
+        // Prepare unmatched paths hint (only if using simple name and found unmatched paths)
+        let unmatched_hint = if !op.struct_name.contains("::") && !finder.unmatched_paths.is_empty() {
+            Some(finder.unmatched_paths)
+        } else {
+            None
+        };
 
         if !finder.deletion_ranges.is_empty() {
             // Sort ranges in reverse order to preserve offsets
@@ -700,6 +737,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed,
             modified_nodes,
+            unmatched_qualified_paths: unmatched_hint,
         })
     }
 
@@ -733,6 +771,7 @@ impl RustEditor {
             field_name: String,
             path_resolver: Option<&'a PathResolver>,
             insertion_points: Vec<(usize, usize)>, // (byte_offset, indentation_spaces)
+            unmatched_paths: std::collections::HashMap<String, usize>, // Collect qualified paths that didn't match
             editor: &'a RustEditor,
         }
 
@@ -772,10 +811,25 @@ impl RustEditor {
                             path_str == self.struct_name
                         }
                     } else {
-                        node.path.segments.len() == 1
+                        // Simple name (no ::) - only match single-segment paths
+                        let matches = node.path.segments.len() == 1
                             && node.path.segments.last()
                                 .map(|seg| seg.ident.to_string())
-                                .as_ref() == Some(&self.struct_name)
+                                .as_ref() == Some(&self.struct_name);
+
+                        // If doesn't match but last segment equals our struct name, track as unmatched
+                        if !matches && node.path.segments.len() > 1 {
+                            if let Some(last_seg) = node.path.segments.last() {
+                                if last_seg.ident.to_string() == self.struct_name {
+                                    let qualified_path = node.path.segments.iter()
+                                        .map(|seg| seg.ident.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join("::");
+                                    *self.unmatched_paths.entry(qualified_path).or_insert(0) += 1;
+                                }
+                            }
+                        }
+                        matches
                     }
                 };
 
@@ -819,15 +873,24 @@ impl RustEditor {
             field_name: field_name.clone(),
             path_resolver: path_resolver.as_ref(),
             insertion_points: Vec::new(),
+            unmatched_paths: std::collections::HashMap::new(),
             editor: self,
         };
 
         inserter.visit_file(&self.syntax_tree);
 
+        // Prepare unmatched paths hint (only if using simple name and found unmatched paths)
+        let unmatched_hint = if !op.struct_name.contains("::") && !inserter.unmatched_paths.is_empty() {
+            Some(inserter.unmatched_paths)
+        } else {
+            None
+        };
+
         if inserter.insertion_points.is_empty() {
             return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+                unmatched_qualified_paths: unmatched_hint,
             });
         }
 
@@ -851,6 +914,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes: backup_nodes,
+            unmatched_qualified_paths: unmatched_hint,
         })
     }
 
@@ -975,6 +1039,7 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
         }
@@ -992,6 +1057,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: modified,
             modified_nodes: if modified { vec![backup_node] } else { vec![] },
+            unmatched_qualified_paths: None,
         })
     }
     
@@ -1074,6 +1140,7 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
         }
@@ -1113,6 +1180,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -1136,6 +1204,7 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
         }
@@ -1192,6 +1261,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -1255,11 +1325,13 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
             })
         } else {
             Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+            unmatched_qualified_paths: None,
             })
         }
     }
@@ -1365,6 +1437,7 @@ impl RustEditor {
             return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+                unmatched_qualified_paths: None,
             });
         }
 
@@ -1422,11 +1495,13 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
             })
         } else {
             Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+            unmatched_qualified_paths: None,
             })
         }
     }
@@ -1532,6 +1607,7 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Pattern '{}' not found in any match expression", op.pattern)
@@ -1573,6 +1649,7 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Pattern '{}' not found in any match expression", op.pattern)
@@ -1626,6 +1703,7 @@ impl RustEditor {
             return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+                unmatched_qualified_paths: None,
             });
         }
 
@@ -1682,6 +1760,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -1706,6 +1785,7 @@ impl RustEditor {
             return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+                unmatched_qualified_paths: None,
             });
         }
 
@@ -1793,6 +1873,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -1820,6 +1901,7 @@ impl RustEditor {
                 return Ok(ModificationResult {
                     changed: false,
                     modified_nodes: vec![],
+                    unmatched_qualified_paths: None,
                 });
             }
         }
@@ -1843,6 +1925,7 @@ impl RustEditor {
             return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+                unmatched_qualified_paths: None,
             });
         }
 
@@ -1870,6 +1953,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: true,
             modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -2299,9 +2383,17 @@ impl RustEditor {
                             Some(f) => f,
                             None => {
                                 // No filter - match anything
-                                let struct_name = node.path.segments.last()
-                                    .map(|seg| seg.ident.to_string())
-                                    .unwrap_or_default();
+                                // If path has multiple segments, include the full qualified path
+                                let struct_name = if node.path.segments.len() > 1 {
+                                    node.path.segments.iter()
+                                        .map(|seg| seg.ident.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join("::")
+                                } else {
+                                    node.path.segments.last()
+                                        .map(|seg| seg.ident.to_string())
+                                        .unwrap_or_default()
+                                };
 
                                 let snippet = self.editor.format_expr_struct(node);
                                 let location = self.editor.span_to_location(node.span());
@@ -2365,9 +2457,17 @@ impl RustEditor {
                         }
 
                         // Get the struct name for the identifier
-                        let struct_name = node.path.segments.last()
-                            .map(|seg| seg.ident.to_string())
-                            .unwrap_or_default();
+                        // If path has multiple segments, include the full qualified path
+                        let struct_name = if node.path.segments.len() > 1 {
+                            node.path.segments.iter()
+                                .map(|seg| seg.ident.to_string())
+                                .collect::<Vec<_>>()
+                                .join("::")
+                        } else {
+                            node.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                                .unwrap_or_default()
+                        };
 
                         // Format the struct literal
                         let snippet = self.editor.format_expr_struct(node);
@@ -3885,6 +3985,7 @@ impl RustEditor {
             return Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
+                unmatched_qualified_paths: None,
             });
         }
 
@@ -3955,6 +4056,7 @@ impl RustEditor {
         Ok(ModificationResult {
             changed: !modified_nodes.is_empty(),
             modified_nodes,
+            unmatched_qualified_paths: None,
         })
     }
 
@@ -3994,6 +4096,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
+            unmatched_qualified_paths: None,
                     });
                 }
 
@@ -4022,6 +4125,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
                 })
             }
             EditMode::Reformat => {
@@ -4041,6 +4145,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
+            unmatched_qualified_paths: None,
                     });
                 }
 
@@ -4066,6 +4171,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
                 })
             }
         }
@@ -4105,6 +4211,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
+            unmatched_qualified_paths: None,
                     });
                 }
 
@@ -4133,6 +4240,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
                 })
             }
             EditMode::Reformat => {
@@ -4151,6 +4259,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
+            unmatched_qualified_paths: None,
                     });
                 }
 
@@ -4176,6 +4285,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
+            unmatched_qualified_paths: None,
                 })
             }
         }
@@ -5127,6 +5237,7 @@ impl RustEditor {
                         end_column: target_line_len,
                     },
                 }],
+                unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Target {} '{}' not found", target_type, target_name)
@@ -5227,6 +5338,7 @@ impl RustEditor {
                         end_column: target_line_len,
                     },
                 }],
+                unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Target {} '{}' not found", target_type, target_name)
@@ -5310,6 +5422,7 @@ impl RustEditor {
                         end_column: target_line_len,
                     },
                 }],
+                unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Target {} '{}' not found", target_type, target_name)

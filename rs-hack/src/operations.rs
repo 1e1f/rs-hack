@@ -208,6 +208,9 @@ pub struct BackupNode {
 pub struct ModificationResult {
     pub changed: bool,
     pub modified_nodes: Vec<BackupNode>,
+    /// Unmatched qualified paths (only populated for struct literal operations with simple names)
+    /// Maps fully qualified path to count of instances found but not matched
+    pub unmatched_qualified_paths: Option<std::collections::HashMap<String, usize>>,
 }
 
 /// Result of inspecting/listing AST nodes

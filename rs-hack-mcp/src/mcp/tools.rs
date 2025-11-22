@@ -23,7 +23,7 @@ impl ToolRegistry {
                 // ============================================================
                 Tool {
                     name: "find",
-                    description: "Find and list AST nodes. DISCOVERY MODE: Omit --node-type to search ALL types with auto-grouped output (recommended for exploration). TARGETED MODE: Specify --node-type for precise searches. v0.5.1: --limit for result limiting, --field-name to find all uses of a field. Use --format snippets (shows code), locations (grep-like), or json (structured). Better than grep: AST-aware, no false positives from comments/strings.",
+                    description: "Find and list AST nodes. DISCOVERY MODE: Omit --node-type to search ALL types with auto-grouped output (recommended for exploration). TARGETED MODE: Specify --node-type for precise searches. v0.5.3: Shows intelligent hints for qualified paths (e.g., suggests '*::StructName' when finding crate::mod::StructName). v0.5.1: --limit for result limiting, --field-name to find all uses of a field. Use --format snippets (shows code), locations (grep-like), or json (structured). Better than grep: AST-aware, no false positives from comments/strings.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -33,7 +33,7 @@ impl ToolRegistry {
                                 "enum": ["struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref", "struct", "enum", "function", "impl-method", "trait", "const", "static", "type-alias", "mod"],
                                 "description": "Type of AST node to inspect. Omit to search ALL types with grouped output."
                             },
-                            "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\", \"View::Rectangle\", \"*::Rectangle\")"},
+                            "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\", \"View::Rectangle\"). v0.5.3: Use '*::StructName' wildcard to match all qualified paths."},
                             "variant": {"type": "string", "description": "Filter enum variants by name (only valid with --node-type enum)"},
                             "content_filter": {"type": "string", "description": "Filter by content substring"},
                             "field_name": {"type": "string", "description": "Find all occurrences of a field across struct definitions, enum variants, and struct literals"},
@@ -51,12 +51,12 @@ impl ToolRegistry {
                 // ============================================================
                 Tool {
                     name: "add",
-                    description: "Unified add command - auto-detects operation type. Add struct fields, enum variants, impl methods, derives, use statements, match arms, or doc comments. v0.5.1 Field API: Use --field-name + --field-type (definition only), --field-name + --field-value (literals only), or all three (both). For enum variant literals: --name \"Enum::Variant\" --field-name --field-value --kind struct. IMPORTANT: --variant is for adding NEW variants, not for targeting existing variant literals.",
+                    description: "Unified add command - auto-detects operation type. Add struct fields, enum variants, impl methods, derives, use statements, match arms, or doc comments. v0.5.3: Shows hints when simple names miss qualified paths (suggests '*::StructName' pattern). Works seamlessly with imported structs - no definition needed for literal-only ops. v0.5.1 Field API: Use --field-name + --field-type (definition only), --field-name + --field-value (literals only), or all three (both). For enum variant literals: --name \"Enum::Variant\" --field-name --field-value --kind struct. IMPORTANT: --variant is for adding NEW variants, not for targeting existing variant literals.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
-                            "name": {"type": "string", "description": "Name of the target (struct/enum/function name). Required for most operations except --use. Use Enum::Variant for enum variant struct literals."},
+                            "name": {"type": "string", "description": "Name of the target (struct/enum/function name). Required for most operations except --use. Use Enum::Variant for enum variant struct literals. v0.5.3: Use '*::StructName' wildcard to match all qualified paths (e.g., crate::mod::StructName, other::path::StructName)."},
                             "kind": {"type": "string", "enum": ["struct", "function", "enum", "impl", "trait", "mod"], "description": "Semantic grouping for broad operations. 'struct' = struct definitions + struct literals + enum variant literals. Use this for operations affecting all instances. Mutually exclusive with --node-type."},
                             "node_type": {"type": "string", "description": "Granular AST node type for surgical precision (e.g., 'struct' = definitions only, 'struct-literal' = initialization expressions only). Use this when you need fine control. Mutually exclusive with --kind."},
                             "field": {"type": "string", "description": "[DEPRECATED] Field definition (e.g., \"email: String\"). Use --field-name + --field-type instead."},
@@ -83,12 +83,12 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "remove",
-                    description: "Unified remove command - auto-detects operation type. Remove struct fields, enum variants, match arms, doc comments, or derives. Use --kind (struct/enum/function) or --node-type for granular control.",
+                    description: "Unified remove command - auto-detects operation type. Remove struct fields, enum variants, match arms, doc comments, or derives. v0.5.3: Shows hints when simple names miss qualified paths (suggests '*::StructName' pattern). Use --kind (struct/enum/function) or --node-type for granular control.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
-                            "name": {"type": "string", "description": "Name of the target (struct/enum/function name) or item to remove"},
+                            "name": {"type": "string", "description": "Name of the target (struct/enum/function name) or item to remove. v0.5.3: Use '*::StructName' wildcard to match all qualified paths."},
                             "kind": {"type": "string", "enum": ["struct", "function", "enum", "impl", "trait", "mod"], "description": "Semantic grouping for disambiguation. Mutually exclusive with --node-type."},
                             "node_type": {"type": "string", "description": "Granular AST node type. Mutually exclusive with --kind."},
                             "field_name": {"type": "string", "description": "Name of field to remove from struct"},

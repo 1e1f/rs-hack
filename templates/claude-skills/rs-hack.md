@@ -97,6 +97,44 @@ rs-hack add \
 # RIGHT:  rs-hack add --name "View::Grid" --field-name foo --field-value bar --kind struct
 ```
 
+### Handling Qualified Paths (v0.5.3+)
+
+rs-hack now provides intelligent hints when you miss struct literals with qualified paths:
+
+```bash
+# Scenario: You try to add a field to TouchableProps
+rs-hack add --name "TouchableProps" --field-name "on_long_press" \
+  --field-value "None" --kind struct --paths src
+
+# Output:
+# Would modify: footer_panel.rs, patch_view.rs
+#
+# ⚠️  Note: Some instances were not matched:
+#
+# 💡 Hint: Found 6 struct literal(s) with fully qualified paths that didn't match:
+#    crate::view::builder::TouchableProps (6 instances)
+#
+# To match all of these, use:
+#    rs-hack ... --name "*::TouchableProps" ...
+```
+
+**How to handle the hint:**
+
+```bash
+# Option 1: Use wildcard to match ALL paths (recommended)
+rs-hack add --name "*::TouchableProps" --field-name "on_long_press" \
+  --field-value "None" --kind struct --paths src --apply
+
+# Option 2: Match specific qualified path
+rs-hack add --name "crate::view::builder::TouchableProps" \
+  --field-name "on_long_press" --field-value "None" --kind struct --paths src --apply
+```
+
+**When to use wildcards:**
+- ✅ Use `*::StructName` when you want to match all instances regardless of qualification
+- ✅ Use simple name first to discover what qualified paths exist via hints
+- ✅ Hints work in `add`, `remove`, and `find` commands
+
 ### Transform: Generic Find & Modify
 
 ```bash

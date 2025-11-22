@@ -82,6 +82,34 @@ cargo install --path rs-hack-mcp
 
 Binaries will be installed to `~/.cargo/bin/`.
 
+## What's New in 0.5.3
+
+**🎉 New Features:**
+
+1. **Intelligent Hints for Qualified Paths** - Never miss struct literals again!
+   - Automatically detects when you use simple names (e.g., `TouchableProps`) but qualified paths exist
+   - Shows grouped hints with instance counts for each qualified path found
+   - Suggests wildcard patterns (`*::TouchableProps`) to match all variants
+   - Works across `add`, `remove`, and `find` commands
+   - Example:
+     ```
+     $ rs-hack remove --name "TouchableProps" --field-name "on_tap" --literal-only --paths src
+
+     ⚠️  Note: Some instances were not matched:
+
+     💡 Hint: Found 6 struct literal(s) with fully qualified paths that didn't match:
+        crate::view::builder::TouchableProps (6 instances)
+
+     To match all of these, use:
+        rs-hack ... --name "*::TouchableProps" ...
+     ```
+
+2. **Literal-Only Operations on Imported Structs** - Works seamlessly with imported types
+   - No longer requires struct definitions to be in the file
+   - Perfect for adding fields to struct literals from external crates
+   - Automatically skips definition lookup when using `--field-value` without `--field-type`
+   - Example: `rs-hack add --name "TouchableProps" --field-name "on_long_press" --field-value "None" --paths src --apply`
+
 ## What's New in 0.5.1
 
 **🎉 Major Enhancements:**
