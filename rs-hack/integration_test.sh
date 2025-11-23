@@ -653,7 +653,7 @@ EOF
 
 run_test "pattern-exact-path-match" \
     "$BINARY add-struct-literal-field --paths $TEMP_DIR/pattern_exact.rs --struct-name 'View::Rectangle' --field 'layer: 0' --apply" \
-    "! (grep -A 5 'let rect = Rectangle' $TEMP_DIR/pattern_exact.rs | grep -q 'layer') && grep -A 5 'let view = View::Rectangle' $TEMP_DIR/pattern_exact.rs | grep -q 'layer: 0' && ! (grep -A 5 'let vtype = ViewType::Rectangle' $TEMP_DIR/pattern_exact.rs | grep -q 'layer')" \
+    "awk '/let rect = Rectangle/,/;/ {r=r\$0} /let view = View::Rectangle/,/;/ {v=v\$0} /let vtype = ViewType::Rectangle/,/;/ {vt=vt\$0} END {exit !(index(r,\"layer\")==0 && index(v,\"layer\")>0 && index(vt,\"layer\")==0)}' $TEMP_DIR/pattern_exact.rs" \
     "true"
 
 # ============================================================================

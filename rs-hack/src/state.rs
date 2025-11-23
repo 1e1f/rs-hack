@@ -245,16 +245,16 @@ pub fn restore_from_nodes(
     // Then process other backups
     for backup in other_backups {
         match backup.node_type.as_str() {
-            "ItemStruct" => {
+            "ItemStruct" | "struct" => {
                 restore_struct(&mut editor, backup)?;
             }
-            "ItemEnum" => {
+            "ItemEnum" | "enum" => {
                 restore_enum(&mut editor, backup)?;
             }
             "ItemImpl" => {
                 restore_impl(&mut editor, backup)?;
             }
-            "ItemFn" => {
+            "ItemFn" | "function" => {
                 // For match operations, we backup the whole function
                 restore_function(&mut editor, backup)?;
             }
