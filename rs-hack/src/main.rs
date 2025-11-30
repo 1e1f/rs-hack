@@ -22,8 +22,30 @@ use diff::{print_diff, print_summary_diff, DiffStats};
 
 #[derive(Parser)]
 #[command(name = "rs-hack")]
-#[command(about = "AST-aware Rust code editing tool for AI agents", long_about = None)]
-#[command(after_help = "For detailed help on any command, use: rs-hack <COMMAND> --help\n\nExamples:\n  rs-hack find --help\n  rs-hack add --help\n  rs-hack rename --help")]
+#[command(about = "Bulk refactor Rust: find/modify struct literals, enum variants, and function calls across your entire codebase")]
+#[command(long_about = "AST-aware Rust refactoring tool that finds and modifies ALL usages across your codebase.
+
+WHAT MAKES RS-HACK DIFFERENT:
+  • Works on struct LITERALS (instantiation sites), not just definitions
+  • One command updates 50 struct initializations scattered across many files
+  • AST-aware: no false positives from comments or strings
+
+COMMON USE CASES:
+  Add a field to a struct + update ALL places it's instantiated:
+    rs-hack add --name Config --field-name timeout --field-type Duration \\
+               --field-value \"Duration::from_secs(30)\" --paths src --apply
+
+  Find all places a struct is instantiated (not just where it's defined):
+    rs-hack find --paths src --node-type struct-literal --name Config
+
+  Remove a field from definition AND all 47 places it's used:
+    rs-hack remove --name User --field-name deprecated_field --paths src --apply")]
+#[command(after_help = "For detailed help on any command, use: rs-hack <COMMAND> --help
+
+Examples:
+  rs-hack find --help
+  rs-hack add --help
+  rs-hack rename --help")]
 #[command(version)]
 struct Cli {
     /// Use project-local state directory (.rs-hack) instead of ~/.rs-hack
@@ -417,7 +439,7 @@ EXAMPLES:
         apply: bool,
     },
 
-    /// Rename across codebase (example: rs-hack rename --name old_func --to new_func --paths src --apply)
+    /// Rename functions, enum variants - updates ALL call sites (see: rs-hack rename --help)
     #[command(display_order = 3)]
     #[command(after_help = "EXAMPLES:
     # Rename function
@@ -612,7 +634,7 @@ MIGRATION:
         apply: bool,
     },
 
-    /// Search code (example: rs-hack find --name unwrap --paths src --limit 20)
+    /// Find definitions AND all usages across files (see: rs-hack find --help)
     #[command(display_order = 1)]
     #[command(after_help = "EXAMPLES:
     # NEW: Search all node types when you don't know what you're looking for
@@ -765,14 +787,26 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// Insert text (example: rs-hack add --name User --field-name email --field-type String --paths src --apply)
+    /// Add fields, variants, methods, derives, match arms - updates ALL usages (see: rs-hack add --help)
     #[command(display_order = 2)]
-    #[command(after_help = "EXAMPLES:
-    # Add struct field
-    rs-hack add --name User --field \"email: String\" --paths src --apply
+    #[command(after_help = "COMMON USE CASE - Add field to ALL struct literal instantiations:
+    # Add a field to every place MyStruct { ... } appears in your codebase
+    rs-hack add --name MyStruct --field-name new_field --field-value \"None\" --paths src --apply
 
-    # Add struct field with default value for all literals
-    rs-hack add --name Config --field timeout --literal-default \"Duration::from_secs(30)\" --paths src --apply
+    # For enum variants like View::Container, use the full path
+    rs-hack add --name \"View::Container\" --field-name style --field-value \"None\" --paths src --apply
+
+EXAMPLES:
+    # Add field to struct definition only (no --field-value)
+    rs-hack add --name User --field-name email --field-type String --paths src --apply
+
+    # Add field to definition AND all literals (with --field-value)
+    rs-hack add --name Config --field-name timeout --field-type Duration \\
+               --field-value \"Duration::from_secs(30)\" --paths src --apply
+
+    # Add field to literals only, not definition (--literal-only)
+    rs-hack add --name Config --field-name timeout --field-value \"Duration::from_secs(30)\" \\
+               --literal-only --paths src --apply
 
     # Add enum variant
     rs-hack add --name Status --variant \"Archived\" --paths src --apply
@@ -787,20 +821,30 @@ OUTPUT FORMATS:
     rs-hack add --use \"serde::Serialize\" --paths src --apply
 
 AUTO-DETECTION:
-    The command auto-detects what to add based on which flag you provide:
-    - --field: Add struct field
+    The command auto-detects what to add based on which flags you provide:
+    - --field-name + --field-type: Add to struct definition
+    - --field-name + --field-value: Add to all struct literals
+    - --field-name + --field-type + --field-value: Add to both
     - --variant: Add enum variant
     - --method: Add impl method
     - --derive: Add derive macro
     - --use: Add use statement
 
-    If the target (--name) is not found, the command will search the codebase
-    and show hints about what exists and how to fix the command.
+ENUM VARIANT SYNTAX:
+    For enum struct variants, use \"EnumName::VariantName\" syntax:
+    rs-hack add --name \"View::Container\" --field-name shadow --field-value \"None\" --paths src
+
+MATCH ARMS (two modes):
+    Mode 1 - Auto-detect ALL missing arms (enum must be in scanned files):
+    rs-hack add --auto-detect --enum-name Status --body \"todo!()\" --paths src --apply
+
+    Mode 2 - Add ONE specific arm (works with external enums):
+    rs-hack add --match-arm \"Status::Archived\" --body \"\\\"archived\\\".to_string()\" --paths src --apply
+
+    Note: --auto-detect ignores --match-arm. Use one mode or the other.
 
 NOTES:
     - Use --name <NAME> to specify the target struct/enum/impl (not needed for --use)
-    - For struct fields with --literal-default, the field is added to both the
-      definition and all struct literal expressions
     - Position can be controlled with --position (first, last, after:name, before:name)")]
     Add {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
@@ -843,23 +887,25 @@ NOTES:
         #[arg(short = 'u', long)]
         r#use: Option<String>,
 
-        /// Match arm pattern (e.g., \"Status::Archived\") - not required with --auto-detect
+        /// Match arm pattern for adding a SINGLE arm (e.g., \"Status::Archived\")
+        /// Mutually exclusive with --auto-detect. Use this for external enums
         #[arg(long)]
         match_arm: Option<String>,
 
-        /// Body of the match arm (e.g., \"\\\"archived\\\".to_string()\") - required with --match-arm
+        /// Body of the match arm (e.g., \"\\\"archived\\\".to_string()\")
         #[arg(long)]
         body: Option<String>,
 
-        /// Function containing the match expression (optional, for --match-arm)
+        /// Function containing the match expression (optional, limits scope)
         #[arg(long)]
         function: Option<String>,
 
-        /// Auto-detect missing match arms (use with --match-arm)
+        /// Auto-detect ALL missing match arms from enum definition (enum must be in scanned files)
+        /// Ignores --match-arm; finds enum variants and adds all missing ones
         #[arg(long)]
         auto_detect: bool,
 
-        /// Enum name for auto-detect mode (required with --auto-detect)
+        /// Enum name for --auto-detect mode (required with --auto-detect)
         #[arg(long)]
         enum_name: Option<String>,
 
@@ -892,7 +938,7 @@ NOTES:
         apply: bool,
     },
 
-    /// Delete text (example: rs-hack remove --name User --field-name deprecated_field --paths src --apply)
+    /// Remove fields, variants, methods, derives, match arms - from ALL usages (see: rs-hack remove --help)
     #[command(display_order = 4)]
     #[command(after_help = "EXAMPLES:
     # Remove struct field (from definition AND all literals)
@@ -988,7 +1034,7 @@ NOTES:
         apply: bool,
     },
 
-    /// Modify text (example: rs-hack update --name User --field "pub email: String" --paths src --apply)
+    /// Update fields, variants, match arms - modifies ALL usages (see: rs-hack update --help)
     #[command(display_order = 5)]
     #[command(after_help = "EXAMPLES:
     # Update struct field type/visibility
@@ -2437,6 +2483,12 @@ fn main() -> Result<()> {
                         anyhow::bail!("--enum-name is required when using --auto-detect");
                     }
 
+                    // Warn if --match-arm was also specified (it will be ignored)
+                    if match_arm.is_some() {
+                        eprintln!("⚠️  Note: --match-arm is ignored with --auto-detect. Auto-detect adds ALL missing variants.");
+                        eprintln!("   To add a specific arm only, remove --auto-detect.");
+                    }
+
                     let op = Operation::AddMatchArm(AddMatchArmOp {
                         pattern: "".to_string(), // Not used in auto-detect mode
                         body: body.clone().unwrap(),
@@ -3152,6 +3204,40 @@ fn parse_position(pos: &str) -> Result<InsertPosition> {
     }
 }
 
+/// Print operation-specific hints when no changes were made
+fn print_operation_hints(op: &Operation) {
+    match op {
+        Operation::AddMatchArm(match_op) => {
+            if match_op.auto_detect {
+                let enum_name = match_op.enum_name.as_deref().unwrap_or("ENUM");
+                eprintln!("\n💡 Hints for --auto-detect mode:");
+                eprintln!("   • The enum definition must be in the scanned files");
+                eprintln!("   • Try: rs-hack find --node-type enum --name {} --paths .", enum_name);
+                eprintln!("   • If enum is in another crate, try: --paths . --paths ../other_crate/src");
+                eprintln!("   • For external enums, use --match-arm instead (no --auto-detect):");
+                eprintln!("     rs-hack add --match-arm \"{}::Variant\" --body \"todo!()\" --paths src", enum_name);
+            } else {
+                eprintln!("\n💡 Hints for match arm addition:");
+                eprintln!("   • Make sure match expressions exist in the scanned files");
+                eprintln!("   • Pattern should be like: EnumName::Variant or EnumName::Variant {{ .. }}");
+                eprintln!("   • Try: rs-hack find --node-type match-arm --paths src");
+            }
+        }
+        Operation::AddStructField(field_op) => {
+            eprintln!("\n💡 Hints:");
+            eprintln!("   • Try: rs-hack find --node-type struct --name {} --paths .", field_op.struct_name);
+        }
+        Operation::AddEnumVariant(variant_op) => {
+            eprintln!("\n💡 Hints:");
+            eprintln!("   • Try: rs-hack find --node-type enum --name {} --paths .", variant_op.enum_name);
+        }
+        _ => {
+            // Generic hint
+            eprintln!("\n💡 Hint: Use rs-hack find to verify targets exist in scanned files");
+        }
+    }
+}
+
 fn execute_operation(
     files: &[PathBuf],
     op: &Operation,
@@ -3165,6 +3251,7 @@ fn execute_operation(
     let mut total_stats = DiffStats::default();
     let mut total_modifications = 0;
     let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut last_error: Option<anyhow::Error> = None;
 
     for file_path in files {
         let content = std::fs::read_to_string(file_path)
@@ -3249,6 +3336,8 @@ fn execute_operation(
                 if files.len() == 1 {
                     return Err(e);
                 }
+                // Store for diagnostic output if nothing matches
+                last_error = Some(e);
             }
         }
     }
@@ -3286,6 +3375,12 @@ fn execute_operation(
         }
     } else if changes.is_empty() {
         println!("No changes made - target not found in any files");
+        // Show the last error for context
+        if let Some(err) = last_error {
+            eprintln!("\n📋 Diagnostic: {}", err);
+        }
+        // Operation-specific hints
+        print_operation_hints(op);
     }
 
     if format == "diff" && show_summary {
@@ -3356,6 +3451,7 @@ fn execute_operation_with_state(
     let mut total_stats = DiffStats::default();
     let mut total_modifications = 0;
     let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut last_error: Option<anyhow::Error> = None;
 
     for file_path in files {
         let content = std::fs::read_to_string(file_path)
@@ -3424,6 +3520,8 @@ fn execute_operation_with_state(
                 if files.len() == 1 {
                     return Err(e);
                 }
+                // Store for diagnostic output if nothing matches
+                last_error = Some(e);
             }
         }
     }
@@ -3449,6 +3547,12 @@ fn execute_operation_with_state(
         println!("\n📝 Run ID: {} (use 'rs-hack revert {}' to undo)", run_id, run_id);
     } else if !changes_made {
         println!("No changes made - target not found in any files");
+        // Show the last error for context
+        if let Some(err) = last_error {
+            eprintln!("\n📋 Diagnostic: {}", err);
+        }
+        // Operation-specific hints
+        print_operation_hints(op);
     }
 
     // Show hint if we found unmatched qualified paths (even if we made some changes)

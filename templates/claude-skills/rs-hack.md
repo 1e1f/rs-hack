@@ -28,7 +28,7 @@ Use rs-hack for all Rust code transformations. It's type-safe and AST-aware—ne
 
 ## Command Patterns
 
-### Rename Enum Variant (NEW!)
+### Rename (Enum Variants, Functions, Trait Methods)
 
 Perfect for large-scale refactoring across many files:
 
@@ -37,20 +37,25 @@ Perfect for large-scale refactoring across many files:
 rs-hack find --paths "src/**/*.rs" --node-type enum-usage \
   --name "EnumName::OldVariant" --format locations
 
-# Step 2: Preview changes
-rs-hack rename-enum-variant \
+# Step 2: Preview changes (dry-run by default)
+rs-hack rename \
   --paths "src/**/*.rs" \
-  --enum-name EnumName \
-  --old-variant OldVariant \
-  --new-variant NewVariant \
-  --format diff
+  --name "EnumName::OldVariant" \
+  --to NewVariant
 
 # Step 3: Apply
-rs-hack rename-enum-variant \
+rs-hack rename \
   --paths "src/**/*.rs" \
-  --enum-name EnumName \
-  --old-variant OldVariant \
-  --new-variant NewVariant \
+  --name "EnumName::OldVariant" \
+  --to NewVariant \
+  --apply
+
+# Rename a function (includes trait methods in v0.5.1+)
+rs-hack rename \
+  --paths "src/**/*.rs" \
+  --name old_function_name \
+  --to new_function_name \
+  --kind function \
   --apply
 ```
 
@@ -59,6 +64,8 @@ rs-hack rename-enum-variant \
 - Match arm patterns
 - Constructor calls
 - Reference patterns (`&Enum::Variant`)
+- Function definitions and calls
+- Trait method definitions and implementations
 - All usages across the codebase
 
 ### Add Struct Field
@@ -96,44 +103,6 @@ rs-hack add \
 # WRONG:  rs-hack add --name View --variant Grid --field-name foo
 # RIGHT:  rs-hack add --name "View::Grid" --field-name foo --field-value bar --kind struct
 ```
-
-### Handling Qualified Paths (v0.5.3+)
-
-rs-hack now provides intelligent hints when you miss struct literals with qualified paths:
-
-```bash
-# Scenario: You try to add a field to TouchableProps
-rs-hack add --name "TouchableProps" --field-name "on_long_press" \
-  --field-value "None" --kind struct --paths src
-
-# Output:
-# Would modify: footer_panel.rs, patch_view.rs
-#
-# ⚠️  Note: Some instances were not matched:
-#
-# 💡 Hint: Found 6 struct literal(s) with fully qualified paths that didn't match:
-#    crate::view::builder::TouchableProps (6 instances)
-#
-# To match all of these, use:
-#    rs-hack ... --name "*::TouchableProps" ...
-```
-
-**How to handle the hint:**
-
-```bash
-# Option 1: Use wildcard to match ALL paths (recommended)
-rs-hack add --name "*::TouchableProps" --field-name "on_long_press" \
-  --field-value "None" --kind struct --paths src --apply
-
-# Option 2: Match specific qualified path
-rs-hack add --name "crate::view::builder::TouchableProps" \
-  --field-name "on_long_press" --field-value "None" --kind struct --paths src --apply
-```
-
-**When to use wildcards:**
-- ✅ Use `*::StructName` when you want to match all instances regardless of qualification
-- ✅ Use simple name first to discover what qualified paths exist via hints
-- ✅ Hints work in `add`, `remove`, and `find` commands
 
 ### Transform: Generic Find & Modify
 
@@ -184,15 +153,15 @@ rs-hack find --paths "src/**/*.rs" \
 
 ```bash
 # Add specific arm
-rs-hack add-match-arm \
+rs-hack add \
   --paths src/handler.rs \
-  --pattern "Status::NewVariant" \
+  --match-arm "Status::NewVariant" \
   --body "todo!()" \
   --function handle_status \
   --apply
 
 # Auto-detect all missing variants
-rs-hack add-match-arm \
+rs-hack add \
   --paths src/handler.rs \
   --auto-detect \
   --enum-name Status \
@@ -227,20 +196,17 @@ rs-hack find --paths "src/**/*.rs" \
   --node-type enum-usage --name "IRValue::HashMapV2" \
   --format locations | wc -l
 
-# 2. Preview changes
-rs-hack rename-enum-variant \
+# 2. Preview changes (dry-run by default)
+rs-hack rename \
   --paths "src/**/*.rs" \
-  --enum-name IRValue \
-  --old-variant HashMapV2 \
-  --new-variant HashMap \
-  --format diff --summary
+  --name "IRValue::HashMapV2" \
+  --to HashMap
 
 # 3. Apply changes
-rs-hack rename-enum-variant \
+rs-hack rename \
   --paths "src/**/*.rs" \
-  --enum-name IRValue \
-  --old-variant HashMapV2 \
-  --new-variant HashMap \
+  --name "IRValue::HashMapV2" \
+  --to HashMap \
   --apply
 
 # 4. Verify
@@ -257,20 +223,23 @@ rs-hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name IRCtx \
   --format locations
 
-# 2. Preview
-rs-hack add-struct-field \
+# 2. Preview (uses v0.5.1 field API)
+rs-hack add \
   --paths "src/**/*.rs" \
-  --struct-name IRCtx \
-  --field "return_type: Option<Type>" \
-  --literal-default "None" \
-  --format diff
+  --name IRCtx \
+  --field-name "return_type" \
+  --field-type "Option<Type>" \
+  --field-value "None" \
+  --kind struct
 
 # 3. Apply
-rs-hack add-struct-field \
+rs-hack add \
   --paths "src/**/*.rs" \
-  --struct-name IRCtx \
-  --field "return_type: Option<Type>" \
-  --literal-default "None" \
+  --name IRCtx \
+  --field-name "return_type" \
+  --field-type "Option<Type>" \
+  --field-value "None" \
+  --kind struct \
   --apply
 
 # 4. Verify
@@ -281,7 +250,7 @@ cargo check
 
 ```bash
 # Remove field from BOTH definitions AND all literal expressions
-# This is what confused users - remove-struct-field does both automatically!
+# The unified remove command does both automatically!
 
 # 1. Find where field is used
 rs-hack find --paths "src/**/*.rs" \
@@ -290,24 +259,26 @@ rs-hack find --paths "src/**/*.rs" \
   --format locations
 
 # 2. Preview removal (removes from definition AND literals)
-rs-hack remove-struct-field \
+rs-hack remove \
   --paths "src/**/*.rs" \
-  --struct-name Config \
+  --name Config \
   --field-name debug_mode \
-  --format diff
+  --kind struct
 
 # 3. Apply
-rs-hack remove-struct-field \
+rs-hack remove \
   --paths "src/**/*.rs" \
-  --struct-name Config \
+  --name Config \
   --field-name debug_mode \
+  --kind struct \
   --apply
 
 # For enum variant fields, use EnumName::VariantName syntax:
-rs-hack remove-struct-field \
+rs-hack remove \
   --paths "src/**/*.rs" \
-  --struct-name "View::Rectangle" \
+  --name "View::Rectangle" \
   --field-name immediate_mode \
+  --kind struct \
   --apply
 ```
 
@@ -340,15 +311,14 @@ rs-hack transform \
 ## When to Use rs-hack
 
 ✅ **DO use rs-hack for:**
-- Renaming enum variants across multiple files
-- Adding fields to struct definitions and literals
-- Adding fields to enum variant struct literals (use `Enum::Variant` syntax!)
-- Removing fields from struct definitions AND literals (both happen automatically!)
-- Removing fields from enum variant fields (use `EnumName::VariantName` syntax)
-- Adding match arms for enum variants
-- Commenting out debug macros
+- Renaming enum variants or functions across multiple files (`rename`)
+- Adding fields to struct definitions and/or literals (`add --field-name --field-type --field-value`)
+- Adding fields to enum variant struct literals (`add --name "Enum::Variant" --field-name --field-value`)
+- Removing fields from structs or enum variants (`remove --field-name`)
+- Adding match arms for enum variants (`add --match-arm`)
+- Commenting out debug macros (`transform --action comment`)
 - Any bulk AST-level transformation
-- Multi-file refactoring (glob patterns)
+- Multi-file refactoring (glob patterns like `"src/**/*.rs"`)
 
 ❌ **DON'T use rs-hack for:**
 - Single-line edits in one file → use Edit tool
@@ -361,11 +331,11 @@ rs-hack transform \
 **⚠️ The #1 mistake: Confusing adding a variant vs adding fields to a variant**
 
 ```bash
-# ❌ WRONG - Trying to add field to enum variant
-rs-hack add --name "View" --variant "Grid" --field-name "foo" --field-value "bar"
+# ❌ WRONG - Trying to add field to enum variant using --variant
+rs-hack add --name "View" --variant "Grid" --field-name "foo" --field-value "bar" --paths src
 # Error: Cannot combine --variant with --field-name
 
-# ✅ RIGHT - Add a NEW variant to an enum
+# ✅ RIGHT - Add a NEW variant to an enum definition
 rs-hack add --name "View" --variant "Grid { columns: u32, rows: u32 }" --paths src --apply
 
 # ✅ RIGHT - Add field to existing enum variant struct literals
@@ -375,6 +345,30 @@ rs-hack add --name "View::Grid" --field-name "foo" --field-value "bar" --kind st
 **Remember:**
 - `--variant` = Add a **new** variant to an enum definition
 - `--name "Enum::Variant"` = Target existing enum variant **literals** (for adding/removing fields)
+
+## Common Pitfall: Qualified Paths (v0.5.3+)
+
+**⚠️ Missing struct literals because they use qualified paths**
+
+```bash
+# You try this and only get partial matches:
+rs-hack add --name "TouchableProps" --field-name "on_long_press" \
+  --field-value "None" --kind struct --paths src
+
+# rs-hack shows a hint:
+# ⚠️  Note: Some instances were not matched:
+# 💡 Hint: Found 6 struct literal(s) with fully qualified paths:
+#    crate::view::builder::TouchableProps (6 instances)
+# To match all, use: --name "*::TouchableProps"
+
+# ✅ FIX - Use wildcard to match all qualified paths
+rs-hack add --name "*::TouchableProps" --field-name "on_long_press" \
+  --field-value "None" --kind struct --paths src --apply
+```
+
+**Remember:**
+- Simple names only match unqualified literals: `StructName { ... }`
+- Use `*::StructName` to match ALL paths: `mod::StructName`, `crate::path::StructName`, etc.
 
 ## Quick Reference
 
