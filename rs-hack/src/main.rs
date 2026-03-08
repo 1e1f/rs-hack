@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use glob::glob;
 
@@ -820,6 +820,12 @@ EXAMPLES:
     # Add use statement (no --name required)
     rs-hack add --use \"serde::Serialize\" --paths src --apply
 
+    # Add ..Default::default() to struct literals that need it
+    rs-hack add --name Config --default-rest --paths src --apply
+
+    # Add custom base expression (e.g., ..other_instance)
+    rs-hack add --name Config --base \"existing_config\" --paths src --apply
+
 AUTO-DETECTION:
     The command auto-detects what to add based on which flags you provide:
     - --field-name + --field-type: Add to struct definition
@@ -829,6 +835,8 @@ AUTO-DETECTION:
     - --method: Add impl method
     - --derive: Add derive macro
     - --use: Add use statement
+    - --default-rest: Add ..Default::default() to struct literals
+    - --base: Add custom base expression (..expr) to struct literals
 
 ENUM VARIANT SYNTAX:
     For enum struct variants, use \"EnumName::VariantName\" syntax:
@@ -928,6 +936,36 @@ NOTES:
         /// Only affect literals, not definitions (only with --field)
         #[arg(long)]
         literal_only: bool,
+
+        /// Add ..Default::default() to all struct literals that don't have a base expression
+        /// Use with --name to specify the struct, and --kind struct for struct literals
+        #[arg(long)]
+        default_rest: bool,
+
+        /// Custom base expression for struct literals (e.g., "other_instance" adds ..other_instance)
+        /// Use "default" as shorthand for "Default::default()"
+        #[arg(long, conflicts_with = "default_rest")]
+        base: Option<String>,
+
+        /// Function or method name to add argument to (e.g., "create_user", "process")
+        #[arg(long)]
+        call: Option<String>,
+
+        /// Argument expression to add (e.g., "None", "ctx.clone()", "Default::default()")
+        #[arg(long)]
+        arg: Option<String>,
+
+        /// Position for new argument: "first", "last", or index number (0-based)
+        #[arg(long, default_value = "last")]
+        arg_position: String,
+
+        /// Filter to "function" or "method" calls only (default: both)
+        #[arg(long)]
+        call_type: Option<String>,
+
+        /// Filter call sites by content substring
+        #[arg(long)]
+        content_filter: Option<String>,
 
         /// Where to insert: \"first\", \"last\", \"after:name\", or \"before:name\"
         #[arg(short = 'P', long, default_value = "last")]
@@ -1029,6 +1067,22 @@ NOTES:
         #[arg(long)]
         literal_only: bool,
 
+        /// Function or method name to remove argument from (e.g., "create_user", "process")
+        #[arg(long)]
+        call: Option<String>,
+
+        /// Index of argument to remove (0-based)
+        #[arg(long)]
+        arg_index: Option<usize>,
+
+        /// Filter to "function" or "method" calls only (default: both)
+        #[arg(long)]
+        call_type: Option<String>,
+
+        /// Filter call sites by content substring
+        #[arg(long)]
+        content_filter: Option<String>,
+
         /// Apply changes (default is dry-run)
         #[arg(long)]
         apply: bool,
@@ -1114,6 +1168,26 @@ NOTES:
         /// Specific AST node type for granular control (struct, struct-literal, function, function-call, method-call, impl-method, enum, enum-usage, match-arm, identifier, type-ref, type-alias, macro-call, const, static, trait, mod, use)
         #[arg(short = 't', long, conflicts_with = "kind")]
         node_type: Option<String>,
+
+        /// Function or method name to update argument in (e.g., "create_user", "process")
+        #[arg(long)]
+        call: Option<String>,
+
+        /// Index of argument to update (0-based)
+        #[arg(long)]
+        arg_index: Option<usize>,
+
+        /// New argument expression (e.g., "None", "ctx.clone()")
+        #[arg(long)]
+        arg: Option<String>,
+
+        /// Filter to "function" or "method" calls only (default: both)
+        #[arg(long)]
+        call_type: Option<String>,
+
+        /// Filter call sites by content substring
+        #[arg(long)]
+        content_filter: Option<String>,
 
         /// Apply changes (default is dry-run)
         #[arg(long)]
@@ -1361,6 +1435,123 @@ WHAT IT DOES:
         /// Show summary only (don't list all literal occurrences)
         #[arg(long)]
         summary: bool,
+    },
+
+    /// Architecture knowledge graph - extract and query @arch: annotations
+    #[command(subcommand)]
+    Arch(ArchCommands),
+}
+
+#[derive(Subcommand)]
+enum ArchCommands {
+    /// Extract annotations and build the graph
+    Extract {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (json, mermaid)
+        #[arg(short, long, default_value = "json")]
+        format: String,
+
+        /// Show verbose extraction progress
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Query the architecture graph
+    Query {
+        /// Query string (e.g., "layer:core AND role:compiler")
+        query: String,
+
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (ids, json, verbose)
+        #[arg(short, long, default_value = "ids")]
+        format: String,
+    },
+
+    /// Trace paths between nodes
+    Trace {
+        /// Source query
+        from: String,
+
+        /// Target query
+        to: String,
+
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Get architectural context for a file
+    Context {
+        /// File path to get context for
+        file: PathBuf,
+
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (markdown, json)
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+    },
+
+    /// Validate architecture rules
+    Validate {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Path to rules TOML file (default: load from Cargo.toml metadata)
+        #[arg(short, long)]
+        rules: Option<PathBuf>,
+
+        /// Only show warnings and errors
+        #[arg(short, long)]
+        quiet: bool,
+
+        /// Also validate layer dependencies from schema
+        #[arg(long)]
+        include_schema_rules: bool,
+    },
+
+    /// Export graph visualization
+    Visualize {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (mermaid, dot)
+        #[arg(short, long, default_value = "mermaid")]
+        format: String,
+    },
+
+    /// Print the schema loaded from Cargo.toml metadata
+    Schema {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (summary, toml, json)
+        #[arg(short, long, default_value = "summary")]
+        format: String,
+    },
+
+    /// Initialize arch metadata in Cargo.toml
+    Init {
+        /// Output format (toml, example)
+        #[arg(short, long, default_value = "toml")]
+        format: String,
+        /// Write to Cargo.toml instead of printing
+        #[arg(long)]
+        apply: bool,
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
     },
 }
 
@@ -2447,14 +2638,50 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only, position, apply } => {
+        Commands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only, default_rest, base, call, arg, arg_position, call_type, content_filter, position, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            // Handle --call operations first (add argument to function/method calls)
+            if let Some(call_name) = call {
+                let arg_expr = arg.ok_or_else(|| anyhow::anyhow!("--arg is required when using --call"))?;
+                let position = arg_position.parse::<ArgPosition>()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                let op = Operation::AddCallArg(AddCallArgOp {
+                    call_name,
+                    arg_expr,
+                    position,
+                    call_type,
+                    content_filter,
+                });
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
+                return Ok(());
+            }
+
+            // Handle --default-rest or --base first (before other operation counting)
+            if default_rest || base.is_some() {
+                let target_name = name.as_ref().ok_or_else(|| anyhow::anyhow!("--name is required when using --default-rest or --base"))?;
+
+                let base_expr = if default_rest {
+                    "Default::default()".to_string()
+                } else {
+                    base.clone().unwrap()
+                };
+
+                let op = Operation::SetStructLiteralBase(SetStructLiteralBaseOp {
+                    struct_name: target_name.clone(),
+                    base_expr,
+                    struct_path: None,
+                });
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
+                return Ok(());
+            }
 
             // Count how many operation flags are set
             let op_count = [field.is_some(), field_name.is_some(), variant.is_some(), method.is_some(), derive.is_some(), r#use.is_some(), match_arm.is_some() || auto_detect, doc_comment.is_some()].iter().filter(|&&x| x).count();
 
             if op_count == 0 {
-                anyhow::bail!("Must specify one of: --field/--field-name, --variant, --method, --derive, --use, --match-arm, or --doc-comment");
+                anyhow::bail!("Must specify one of: --field/--field-name, --variant, --method, --derive, --use, --match-arm, --default-rest, --base, --call, or --doc-comment");
             }
 
             if op_count > 1 {
@@ -2469,7 +2696,7 @@ fn main() -> Result<()> {
                         variant.as_deref().unwrap_or("VariantName")
                     );
                 }
-                anyhow::bail!("Can only specify one operation flag at a time (--field/--field-name, --variant, --method, --derive, --use, --match-arm, or --doc-comment)");
+                anyhow::bail!("Can only specify one operation flag at a time (--field/--field-name, --variant, --method, --derive, --use, --match-arm, --call, or --doc-comment)");
             }
 
             // Handle --match-arm operations
@@ -2675,18 +2902,32 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Remove { paths, name, field_name, variant, method, derive, match_arm, function, doc_comment, kind, node_type, literal_only, apply } => {
+        Commands::Remove { paths, name, field_name, variant, method, derive, match_arm, function, doc_comment, kind, node_type, literal_only, call, arg_index, call_type, content_filter, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            // Handle --call operations first (remove argument from function/method calls)
+            if let Some(call_name) = call {
+                let idx = arg_index.ok_or_else(|| anyhow::anyhow!("--arg-index is required when using --call"))?;
+
+                let op = Operation::RemoveCallArg(RemoveCallArgOp {
+                    call_name,
+                    arg_index: idx,
+                    call_type,
+                    content_filter,
+                });
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
+                return Ok(());
+            }
 
             // Count how many operation flags are set
             let op_count = [field_name.is_some(), variant.is_some(), method.is_some(), derive.is_some(), match_arm.is_some(), doc_comment].iter().filter(|&&x| x).count();
 
             if op_count == 0 {
-                anyhow::bail!("Must specify one of: --field-name, --variant, --method, --derive, --match-arm, or --doc-comment");
+                anyhow::bail!("Must specify one of: --field-name, --variant, --method, --derive, --match-arm, --call, or --doc-comment");
             }
 
             if op_count > 1 {
-                anyhow::bail!("Can only specify one operation flag at a time (--field-name, --variant, --method, --derive, --match-arm, or --doc-comment)");
+                anyhow::bail!("Can only specify one operation flag at a time (--field-name, --variant, --method, --derive, --match-arm, --call, or --doc-comment)");
             }
 
             // Handle --match-arm operations
@@ -2809,18 +3050,34 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Update { paths, name, field, field_name, field_type, variant, match_arm, body, function, doc_comment, kind, node_type, apply } => {
+        Commands::Update { paths, name, field, field_name, field_type, variant, match_arm, body, function, doc_comment, kind, node_type, call, arg_index, arg, call_type, content_filter, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
+
+            // Handle --call operations first (update argument in function/method calls)
+            if let Some(call_name) = call {
+                let idx = arg_index.ok_or_else(|| anyhow::anyhow!("--arg-index is required when using --call"))?;
+                let new_expr = arg.ok_or_else(|| anyhow::anyhow!("--arg is required when using --call"))?;
+
+                let op = Operation::UpdateCallArg(UpdateCallArgOp {
+                    call_name,
+                    arg_index: idx,
+                    new_expr,
+                    call_type,
+                    content_filter,
+                });
+                execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
+                return Ok(());
+            }
 
             // Count how many operation flags are set
             let op_count = [field.is_some(), field_name.is_some(), variant.is_some(), match_arm.is_some(), doc_comment.is_some()].iter().filter(|&&x| x).count();
 
             if op_count == 0 {
-                anyhow::bail!("Must specify one of: --field, --variant, --match-arm, or --doc-comment");
+                anyhow::bail!("Must specify one of: --field, --variant, --match-arm, --call, or --doc-comment");
             }
 
             if op_count > 1 {
-                anyhow::bail!("Can only specify one operation flag at a time (--field, --variant, --match-arm, or --doc-comment)");
+                anyhow::bail!("Can only specify one operation flag at a time (--field, --variant, --match-arm, --call, or --doc-comment)");
             }
 
             // Handle --match-arm operations
@@ -3103,9 +3360,425 @@ fn main() -> Result<()> {
                 }
             }
         }
+
+        Commands::Arch(arch_cmd) => {
+            handle_arch_command(arch_cmd)?;
+        }
     }
 
     Ok(())
+}
+
+fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
+    use rs_hack_arch::{
+        extract::extract_from_workspace_verbose,
+        graph::{ArchGraph, EdgeKind},
+        query::{get_file_context, trace_path, Query},
+        schema::Schema,
+        validate::{load_rules, load_rules_from_metadata, rules_from_schema, validate, Severity},
+    };
+
+    match cmd {
+        ArchCommands::Extract { path, format, verbose } => {
+            let annotations = extract_from_workspace_verbose(&path, verbose)?;
+            if verbose {
+                for ann in &annotations {
+                    eprintln!("  {:?} at {}:{}", ann.kind, ann.file.display(), ann.line);
+                }
+            }
+            let graph = ArchGraph::from_annotations(annotations);
+            if verbose {
+                eprintln!("Built graph with {} nodes", graph.nodes().count());
+            }
+
+            match format.as_str() {
+                "json" => println!("{}", graph.to_json()?),
+                "mermaid" => println!("{}", graph.to_mermaid()),
+                _ => eprintln!("Unknown format: {}", format),
+            }
+        }
+
+        ArchCommands::Query { query, path, format } => {
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let graph = ArchGraph::from_annotations(annotations);
+
+            let q = Query::parse(&query).map_err(|e| anyhow::anyhow!(e))?;
+            let result = q.execute(&graph);
+
+            match format.as_str() {
+                "ids" => {
+                    for id in &result.nodes {
+                        println!("{}", id);
+                    }
+                    eprintln!("\n{} matches", result.count);
+                }
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&result.nodes)?);
+                }
+                "verbose" => {
+                    for id in &result.nodes {
+                        if let Some(node) = graph.get_node(id) {
+                            println!("{}:{} - {}", node.file.display(), node.line, node.id);
+                            if let Some(ref layer) = node.properties.layer {
+                                println!("  layer: {}", layer);
+                            }
+                            if !node.properties.roles.is_empty() {
+                                println!("  roles: {}", node.properties.roles.join(", "));
+                            }
+                            if let Some(ref thread) = node.properties.thread {
+                                println!("  thread: {:?}", thread);
+                            }
+                            println!();
+                        }
+                    }
+                    eprintln!("{} matches", result.count);
+                }
+                _ => eprintln!("Unknown format: {}", format),
+            }
+        }
+
+        ArchCommands::Trace { from, to, path } => {
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let graph = ArchGraph::from_annotations(annotations);
+
+            let paths = trace_path(&graph, &from, &to).map_err(|e| anyhow::anyhow!(e))?;
+
+            if paths.is_empty() {
+                println!("No paths found from '{}' to '{}'", from, to);
+            } else {
+                for (i, p) in paths.iter().enumerate() {
+                    println!("Path {}:", i + 1);
+                    for (j, node) in p.iter().enumerate() {
+                        if j > 0 {
+                            println!("  ↓");
+                        }
+                        println!("  {}", node);
+                    }
+                    println!();
+                }
+            }
+        }
+
+        ArchCommands::Context { file, path, format } => {
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let graph = ArchGraph::from_annotations(annotations);
+
+            let file_str = file.to_string_lossy();
+            let context = get_file_context(&graph, &file_str);
+
+            match format.as_str() {
+                "markdown" => println!("{}", context.to_markdown(&file_str)),
+                "json" => {
+                    let json = serde_json::json!({
+                        "file": file_str.to_string(),
+                        "layer": context.layer,
+                        "roles": context.roles,
+                        "thread": context.thread,
+                        "qos": context.qos,
+                        "produces": context.produces,
+                        "consumes": context.consumes,
+                        "patterns": context.patterns,
+                        "constraints": context.constraints,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json)?);
+                }
+                _ => eprintln!("Unknown format: {}", format),
+            }
+        }
+
+        ArchCommands::Validate { path, rules, quiet, include_schema_rules } => {
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let graph = ArchGraph::from_annotations(annotations);
+
+            let mut all_rules = if let Some(rules_path) = rules {
+                let content = std::fs::read_to_string(&rules_path)?;
+                load_rules(&content)?
+            } else {
+                match load_rules_from_metadata(&path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        if !quiet {
+                            eprintln!("Note: Could not load rules from Cargo.toml: {}", e);
+                        }
+                        Vec::new()
+                    }
+                }
+            };
+
+            if include_schema_rules {
+                if let Ok(schema) = Schema::from_cargo_metadata(&path) {
+                    all_rules.extend(rules_from_schema(&schema));
+                }
+            }
+
+            if all_rules.is_empty() {
+                if !quiet {
+                    println!("No architecture rules defined.");
+                    println!("Add rules to [[workspace.metadata.arch.rules]] in Cargo.toml");
+                    println!("Or use --include-schema-rules to validate layer dependencies.");
+                }
+                return Ok(());
+            }
+
+            if !quiet {
+                eprintln!("Validating {} rules...", all_rules.len());
+            }
+
+            let violations = validate(&graph, &all_rules);
+
+            if violations.is_empty() {
+                if !quiet {
+                    println!("✓ No violations found");
+                }
+            } else {
+                let errors = violations.iter().filter(|v| v.severity == Severity::Error).count();
+                let warnings = violations.iter().filter(|v| v.severity == Severity::Warning).count();
+
+                for v in &violations {
+                    let prefix = match v.severity {
+                        Severity::Error => "ERROR",
+                        Severity::Warning => "WARNING",
+                    };
+                    let location = match (&v.file, v.line) {
+                        (Some(f), Some(l)) => format!("{}:{}", f.display(), l),
+                        (Some(f), None) => f.display().to_string(),
+                        _ => "unknown".into(),
+                    };
+                    println!("{}: {} - {} ({})", prefix, v.rule, v.message, location);
+                }
+
+                if errors > 0 {
+                    eprintln!("\n✗ {} errors, {} warnings", errors, warnings);
+                    std::process::exit(1);
+                } else {
+                    eprintln!("\n⚠ {} warnings", warnings);
+                }
+            }
+        }
+
+        ArchCommands::Visualize { path, format } => {
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let graph = ArchGraph::from_annotations(annotations);
+
+            match format.as_str() {
+                "mermaid" => println!("{}", graph.to_mermaid()),
+                "dot" => {
+                    println!("digraph arch {{");
+                    println!("  rankdir=TB;");
+                    println!("  node [shape=box];");
+
+                    for node in graph.nodes() {
+                        let label = node.id.split("::").last().unwrap_or(&node.id);
+                        let color = node.properties.layer.as_deref()
+                            .map(|l| match l {
+                                "core" => "lightblue",
+                                "lib" => "lightgreen",
+                                "api" => "lightyellow",
+                                "ui" => "lightpink",
+                                "app" => "lightgray",
+                                _ => "white",
+                            })
+                            .unwrap_or("white");
+                        println!(
+                            "  \"{}\" [label=\"{}\" fillcolor=\"{}\" style=filled];",
+                            node.id, label, color
+                        );
+                    }
+
+                    for edge in graph.edges() {
+                        let style = match edge.kind {
+                            EdgeKind::DependsOn => "solid",
+                            EdgeKind::MessageFlow => "dashed",
+                            EdgeKind::Bridge => "bold",
+                            _ => "dotted",
+                        };
+                        println!("  \"{}\" -> \"{}\" [style={}];", edge.from, edge.to, style);
+                    }
+
+                    println!("}}");
+                }
+                _ => eprintln!("Unknown format: {}", format),
+            }
+        }
+
+        ArchCommands::Schema { path, format } => {
+            let schema = Schema::from_cargo_metadata(&path)?;
+
+            if schema.is_empty() {
+                eprintln!("No architecture schema found in Cargo.toml");
+                eprintln!("Add [workspace.metadata.arch] section to configure.");
+                eprintln!("Run 'rs-hack arch init' for a template.");
+                return Ok(());
+            }
+
+            match format.as_str() {
+                "summary" => println!("{}", schema.summary()),
+                "toml" => println!("{}", schema.to_toml()?),
+                "json" => println!("{}", serde_json::to_string_pretty(&schema)?),
+                _ => eprintln!("Unknown format: {}", format),
+            }
+        }
+
+        ArchCommands::Init { format, apply, path } => {
+            match format.as_str() {
+                "toml" => {
+                    if apply {
+                        apply_arch_init_template(&path)?;
+                    } else {
+                        print_arch_init_template();
+                        eprintln!("\n# To apply this to your Cargo.toml, run:");
+                        eprintln!("#   rs-hack arch init --apply");
+                    }
+                }
+                "example" => print_arch_example_annotations(),
+                _ => eprintln!("Unknown format: {}", format),
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_arch_init_template(path: &Path) -> Result<()> {
+    // Find workspace Cargo.toml
+    let cargo_toml = if path.join("Cargo.toml").exists() {
+        path.join("Cargo.toml")
+    } else {
+        // Try to find it via cargo metadata
+        let output = std::process::Command::new("cargo")
+            .args(["locate-project", "--workspace", "--message-format=plain"])
+            .current_dir(path)
+            .output()
+            .context("Failed to run cargo locate-project")?;
+        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
+    };
+
+    if !cargo_toml.exists() {
+        bail!("Could not find Cargo.toml at {:?}", cargo_toml);
+    }
+
+    // Read existing content
+    let content = std::fs::read_to_string(&cargo_toml)
+        .context("Failed to read Cargo.toml")?;
+
+    // Check if arch metadata already exists
+    if content.contains("[workspace.metadata.arch]") {
+        eprintln!("Architecture metadata already exists in {}", cargo_toml.display());
+        eprintln!("Edit manually or remove existing section first.");
+        return Ok(());
+    }
+
+    // Append the template
+    let template = r#"
+# Architecture Knowledge Graph Configuration
+# See: rs-hack arch --help
+[workspace.metadata.arch]
+
+# Define architectural layers (customize for your project)
+[workspace.metadata.arch.layers]
+core = { description = "Core library with no external dependencies", allowed_dependencies = [] }
+lib = { description = "Library layer", allowed_dependencies = ["core"] }
+app = { description = "Application entry points", allowed_dependencies = ["core", "lib"] }
+
+# Define roles for components
+[workspace.metadata.arch.roles]
+compiler = "Transforms source to executable form"
+runtime = "Manages execution state"
+transport = "Routes messages between components"
+
+# Define validation rules
+[[workspace.metadata.arch.rules]]
+name = "core-independence"
+description = "Core layer cannot depend on higher layers"
+severity = "error"
+type = "layer_dependency"
+layer = "core"
+allowed = []
+"#;
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&cargo_toml)
+        .context("Failed to open Cargo.toml for appending")?;
+
+    use std::io::Write;
+    writeln!(file, "{}", template)?;
+
+    eprintln!("Added [workspace.metadata.arch] to {}", cargo_toml.display());
+    eprintln!("Next steps:");
+    eprintln!("  1. Edit the layers/roles to match your architecture");
+    eprintln!("  2. Add @arch: annotations to your source files");
+    eprintln!("  3. Run 'rs-hack arch extract' to build the graph");
+    Ok(())
+}
+
+fn print_arch_init_template() {
+    println!(r#"# Add this to your workspace Cargo.toml
+
+[workspace.metadata.arch]
+
+# Define architectural layers
+[workspace.metadata.arch.layers]
+core = {{ description = "Core library with no external dependencies", allowed_dependencies = [] }}
+lib = {{ description = "Library layer", allowed_dependencies = ["core"] }}
+api = {{ description = "API/service layer", allowed_dependencies = ["core", "lib"] }}
+app = {{ description = "Application entry points", allowed_dependencies = ["core", "lib", "api"] }}
+
+# Define roles for components
+[workspace.metadata.arch.roles]
+compiler = "Transforms source to executable form"
+runtime = "Manages execution state"
+transport = "Routes messages between components"
+storage = "Persists and retrieves data"
+
+# Define thread contexts (optional)
+[workspace.metadata.arch.threads]
+main = {{ priority = "normal", description = "Main thread" }}
+worker = {{ priority = "normal", description = "Background worker threads" }}
+
+# Define validation rules
+[[workspace.metadata.arch.rules]]
+name = "core-independence"
+description = "Core layer cannot depend on higher layers"
+severity = "error"
+type = "layer_dependency"
+layer = "core"
+allowed = []
+"#);
+}
+
+fn print_arch_example_annotations() {
+    println!(r#"# Example @arch: annotations for Rust source files
+
+## Module-level (at top of file with //! comments):
+
+//! @arch:layer(core)
+//! @arch:role(runtime)
+
+## Struct-level:
+
+/// @arch:layer(lib)
+/// @arch:role(storage)
+/// @arch:produces(event:Created, event:Updated)
+pub struct Repository {{ ... }}
+
+## Function-level:
+
+/// @arch:thread(worker)
+/// @arch:consumes(command:Create)
+pub fn process_command(cmd: Command) {{ ... }}
+
+## Available annotations:
+
+@arch:layer(name)              - Architectural layer
+@arch:role(name)               - Component role
+@arch:thread(name)             - Thread context
+@arch:produces(type:name, ...) - Messages this component produces
+@arch:consumes(type:name, ...) - Messages this component consumes
+@arch:depends_on(target)       - Explicit dependency
+@arch:pattern(name)            - Design pattern in use
+@arch:gateway                  - Protocol translation point
+"#);
 }
 
 /// Expand semantic kind to list of specific node types
@@ -3443,6 +4116,10 @@ fn execute_operation_with_state(
         Operation::AddDocComment(_) => "AddDocComment",
         Operation::UpdateDocComment(_) => "UpdateDocComment",
         Operation::RemoveDocComment(_) => "RemoveDocComment",
+        Operation::SetStructLiteralBase(_) => "SetStructLiteralBase",
+        Operation::AddCallArg(_) => "AddCallArg",
+        Operation::UpdateCallArg(_) => "UpdateCallArg",
+        Operation::RemoveCallArg(_) => "RemoveCallArg",
     };
 
     // First pass: collect changes and backup files

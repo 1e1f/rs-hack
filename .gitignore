@@ -1,10 +1,11 @@
 /tmp
+/src
 /target
 /*.md
 !README.md
 !HUMAN.md
 .claude
-
+.DS_STORE
 # Cargo.lock is committed at workspace root but ignored in sub-crates
 /rs-hack/Cargo.lock
 /rs-hack-mcp/Cargo.lock

@@ -62,6 +62,10 @@ pub enum Operation {
     AddDocComment(AddDocCommentOp),
     UpdateDocComment(UpdateDocCommentOp),
     RemoveDocComment(RemoveDocCommentOp),
+    SetStructLiteralBase(SetStructLiteralBaseOp),
+    AddCallArg(AddCallArgOp),
+    UpdateCallArg(UpdateCallArgOp),
+    RemoveCallArg(RemoveCallArgOp),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +102,18 @@ pub struct AddStructLiteralFieldOp {
     pub struct_name: String,
     pub field_def: String, // e.g., "return_type: None"
     pub position: InsertPosition,
+    #[serde(default)]
+    pub struct_path: Option<String>,  // Optional canonical path (e.g., "crate::types::Rectangle")
+}
+
+/// Add or set the base expression (..expr) on struct literals
+/// e.g., adds `..Default::default()` to `Foo { a: 1 }` → `Foo { a: 1, ..Default::default() }`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStructLiteralBaseOp {
+    pub struct_name: String,
+    /// The base expression (e.g., "Default::default()" or just "default")
+    /// If "default", expands to "Default::default()"
+    pub base_expr: String,
     #[serde(default)]
     pub struct_path: Option<String>,  // Optional canonical path (e.g., "crate::types::Rectangle")
 }
@@ -323,6 +339,107 @@ pub struct FieldLocation {
     pub file_path: String,
     pub line: usize,
     pub context: FieldContext,
+}
+
+/// Insert position for call arguments (numeric since args are positional)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ArgPosition {
+    /// Insert as first argument
+    First,
+    /// Insert as last argument
+    Last,
+    /// Insert at specific index (0-based, shifts existing args right)
+    Index(usize),
+}
+
+impl Default for ArgPosition {
+    fn default() -> Self {
+        ArgPosition::Last
+    }
+}
+
+impl std::fmt::Display for ArgPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArgPosition::First => write!(f, "first"),
+            ArgPosition::Last => write!(f, "last"),
+            ArgPosition::Index(i) => write!(f, "index:{}", i),
+        }
+    }
+}
+
+impl std::str::FromStr for ArgPosition {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "first" => Ok(ArgPosition::First),
+            "last" => Ok(ArgPosition::Last),
+            s if s.starts_with("index:") => {
+                let idx = s[6..].parse::<usize>()
+                    .map_err(|_| format!("Invalid index in position: {}", s))?;
+                Ok(ArgPosition::Index(idx))
+            }
+            s => {
+                // Try parsing as plain number
+                if let Ok(idx) = s.parse::<usize>() {
+                    Ok(ArgPosition::Index(idx))
+                } else {
+                    Err(format!("Invalid arg position: {}. Valid values are 'first', 'last', or 'index:N'", s))
+                }
+            }
+        }
+    }
+}
+
+/// Add an argument to function or method calls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddCallArgOp {
+    /// Name of the function or method to target
+    pub call_name: String,
+    /// Expression to add as argument (e.g., "None", "ctx.clone()", "Default::default()")
+    pub arg_expr: String,
+    /// Where to insert the argument
+    #[serde(default)]
+    pub position: ArgPosition,
+    /// Filter to "function" or "method" calls only (None = both)
+    #[serde(default)]
+    pub call_type: Option<String>,
+    /// Filter call sites by content substring
+    #[serde(default)]
+    pub content_filter: Option<String>,
+}
+
+/// Update an argument at a specific index in function or method calls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCallArgOp {
+    /// Name of the function or method to target
+    pub call_name: String,
+    /// Index of the argument to update (0-based)
+    pub arg_index: usize,
+    /// New expression for the argument
+    pub new_expr: String,
+    /// Filter to "function" or "method" calls only (None = both)
+    #[serde(default)]
+    pub call_type: Option<String>,
+    /// Filter call sites by content substring
+    #[serde(default)]
+    pub content_filter: Option<String>,
+}
+
+/// Remove an argument at a specific index from function or method calls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveCallArgOp {
+    /// Name of the function or method to target
+    pub call_name: String,
+    /// Index of the argument to remove (0-based)
+    pub arg_index: usize,
+    /// Filter to "function" or "method" calls only (None = both)
+    #[serde(default)]
+    pub call_type: Option<String>,
+    /// Filter call sites by content substring
+    #[serde(default)]
+    pub content_filter: Option<String>,
 }
 
 /// Context in which a field appears

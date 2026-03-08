@@ -940,6 +940,93 @@ run_test "remove-doc-comment" \
     "! grep -q '///' $TEMP_DIR/doc_test.rs"
 
 # ============================================================================
+section "STRUCT LITERAL BASE OPERATIONS (NEW v0.5.4)"
+# ============================================================================
+
+# Test --default-rest with multiline struct literal
+cat > "$TEMP_DIR/default_rest_test.rs" << 'EOF'
+#[derive(Default)]
+pub struct Config {
+    pub timeout: u64,
+    pub retries: u32,
+    pub enabled: bool,
+}
+
+fn create_config() -> Config {
+    Config {
+        timeout: 5000,
+        retries: 3,
+        enabled: true,
+    }
+}
+
+fn create_partial() -> Config {
+    Config {
+        timeout: 1000,
+        ..Default::default()
+    }
+}
+
+fn quick_config() -> Config {
+    Config { timeout: 100, retries: 1, enabled: false }
+}
+EOF
+
+run_test "default-rest-multiline" \
+    "$BINARY add --paths $TEMP_DIR/default_rest_test.rs --name Config --default-rest --apply" \
+    "grep -A 10 'fn create_config' $TEMP_DIR/default_rest_test.rs | grep -q '\.\.Default::default()' && grep -A 10 'fn quick_config' $TEMP_DIR/default_rest_test.rs | grep -q '\.\.Default::default()'" \
+    "true"
+
+# Test that existing base expressions are skipped
+run_test "default-rest-skips-existing" \
+    "grep -A 5 'fn create_partial' $TEMP_DIR/default_rest_test.rs | grep -c '\.\.Default::default()'" \
+    "[ \$(grep -A 5 'fn create_partial' $TEMP_DIR/default_rest_test.rs | grep -c '\.\.Default::default()') -eq 1 ]" \
+    "true"
+
+# Test --base with custom expression
+cat > "$TEMP_DIR/custom_base_test.rs" << 'EOF'
+pub struct Settings {
+    pub name: String,
+    pub value: i32,
+}
+
+fn main() {
+    let defaults = Settings { name: "default".to_string(), value: 0 };
+    let custom = Settings { name: "custom".to_string(), value: 42 };
+}
+EOF
+
+run_test "custom-base-expression" \
+    "$BINARY add --paths $TEMP_DIR/custom_base_test.rs --name Settings --base 'defaults' --apply" \
+    "grep -q '\.\.defaults' $TEMP_DIR/custom_base_test.rs && grep -A 3 'let custom' $TEMP_DIR/custom_base_test.rs | grep -q '\.\.defaults'" \
+    "true"
+
+# Test --default-rest with single-line struct literal (formatting)
+cat > "$TEMP_DIR/single_line_base.rs" << 'EOF'
+#[derive(Default)]
+pub struct Point { pub x: i32, pub y: i32 }
+
+fn origin() -> Point { Point { x: 0, y: 0 } }
+EOF
+
+run_test "default-rest-single-line-formatting" \
+    "$BINARY add --paths $TEMP_DIR/single_line_base.rs --name Point --default-rest --apply" \
+    "grep -q 'Point { x: 0, y: 0, \.\.Default::default() }' $TEMP_DIR/single_line_base.rs" \
+    "true"
+
+# Test --base with "default" shorthand
+cat > "$TEMP_DIR/default_shorthand.rs" << 'EOF'
+#[derive(Default)]
+pub struct Item { pub id: u64 }
+fn test() -> Item { Item { id: 1 } }
+EOF
+
+run_test "base-default-shorthand" \
+    "$BINARY add --paths $TEMP_DIR/default_shorthand.rs --name Item --base 'default' --apply" \
+    "grep -q '\.\.Default::default()' $TEMP_DIR/default_shorthand.rs" \
+    "true"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 
@@ -976,8 +1063,9 @@ if [ $FAILED -eq 0 ]; then
     echo "  ✅ 2 YAML batch operations tests (yaml, json-backwards-compat) ⭐ NEW Sprint 3"
     echo "  ✅ 7 Find discovery & variant filtering (all-types, variant-flag, ::, wildcard, hints, canonical, grouped) ⭐ NEW v0.5.0"
     echo "  ✅ 3 Doc comment operations (add, update, remove) ⭐ NEW"
+    echo "  ✅ 5 Struct literal base operations (multiline, skip-existing, custom-base, single-line, shorthand) ⭐ NEW v0.5.4"
     echo ""
-    printf "Total: %b61 tests%b\n" "$BLUE" "$NC"
+    printf "Total: %b66 tests%b\n" "$BLUE" "$NC"
 
     # STATE AUDIT
     section "STATE AUDIT"

@@ -3,6 +3,7 @@ members = [
     "rs-hack",
     "rshack",
     "rs-hack-mcp",
+    "rs-hack-arch",
 ]
 resolver = "2"
 

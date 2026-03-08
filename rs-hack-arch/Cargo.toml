@@ -1,0 +1,39 @@
+[package]
+name = "rs-hack-arch"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Architecture knowledge graph from Rust source annotations"
+
+[dependencies]
+# AST parsing
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+
+# File traversal
+glob = "0.3"
+walkdir = "2.0"
+
+# Graph storage
+petgraph = "0.6"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Caching
+blake3 = "1.5"
+
+# Cargo metadata for schema loading
+cargo_metadata = "0.18"
+
+[dev-dependencies]
+tempfile = "3.0"

@@ -116,6 +116,10 @@ impl RustEditor {
                 &op.target_type,
                 &op.name,
             ),
+            Operation::SetStructLiteralBase(op) => self.set_struct_literal_base(op),
+            Operation::AddCallArg(op) => self.add_call_arg(op),
+            Operation::UpdateCallArg(op) => self.update_call_arg(op),
+            Operation::RemoveCallArg(op) => self.remove_call_arg(op),
         }
     }
     
@@ -909,6 +913,212 @@ impl RustEditor {
         // Re-parse to update syntax_tree
         self.syntax_tree = syn::parse_str(&self.content)
             .context("Failed to re-parse after adding struct literal fields")?;
+        self.line_offsets = Self::compute_line_offsets(&self.content);
+
+        Ok(ModificationResult {
+            changed: true,
+            modified_nodes: backup_nodes,
+            unmatched_qualified_paths: unmatched_hint,
+        })
+    }
+
+    /// Set the base expression (..expr) on struct literals that don't already have one
+    /// e.g., `Foo { a: 1 }` → `Foo { a: 1, ..Default::default() }`
+    pub(crate) fn set_struct_literal_base(&mut self, op: &SetStructLiteralBaseOp) -> Result<ModificationResult> {
+        // Expand "default" shorthand to "Default::default()"
+        let base_expr = if op.base_expr == "default" {
+            "Default::default()".to_string()
+        } else {
+            op.base_expr.clone()
+        };
+
+        // Create a path resolver if a canonical path was provided
+        let path_resolver = if let Some(struct_path) = &op.struct_path {
+            let mut resolver = PathResolver::new(struct_path)
+                .ok_or_else(|| anyhow::anyhow!("Invalid struct path: {}", struct_path))?;
+            resolver.scan_file(&self.syntax_tree);
+            Some(resolver)
+        } else {
+            None
+        };
+
+        // Collect backups of all struct literal expressions that will be modified
+        let backup_nodes = self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
+
+        // Find all struct literals that need a base expression
+        use syn::visit::Visit;
+
+        struct BaseInserter<'a> {
+            struct_name: String,
+            path_resolver: Option<&'a PathResolver>,
+            // (insert_after_offset, close_brace_offset, indent_spaces)
+            insertion_points: Vec<(usize, usize, usize)>,
+            unmatched_paths: std::collections::HashMap<String, usize>,
+            editor: &'a RustEditor,
+        }
+
+        impl<'ast, 'a> Visit<'ast> for BaseInserter<'a> {
+            fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+                use syn::parse::Parser;
+                if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                    .parse2(node.mac.tokens.clone())
+                {
+                    for expr in exprs.iter() {
+                        syn::visit::visit_expr(self, expr);
+                    }
+                }
+                syn::visit::visit_expr_macro(self, node);
+            }
+
+            fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+                // Skip if already has a base expression
+                if node.rest.is_some() {
+                    syn::visit::visit_expr_struct(self, node);
+                    return;
+                }
+
+                // Check if this matches our target
+                let is_match = if let Some(resolver) = &self.path_resolver {
+                    resolver.matches_target(&node.path)
+                } else {
+                    // Legacy matching logic
+                    if self.struct_name.contains("::") {
+                        if self.struct_name.starts_with("*::") {
+                            let target_name = &self.struct_name[3..];
+                            node.path.segments.last()
+                                .map(|seg| seg.ident.to_string() == target_name)
+                                .unwrap_or(false)
+                        } else {
+                            let path_str = node.path.segments.iter()
+                                .map(|seg| seg.ident.to_string())
+                                .collect::<Vec<_>>()
+                                .join("::");
+                            path_str == self.struct_name
+                        }
+                    } else {
+                        let matches = node.path.segments.len() == 1
+                            && node.path.segments.last()
+                                .map(|seg| seg.ident.to_string())
+                                .as_ref() == Some(&self.struct_name);
+
+                        if !matches && node.path.segments.len() > 1 {
+                            if let Some(last_seg) = node.path.segments.last() {
+                                if last_seg.ident.to_string() == self.struct_name {
+                                    let qualified_path = node.path.segments.iter()
+                                        .map(|seg| seg.ident.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join("::");
+                                    *self.unmatched_paths.entry(qualified_path).or_insert(0) += 1;
+                                }
+                            }
+                        }
+                        matches
+                    }
+                };
+
+                if is_match {
+                    // Find where to insert: after last field, or after opening brace if empty
+                    let brace_span = node.brace_token.span.join();
+                    let close_brace_offset = self.editor.span_to_byte_offset(brace_span.end()) - 1;
+
+                    let (insert_after, indent) = if let Some(last_field) = node.fields.last() {
+                        let field_end = self.editor.span_to_byte_offset(last_field.span().end());
+                        let field_start_offset = self.editor.span_to_byte_offset(last_field.span().start());
+                        let indent = self.editor.get_indentation(field_start_offset).len();
+                        (field_end, indent)
+                    } else {
+                        // No fields, insert after opening brace
+                        let open_brace = self.editor.span_to_byte_offset(brace_span.start()) + 1;
+                        let struct_start = self.editor.span_to_byte_offset(node.span().start());
+                        let indent = self.editor.get_indentation(struct_start).len() + 4;
+                        (open_brace, indent)
+                    };
+
+                    self.insertion_points.push((insert_after, close_brace_offset, indent));
+                }
+
+                syn::visit::visit_expr_struct(self, node);
+            }
+        }
+
+        let mut inserter = BaseInserter {
+            struct_name: op.struct_name.clone(),
+            path_resolver: path_resolver.as_ref(),
+            insertion_points: Vec::new(),
+            unmatched_paths: std::collections::HashMap::new(),
+            editor: self,
+        };
+
+        inserter.visit_file(&self.syntax_tree);
+
+        let unmatched_hint = if !op.struct_name.contains("::") && !inserter.unmatched_paths.is_empty() {
+            Some(inserter.unmatched_paths)
+        } else {
+            None
+        };
+
+        if inserter.insertion_points.is_empty() {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+                unmatched_qualified_paths: unmatched_hint,
+            });
+        }
+
+        // Sort insertion points in reverse order so we can insert from end to beginning
+        let mut points = inserter.insertion_points;
+        points.sort_by_key(|(insert_after, _, _)| std::cmp::Reverse(*insert_after));
+
+        // Perform surgical insertions
+        for (insert_after, close_brace_offset, indent_spaces) in points {
+            // Check if there's already a comma after the last field (syn span doesn't include trailing comma)
+            let after_insert = &self.content[insert_after..close_brace_offset];
+            let trimmed_after = after_insert.trim_start();
+            let has_trailing_comma = trimmed_after.starts_with(',');
+
+            // If there's a trailing comma, adjust insert point to after the comma
+            let actual_insert_pos = if has_trailing_comma {
+                // Find the comma position and insert after it
+                let comma_offset = after_insert.find(',').unwrap();
+                insert_after + comma_offset + 1
+            } else {
+                insert_after
+            };
+
+            // Check if this is multiline (there's a newline between insert point and close brace)
+            let between = &self.content[actual_insert_pos..close_brace_offset];
+            let is_multiline = between.contains('\n');
+
+            // Also check if we're inserting right after opening brace (no fields)
+            let before_insert = &self.content[..insert_after];
+            let trimmed = before_insert.trim_end();
+            let after_open_brace = trimmed.ends_with('{');
+
+            let base_str = if is_multiline {
+                // Multiline: add on a new line with proper indentation
+                let indent = " ".repeat(indent_spaces);
+                if after_open_brace || has_trailing_comma {
+                    // No comma needed - either after brace or we're after the existing comma
+                    format!("\n{}..{}", indent, base_expr)
+                } else {
+                    // No trailing comma, add comma first
+                    format!(",\n{}..{}", indent, base_expr)
+                }
+            } else {
+                // Single line: add inline
+                if after_open_brace || has_trailing_comma {
+                    format!(" ..{}", base_expr)
+                } else {
+                    format!(", ..{}", base_expr)
+                }
+            };
+
+            self.content.insert_str(actual_insert_pos, &base_str);
+        }
+
+        // Re-parse to update syntax_tree
+        self.syntax_tree = syn::parse_str(&self.content)
+            .context("Failed to re-parse after adding struct literal base")?;
         self.line_offsets = Self::compute_line_offsets(&self.content);
 
         Ok(ModificationResult {
@@ -4058,6 +4268,589 @@ impl RustEditor {
             modified_nodes,
             unmatched_qualified_paths: None,
         })
+    }
+
+    /// Add an argument to function or method calls
+    pub(crate) fn add_call_arg(&mut self, op: &AddCallArgOp) -> Result<ModificationResult> {
+        let call_matches = self.find_call_sites(&op.call_name, op.call_type.as_deref(), op.content_filter.as_deref())?;
+
+        if call_matches.is_empty() {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+                unmatched_qualified_paths: None,
+            });
+        }
+
+        // Sort by position (backwards) to avoid offset issues
+        let mut sorted_matches = call_matches;
+        sorted_matches.sort_by(|a, b| {
+            b.location.line.cmp(&a.location.line)
+                .then(b.location.column.cmp(&a.location.column))
+        });
+
+        let mut modified_nodes = Vec::new();
+
+        for call_match in &sorted_matches {
+            // Create backup node
+            let backup_node = BackupNode {
+                node_type: call_match.node_type.clone(),
+                identifier: call_match.identifier.clone(),
+                original_content: call_match.snippet.clone(),
+                location: call_match.location.clone(),
+            };
+
+            // Parse the call to get argument info
+            let (args_start, args_end, arg_count) = self.find_call_args_span(&call_match)?;
+
+            // Calculate the insert position
+            let insert_idx = match &op.position {
+                ArgPosition::First => 0,
+                ArgPosition::Last => arg_count,
+                ArgPosition::Index(i) => (*i).min(arg_count),
+            };
+
+            // Build the new argument text
+            let new_arg = if arg_count == 0 {
+                // No existing args - just insert the argument
+                op.arg_expr.clone()
+            } else if insert_idx == 0 {
+                // Inserting at the start
+                format!("{}, ", op.arg_expr)
+            } else if insert_idx >= arg_count {
+                // Inserting at the end
+                format!(", {}", op.arg_expr)
+            } else {
+                // Inserting in the middle
+                format!("{}, ", op.arg_expr)
+            };
+
+            // Find the insertion point
+            let insert_offset = if arg_count == 0 {
+                // Empty args - insert after opening paren
+                args_start
+            } else if insert_idx == 0 {
+                // Insert at start
+                args_start
+            } else if insert_idx >= arg_count {
+                // Insert at end
+                args_end
+            } else {
+                // Find the position after the nth argument's comma
+                self.find_arg_boundary_offset(&call_match, insert_idx)?
+            };
+
+            // Insert the new argument
+            self.content.insert_str(insert_offset, &new_arg);
+
+            // Recompute line offsets after each change
+            self.line_offsets = Self::compute_line_offsets(&self.content);
+
+            modified_nodes.push(backup_node);
+        }
+
+        Ok(ModificationResult {
+            changed: !modified_nodes.is_empty(),
+            modified_nodes,
+            unmatched_qualified_paths: None,
+        })
+    }
+
+    /// Update an argument at a specific index in function or method calls
+    pub(crate) fn update_call_arg(&mut self, op: &UpdateCallArgOp) -> Result<ModificationResult> {
+        let call_matches = self.find_call_sites(&op.call_name, op.call_type.as_deref(), op.content_filter.as_deref())?;
+
+        if call_matches.is_empty() {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+                unmatched_qualified_paths: None,
+            });
+        }
+
+        // Sort by position (backwards) to avoid offset issues
+        let mut sorted_matches = call_matches;
+        sorted_matches.sort_by(|a, b| {
+            b.location.line.cmp(&a.location.line)
+                .then(b.location.column.cmp(&a.location.column))
+        });
+
+        let mut modified_nodes = Vec::new();
+
+        for call_match in &sorted_matches {
+            // Get argument info
+            let (_, _, arg_count) = self.find_call_args_span(&call_match)?;
+
+            // Check if the index is valid
+            if op.arg_index >= arg_count {
+                continue; // Skip this call - doesn't have enough arguments
+            }
+
+            // Create backup node
+            let backup_node = BackupNode {
+                node_type: call_match.node_type.clone(),
+                identifier: call_match.identifier.clone(),
+                original_content: call_match.snippet.clone(),
+                location: call_match.location.clone(),
+            };
+
+            // Find the span of the argument to replace
+            let (arg_start, arg_end) = self.find_arg_span(&call_match, op.arg_index)?;
+
+            // Replace the argument
+            self.content.replace_range(arg_start..arg_end, &op.new_expr);
+
+            // Recompute line offsets after each change
+            self.line_offsets = Self::compute_line_offsets(&self.content);
+
+            modified_nodes.push(backup_node);
+        }
+
+        Ok(ModificationResult {
+            changed: !modified_nodes.is_empty(),
+            modified_nodes,
+            unmatched_qualified_paths: None,
+        })
+    }
+
+    /// Remove an argument at a specific index from function or method calls
+    pub(crate) fn remove_call_arg(&mut self, op: &RemoveCallArgOp) -> Result<ModificationResult> {
+        let call_matches = self.find_call_sites(&op.call_name, op.call_type.as_deref(), op.content_filter.as_deref())?;
+
+        if call_matches.is_empty() {
+            return Ok(ModificationResult {
+                changed: false,
+                modified_nodes: vec![],
+                unmatched_qualified_paths: None,
+            });
+        }
+
+        // Sort by position (backwards) to avoid offset issues
+        let mut sorted_matches = call_matches;
+        sorted_matches.sort_by(|a, b| {
+            b.location.line.cmp(&a.location.line)
+                .then(b.location.column.cmp(&a.location.column))
+        });
+
+        let mut modified_nodes = Vec::new();
+
+        for call_match in &sorted_matches {
+            // Get argument info
+            let (_, _, arg_count) = self.find_call_args_span(&call_match)?;
+
+            // Check if the index is valid
+            if op.arg_index >= arg_count {
+                continue; // Skip this call - doesn't have enough arguments
+            }
+
+            // Create backup node
+            let backup_node = BackupNode {
+                node_type: call_match.node_type.clone(),
+                identifier: call_match.identifier.clone(),
+                original_content: call_match.snippet.clone(),
+                location: call_match.location.clone(),
+            };
+
+            // Find the span of the argument to remove (including comma)
+            let (remove_start, remove_end) = self.find_arg_span_with_comma(&call_match, op.arg_index, arg_count)?;
+
+            // Remove the argument
+            self.content.replace_range(remove_start..remove_end, "");
+
+            // Recompute line offsets after each change
+            self.line_offsets = Self::compute_line_offsets(&self.content);
+
+            modified_nodes.push(backup_node);
+        }
+
+        Ok(ModificationResult {
+            changed: !modified_nodes.is_empty(),
+            modified_nodes,
+            unmatched_qualified_paths: None,
+        })
+    }
+
+    /// Find all function and/or method call sites matching the given name
+    fn find_call_sites(&self, call_name: &str, call_type: Option<&str>, content_filter: Option<&str>) -> Result<Vec<InspectResult>> {
+        let mut results = Vec::new();
+
+        // Determine which types to search
+        let search_functions = call_type.map_or(true, |ct| ct == "function");
+        let search_methods = call_type.map_or(true, |ct| ct == "method");
+
+        if search_functions {
+            let func_results = self.inspect(Some("function-call"), Some(call_name), None, false)?;
+            results.extend(func_results);
+        }
+
+        if search_methods {
+            let method_results = self.inspect(Some("method-call"), Some(call_name), None, false)?;
+            results.extend(method_results);
+        }
+
+        // Apply content filter if specified
+        if let Some(filter) = content_filter {
+            results = results.into_iter()
+                .filter(|r| r.snippet.contains(filter))
+                .collect();
+        }
+
+        Ok(results)
+    }
+
+    /// Find the byte offsets of the arguments list (just after opening paren, just before closing paren)
+    /// Returns (start_offset, end_offset, arg_count)
+    fn find_call_args_span(&self, call_match: &InspectResult) -> Result<(usize, usize, usize)> {
+        let start_offset = self.line_column_to_byte_offset(
+            call_match.location.line,
+            call_match.location.column
+        )?;
+        let end_offset = self.line_column_to_byte_offset(
+            call_match.location.end_line,
+            call_match.location.end_column
+        )?;
+
+        let call_text = &self.content[start_offset..end_offset];
+
+        // Find the opening parenthesis
+        let paren_start = call_text.find('(')
+            .ok_or_else(|| anyhow::anyhow!("Could not find opening parenthesis in call"))?;
+
+        // Find the closing parenthesis (accounting for nested parens)
+        let paren_end = self.find_matching_paren(call_text, paren_start)?;
+
+        // Extract just the arguments text
+        let args_text = &call_text[paren_start + 1..paren_end];
+
+        // Count arguments (handle nested parens, brackets, braces)
+        let arg_count = self.count_args(args_text);
+
+        Ok((
+            start_offset + paren_start + 1,
+            start_offset + paren_end,
+            arg_count
+        ))
+    }
+
+    /// Find matching closing parenthesis, accounting for nesting
+    fn find_matching_paren(&self, text: &str, open_pos: usize) -> Result<usize> {
+        let bytes = text.as_bytes();
+        let mut depth = 0;
+        let mut in_string = false;
+        let mut string_char = '"';
+        let mut escape_next = false;
+
+        for (i, &ch) in bytes.iter().enumerate().skip(open_pos) {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+
+            if ch == b'\\' && in_string {
+                escape_next = true;
+                continue;
+            }
+
+            if (ch == b'"' || ch == b'\'') && !in_string {
+                in_string = true;
+                string_char = ch as char;
+                continue;
+            }
+
+            if in_string && ch == string_char as u8 {
+                in_string = false;
+                continue;
+            }
+
+            if in_string {
+                continue;
+            }
+
+            match ch {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(i);
+                    }
+                }
+                b']' | b'}' => depth -= 1,
+                _ => {}
+            }
+        }
+
+        anyhow::bail!("Could not find matching closing parenthesis")
+    }
+
+    /// Count the number of arguments in an argument list string
+    fn count_args(&self, args_text: &str) -> usize {
+        let trimmed = args_text.trim();
+        if trimmed.is_empty() {
+            return 0;
+        }
+
+        let mut count = 1;
+        let mut depth = 0;
+        let mut in_string = false;
+        let mut string_char = '"';
+        let mut escape_next = false;
+
+        for ch in trimmed.chars() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+
+            if ch == '\\' && in_string {
+                escape_next = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'') && !in_string {
+                in_string = true;
+                string_char = ch;
+                continue;
+            }
+
+            if in_string && ch == string_char {
+                in_string = false;
+                continue;
+            }
+
+            if in_string {
+                continue;
+            }
+
+            match ch {
+                '(' | '[' | '{' | '<' => depth += 1,
+                ')' | ']' | '}' | '>' => depth -= 1,
+                ',' if depth == 0 => count += 1,
+                _ => {}
+            }
+        }
+
+        count
+    }
+
+    /// Find the byte offset of the boundary before the nth argument
+    fn find_arg_boundary_offset(&self, call_match: &InspectResult, arg_index: usize) -> Result<usize> {
+        let (args_start, args_end, _) = self.find_call_args_span(call_match)?;
+        let args_text = &self.content[args_start..args_end];
+
+        let mut current_arg = 0;
+        let mut depth = 0;
+        let mut in_string = false;
+        let mut string_char = '"';
+        let mut escape_next = false;
+
+        for (i, ch) in args_text.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+
+            if ch == '\\' && in_string {
+                escape_next = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'') && !in_string {
+                in_string = true;
+                string_char = ch;
+                continue;
+            }
+
+            if in_string && ch == string_char {
+                in_string = false;
+                continue;
+            }
+
+            if in_string {
+                continue;
+            }
+
+            match ch {
+                '(' | '[' | '{' | '<' => depth += 1,
+                ')' | ']' | '}' | '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    current_arg += 1;
+                    if current_arg == arg_index {
+                        // Return position right after the comma (and any whitespace)
+                        let rest = &args_text[i + 1..];
+                        let whitespace_len = rest.len() - rest.trim_start().len();
+                        return Ok(args_start + i + 1 + whitespace_len);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // If we didn't find the boundary, return the end
+        Ok(args_end)
+    }
+
+    /// Find the byte span of a specific argument
+    fn find_arg_span(&self, call_match: &InspectResult, arg_index: usize) -> Result<(usize, usize)> {
+        let (args_start, args_end, _) = self.find_call_args_span(call_match)?;
+        let args_text = &self.content[args_start..args_end];
+
+        let mut current_arg = 0;
+        let mut arg_start_in_text = 0;
+        let mut depth = 0;
+        let mut in_string = false;
+        let mut string_char = '"';
+        let mut escape_next = false;
+
+        // Skip leading whitespace for first arg
+        let trimmed_start = args_text.len() - args_text.trim_start().len();
+        if arg_index == 0 {
+            arg_start_in_text = trimmed_start;
+        }
+
+        for (i, ch) in args_text.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+
+            if ch == '\\' && in_string {
+                escape_next = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'') && !in_string {
+                in_string = true;
+                string_char = ch;
+                continue;
+            }
+
+            if in_string && ch == string_char {
+                in_string = false;
+                continue;
+            }
+
+            if in_string {
+                continue;
+            }
+
+            match ch {
+                '(' | '[' | '{' | '<' => depth += 1,
+                ')' | ']' | '}' | '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    if current_arg == arg_index {
+                        // Found the end of our argument
+                        // Trim trailing whitespace from the argument
+                        let arg_text = &args_text[arg_start_in_text..i];
+                        let trimmed_len = arg_text.trim_end().len();
+                        return Ok((args_start + arg_start_in_text, args_start + arg_start_in_text + trimmed_len));
+                    }
+                    current_arg += 1;
+                    // Next arg starts after comma and whitespace
+                    let rest = &args_text[i + 1..];
+                    let whitespace_len = rest.len() - rest.trim_start().len();
+                    arg_start_in_text = i + 1 + whitespace_len;
+                }
+                _ => {}
+            }
+        }
+
+        // Last argument - goes to end of args
+        if current_arg == arg_index {
+            let arg_text = &args_text[arg_start_in_text..];
+            let trimmed_len = arg_text.trim_end().len();
+            return Ok((args_start + arg_start_in_text, args_start + arg_start_in_text + trimmed_len));
+        }
+
+        anyhow::bail!("Argument index {} not found", arg_index)
+    }
+
+    /// Find the byte span of a specific argument including comma for removal
+    fn find_arg_span_with_comma(&self, call_match: &InspectResult, arg_index: usize, arg_count: usize) -> Result<(usize, usize)> {
+        let (args_start, args_end, _) = self.find_call_args_span(call_match)?;
+        let args_text = &self.content[args_start..args_end];
+
+        let mut current_arg = 0;
+        let mut arg_start_in_text = 0;
+        let mut depth = 0;
+        let mut in_string = false;
+        let mut string_char = '"';
+        let mut escape_next = false;
+
+        // Skip leading whitespace for first arg
+        let trimmed_start = args_text.len() - args_text.trim_start().len();
+        if arg_index == 0 {
+            arg_start_in_text = trimmed_start;
+        }
+
+        for (i, ch) in args_text.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+
+            if ch == '\\' && in_string {
+                escape_next = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'') && !in_string {
+                in_string = true;
+                string_char = ch;
+                continue;
+            }
+
+            if in_string && ch == string_char {
+                in_string = false;
+                continue;
+            }
+
+            if in_string {
+                continue;
+            }
+
+            match ch {
+                '(' | '[' | '{' | '<' => depth += 1,
+                ')' | ']' | '}' | '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    if current_arg == arg_index {
+                        // Found our argument
+                        if arg_index == 0 && arg_count > 1 {
+                            // First arg, but not only - include comma and whitespace after
+                            let rest = &args_text[i + 1..];
+                            let whitespace_len = rest.len() - rest.trim_start().len();
+                            return Ok((args_start + arg_start_in_text, args_start + i + 1 + whitespace_len));
+                        } else {
+                            // Include comma (and preceding whitespace from previous arg separator)
+                            return Ok((args_start + arg_start_in_text, args_start + i + 1));
+                        }
+                    }
+                    current_arg += 1;
+                    // Next arg starts after comma and whitespace
+                    let rest = &args_text[i + 1..];
+                    let whitespace_len = rest.len() - rest.trim_start().len();
+                    arg_start_in_text = i + 1 + whitespace_len;
+                }
+                _ => {}
+            }
+        }
+
+        // Last argument
+        if current_arg == arg_index {
+            if arg_count > 1 {
+                // Not the only arg - need to remove preceding comma too
+                // Find the comma before this arg
+                let before_text = &args_text[..arg_start_in_text];
+                let comma_pos = before_text.rfind(',')
+                    .ok_or_else(|| anyhow::anyhow!("Could not find comma before argument"))?;
+                return Ok((args_start + comma_pos, args_start + args_text.trim_end().len()));
+            } else {
+                // Only argument - just remove it
+                let trimmed_end = args_text.trim_end().len();
+                return Ok((args_start + arg_start_in_text, args_start + trimmed_end));
+            }
+        }
+
+        anyhow::bail!("Argument index {} not found", arg_index)
     }
 
     /// Rename an enum variant across the entire file

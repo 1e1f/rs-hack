@@ -41,6 +41,7 @@ chrono = { version = "0.4", features = ["serde"] }
 directories = "6.0"
 similar = "2.3"
 strsim = "0.11"
+rs-hack-arch = { path = "../rs-hack-arch" }
 
 [dev-dependencies]
 tempfile = "3.23"
