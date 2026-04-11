@@ -21,7 +21,7 @@ impl Server {
         }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub fn run(self) -> Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
         let reader = stdin.lock();
@@ -37,31 +37,31 @@ impl Server {
             debug!("Received: {}", line);
 
             let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
-                Ok(request) => self.handle_request(request).await,
-                Err(e) => JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e)),
+                Ok(request) => self.handle_request(request),
+                Err(e) => JsonRpcResponse::error(None, -32700, format!("Parse error: {e}")),
             };
 
             let response_json = serde_json::to_string(&response)?;
             debug!("Sending: {}", response_json);
-            writeln!(stdout, "{}", response_json)?;
+            writeln!(stdout, "{response_json}")?;
             stdout.flush()?;
         }
 
         Ok(())
     }
 
-    async fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
+    fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         debug!("Handling method: {}", request.method);
 
         match request.method.as_str() {
-            "initialize" => self.handle_initialize(request),
+            "initialize" => Self::handle_initialize(request),
             "tools/list" => self.handle_tools_list(request),
-            "tools/call" => self.handle_tools_call(request).await,
+            "tools/call" => self.handle_tools_call(request),
             _ => JsonRpcResponse::method_not_found(request.id),
         }
     }
 
-    fn handle_initialize(&self, request: JsonRpcRequest) -> JsonRpcResponse {
+    fn handle_initialize(request: JsonRpcRequest) -> JsonRpcResponse {
         info!("Client initializing");
 
         let result = json!({
@@ -109,7 +109,7 @@ impl Server {
         JsonRpcResponse::success(request.id, json!({ "tools": tools_list }))
     }
 
-    async fn handle_tools_call(&self, request: JsonRpcRequest) -> JsonRpcResponse {
+    fn handle_tools_call(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         let params = match request.params {
             Some(p) => p,
             None => {
@@ -130,11 +130,14 @@ impl Server {
             }
         };
 
-        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
 
         debug!("Calling tool: {} with args: {:?}", tool_name, arguments);
 
-        match self.tools.call(tool_name, arguments).await {
+        match self.tools.call(tool_name, arguments) {
             Ok(result) => {
                 info!("Tool {} completed successfully", tool_name);
                 JsonRpcResponse::success(

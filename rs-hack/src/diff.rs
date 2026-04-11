@@ -14,7 +14,7 @@ pub struct DiffStats {
 }
 
 impl DiffStats {
-    pub fn add(&mut self, other: &DiffStats) {
+    pub const fn add(&mut self, other: &Self) {
         self.files_changed += other.files_changed;
         self.lines_added += other.lines_added;
         self.lines_removed += other.lines_removed;
@@ -146,11 +146,7 @@ pub fn print_summary_diff(path: &Path, original: &str, modified: &str) -> DiffSt
             let (line_num, tag, content) = &changes[i];
 
             // Print the change
-            if *tag == '-' {
-                print!("{:>5} | {}{}", line_num, tag, content);
-            } else {
-                print!("{:>5} | {}{}", line_num, tag, content);
-            }
+            print!("{:>5} | {}{}", line_num, tag, content);
 
             i += 1;
         }

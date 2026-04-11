@@ -290,7 +290,7 @@ impl ToolRegistry {
         &self.tools
     }
 
-    pub async fn call(&self, name: &str, arguments: Value) -> Result<String> {
+    pub fn call(&self, name: &str, arguments: Value) -> Result<String> {
         debug!("Executing tool: {} with args: {:?}", name, arguments);
 
         // In-process dispatch for tools backed by the rs-hack lib API.
@@ -392,29 +392,29 @@ impl ToolRegistry {
         let command = match tool_name {
             // Find uses "find" command
             "find" => {
-                self.add_find_args(&arguments, &mut args);
+                self.add_find_args(arguments, &mut args);
                 "find"
             }
             // Unified CRUD commands (v0.5.0)
             "add" => {
-                self.add_add_args(&arguments, &mut args);
+                self.add_add_args(arguments, &mut args);
                 "add"
             }
             "remove" => {
-                self.add_remove_args(&arguments, &mut args);
+                self.add_remove_args(arguments, &mut args);
                 "remove"
             }
             "update" => {
-                self.add_update_args(&arguments, &mut args);
+                self.add_update_args(arguments, &mut args);
                 "update"
             }
             "rename" => {
-                self.add_rename_args(&arguments, &mut args);
+                self.add_rename_args(arguments, &mut args);
                 "rename"
             }
             // Transform command
             "transform" => {
-                self.add_transform_args(&arguments, &mut args)?;
+                self.add_transform_args(arguments, &mut args)?;
                 "transform"
             }
             // History renamed to "history"
@@ -456,7 +456,7 @@ impl ToolRegistry {
             }
             // All other commands map 1:1 (with underscores -> dashes)
             _ => {
-                self.add_standard_args(&arguments, &mut args);
+                self.add_standard_args(arguments, &mut args);
                 &tool_name.replace('_', "-")
             }
         };
@@ -497,11 +497,10 @@ impl ToolRegistry {
 
         // Add include_comments (default is true, only add flag if explicitly set to false)
         if let Some(include_comments) = arguments.get("include_comments").and_then(|v| v.as_bool())
+            && !include_comments
         {
-            if !include_comments {
-                args.push("--include-comments".to_string());
-                args.push("false".to_string());
-            }
+            args.push("--include-comments".to_string());
+            args.push("false".to_string());
         }
 
         // Add format
@@ -908,10 +907,10 @@ impl ToolRegistry {
         }
 
         // Add validate (default is true, so only add if explicitly set to false)
-        if let Some(validate) = arguments.get("validate").and_then(|v| v.as_bool()) {
-            if !validate {
-                args.push("--no-validate".to_string());
-            }
+        if let Some(validate) = arguments.get("validate").and_then(|v| v.as_bool())
+            && !validate
+        {
+            args.push("--no-validate".to_string());
         }
 
         // Add apply (boolean flag)

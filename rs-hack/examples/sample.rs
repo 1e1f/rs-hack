@@ -30,11 +30,12 @@ pub struct Config {
 }
 
 impl User {
-    pub fn new(id: u64, name: String) -> Self {
-        
+    pub const fn new(id: u64, name: String) -> Self {
+
         //l eaving a weird gap here
-        User { 
+        User {
             id, name }
+
     }
 }
 

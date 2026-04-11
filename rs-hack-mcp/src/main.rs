@@ -3,7 +3,6 @@
 
 use anyhow::Result;
 use tracing::{Level, info};
-use tracing_subscriber;
 
 mod mcp;
 
@@ -19,7 +18,7 @@ async fn main() -> Result<()> {
 
     // Create and run the MCP server using stdio
     let server = mcp::Server::new();
-    server.run().await?;
+    server.run()?;
 
     Ok(())
 }

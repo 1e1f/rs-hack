@@ -67,7 +67,7 @@ pub struct FileModification {
 }
 
 /// Status of a run
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RunStatus {
     Applied,
@@ -101,7 +101,7 @@ impl RunsIndex {
 
         let content = fs::read_to_string(&index_path).context("Failed to read runs index")?;
 
-        let index: RunsIndex = serde_json::from_str(&content).map_err(|e| {
+        let index: Self = serde_json::from_str(&content).map_err(|e| {
             if e.to_string().contains("missing field") {
                 eprintln!("⚠️  Incompatible state format detected from previous hack version.");
                 eprintln!("   The state directory will be reset.");
@@ -452,12 +452,11 @@ fn restore_struct_literal(
         let (start, end, _) = finder.current_literals[target_counter];
         let backup_content = backup.original_content.trim();
         editor.replace_range(start, end, backup_content)?;
-        Ok(())
-    } else {
-        // Struct literal no longer exists, which is okay for revert
-        // (it might have been removed by the operation we're reverting)
-        Ok(())
     }
+
+    // Struct literal no longer exists, which is okay for revert
+    // (it might have been removed by the operation we're reverting)
+    Ok(())
 }
 
 /// Save run metadata
@@ -721,7 +720,7 @@ mod tests {
 
         // Save backup nodes
         let run_id = "abc1234";
-        save_backup_nodes(&file_path, &[node.clone()], run_id, &state_dir)?;
+        save_backup_nodes(&file_path, &[node], run_id, &state_dir)?;
 
         // Verify backup file exists
         let backup_dir = state_dir.join(run_id);

@@ -17,7 +17,7 @@ pub struct Replacement {
 }
 
 impl Replacement {
-    pub fn new(start: LineColumn, end: LineColumn, new_text: String) -> Self {
+    pub const fn new(start: LineColumn, end: LineColumn, new_text: String) -> Self {
         Self {
             start,
             end,
@@ -111,10 +111,10 @@ pub fn apply_surgical_edits(original_source: &str, mut replacements: Vec<Replace
         while current_line < replacement.start.line {
             if current_line <= lines.len() {
                 // Add any remaining text on current line
-                if let Some(line) = lines.get(current_line - 1) {
-                    if current_col < line.len() {
-                        result.push_str(&line[current_col..]);
-                    }
+                if let Some(line) = lines.get(current_line - 1)
+                    && current_col < line.len()
+                {
+                    result.push_str(&line[current_col..]);
                 }
                 result.push('\n');
             }
@@ -123,13 +123,12 @@ pub fn apply_surgical_edits(original_source: &str, mut replacements: Vec<Replace
         }
 
         // Copy partial line up to replacement start (on the same line)
-        if current_line == replacement.start.line {
-            if let Some(line) = lines.get(current_line - 1) {
-                if current_col < replacement.start.column && replacement.start.column <= line.len()
-                {
-                    result.push_str(&line[current_col..replacement.start.column]);
-                }
-            }
+        if current_line == replacement.start.line
+            && let Some(line) = lines.get(current_line - 1)
+            && current_col < replacement.start.column
+            && replacement.start.column <= line.len()
+        {
+            result.push_str(&line[current_col..replacement.start.column]);
         }
 
         // Apply the replacement
@@ -142,10 +141,10 @@ pub fn apply_surgical_edits(original_source: &str, mut replacements: Vec<Replace
 
     // Copy remaining text after all replacements
     while current_line <= lines.len() {
-        if let Some(line) = lines.get(current_line - 1) {
-            if current_col < line.len() {
-                result.push_str(&line[current_col..]);
-            }
+        if let Some(line) = lines.get(current_line - 1)
+            && current_col < line.len()
+        {
+            result.push_str(&line[current_col..]);
         }
         if current_line < lines.len() {
             result.push('\n');

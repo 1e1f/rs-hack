@@ -9,26 +9,22 @@ use serde::{Deserialize, Serialize};
 /// Edit mode for operations - controls how changes are applied to source files
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum EditMode {
     /// Surgical mode: preserve all formatting, only change specific locations
     /// This is the recommended default for minimal diffs
+    #[default]
     Surgical,
     /// Reformat mode: use prettyplease to reformat the entire file
     /// Use this if you want consistent formatting across the file
     Reformat,
 }
 
-impl Default for EditMode {
-    fn default() -> Self {
-        EditMode::Surgical
-    }
-}
-
 impl std::fmt::Display for EditMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EditMode::Surgical => write!(f, "surgical"),
-            EditMode::Reformat => write!(f, "reformat"),
+            Self::Surgical => write!(f, "surgical"),
+            Self::Reformat => write!(f, "reformat"),
         }
     }
 }
@@ -38,8 +34,8 @@ impl std::str::FromStr for EditMode {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "surgical" => Ok(EditMode::Surgical),
-            "reformat" => Ok(EditMode::Reformat),
+            "surgical" => Ok(Self::Surgical),
+            "reformat" => Ok(Self::Reformat),
             _ => Err(format!(
                 "Invalid edit mode: {}. Valid values are 'surgical' or 'reformat'",
                 s
@@ -354,15 +350,11 @@ pub struct RemoveDocCommentOp {
 /// Documentation comment style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum DocCommentStyle {
-    Line,  // /// or //!
+    #[default]
+    Line, // /// or //!
     Block, // /** */ or /*! */
-}
-
-impl Default for DocCommentStyle {
-    fn default() -> Self {
-        DocCommentStyle::Line
-    }
 }
 
 impl std::str::FromStr for DocCommentStyle {
@@ -370,8 +362,8 @@ impl std::str::FromStr for DocCommentStyle {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "line" => Ok(DocCommentStyle::Line),
-            "block" => Ok(DocCommentStyle::Block),
+            "line" => Ok(Self::Line),
+            "block" => Ok(Self::Block),
             _ => Err(format!(
                 "Invalid doc comment style: {}. Valid values are 'line' or 'block'",
                 s
@@ -389,28 +381,23 @@ pub struct FieldLocation {
 }
 
 /// Insert position for call arguments (numeric since args are positional)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum ArgPosition {
     /// Insert as first argument
     First,
     /// Insert as last argument
+    #[default]
     Last,
     /// Insert at specific index (0-based, shifts existing args right)
     Index(usize),
 }
 
-impl Default for ArgPosition {
-    fn default() -> Self {
-        ArgPosition::Last
-    }
-}
-
 impl std::fmt::Display for ArgPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ArgPosition::First => write!(f, "first"),
-            ArgPosition::Last => write!(f, "last"),
-            ArgPosition::Index(i) => write!(f, "index:{}", i),
+            Self::First => write!(f, "first"),
+            Self::Last => write!(f, "last"),
+            Self::Index(i) => write!(f, "index:{}", i),
         }
     }
 }
@@ -420,24 +407,25 @@ impl std::str::FromStr for ArgPosition {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "first" => Ok(ArgPosition::First),
-            "last" => Ok(ArgPosition::Last),
+            "first" => Ok(Self::First),
+            "last" => Ok(Self::Last),
             s if s.starts_with("index:") => {
                 let idx = s[6..]
                     .parse::<usize>()
                     .map_err(|_| format!("Invalid index in position: {}", s))?;
-                Ok(ArgPosition::Index(idx))
+                Ok(Self::Index(idx))
             }
             s => {
                 // Try parsing as plain number
-                if let Ok(idx) = s.parse::<usize>() {
-                    Ok(ArgPosition::Index(idx))
-                } else {
-                    Err(format!(
-                        "Invalid arg position: {}. Valid values are 'first', 'last', or 'index:N'",
-                        s
-                    ))
-                }
+                s.parse::<usize>().map_or_else(
+                    |_| {
+                        Err(format!(
+                            "Invalid arg position: {}. Valid values are 'first', 'last', or 'index:N'",
+                            s
+                        ))
+                    },
+                    |idx| Ok(Self::Index(idx)),
+                )
             }
         }
     }

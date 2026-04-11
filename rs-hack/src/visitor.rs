@@ -31,8 +31,14 @@ pub enum NodeMatch {
 }
 
 #[allow(dead_code)]
+impl Default for NodeFinder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NodeFinder {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             matches: Vec::new(),
         }

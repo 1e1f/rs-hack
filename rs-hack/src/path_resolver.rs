@@ -24,10 +24,6 @@ pub struct PathResolver {
     /// e.g., ["crate", "compiler", "types", "IRValue"]
     target_canonical_segments: Vec<String>,
 
-    /// The simple name of the target (last segment of canonical path)
-    /// e.g., "IRValue"
-    target_simple_name: String,
-
     /// Maps local names/aliases to their canonical path segments
     /// e.g., "IRValue" -> ["crate", "compiler", "types", "IRValue"]
     /// e.g., "types" -> ["crate", "compiler", "types"]
@@ -64,11 +60,8 @@ impl PathResolver {
             return None;
         }
 
-        let simple_name = segments.last().unwrap().clone();
-
         Some(Self {
             target_canonical_segments: segments,
-            target_simple_name: simple_name,
             local_aliases: HashMap::new(),
             has_potential_glob_import: false,
         })
@@ -78,10 +71,10 @@ impl PathResolver {
     ///
     /// This matches the old behavior where only `EnumName::Variant` is matched,
     /// without any use statement tracking.
+    #[allow(dead_code)]
     pub fn simple(name: &str) -> Self {
         Self {
             target_canonical_segments: vec![name.to_string()],
-            target_simple_name: name.to_string(),
             local_aliases: HashMap::new(),
             has_potential_glob_import: false,
         }
@@ -150,10 +143,10 @@ impl PathResolver {
         // Case 3: Simple import case
         // e.g., if `use crate::compiler::types::IRValue;` exists,
         // then just `IRValue` should match
-        if path_segments.len() == 1 {
-            if let Some(canonical) = self.local_aliases.get(&path_segments[0]) {
-                return canonical == &self.target_canonical_segments;
-            }
+        if path_segments.len() == 1
+            && let Some(canonical) = self.local_aliases.get(&path_segments[0])
+        {
+            return canonical == &self.target_canonical_segments;
         }
 
         false
@@ -170,6 +163,7 @@ impl PathResolver {
     ///
     /// # Returns
     /// true if the path has at least 2 segments and the second-to-last matches preceding_segment
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn path_ends_with(&self, path: &Path, preceding_segment: &str) -> bool {
         let segments: Vec<_> = path.segments.iter().collect();
         let len = segments.len();
@@ -182,8 +176,12 @@ impl PathResolver {
     }
 
     /// Get the simple name of the target.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn target_name(&self) -> &str {
-        &self.target_simple_name
+        self.target_canonical_segments
+            .last()
+            .map(std::string::String::as_str)
+            .expect("canonical path should have at least one segment")
     }
 
     /// Check if a path could potentially match via glob import.
@@ -191,6 +189,7 @@ impl PathResolver {
     /// Returns true if:
     /// - We found a glob import that could include our target
     /// - The path's simple name matches our target
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn might_match_via_glob(&self, path: &Path) -> bool {
         if !self.has_potential_glob_import {
             return false;
@@ -199,7 +198,7 @@ impl PathResolver {
         // Check if the last segment matches our target name
         path.segments
             .last()
-            .map(|seg| seg.ident == self.target_simple_name)
+            .map(|seg| seg.ident == self.target_name())
             .unwrap_or(false)
     }
 }
@@ -216,7 +215,7 @@ impl<'a> UseStatementScanner<'a> {
     fn process_use_tree(&mut self, tree: &UseTree, prefix: Vec<String>) {
         match tree {
             UseTree::Path(path) => {
-                let mut new_prefix = prefix.clone();
+                let mut new_prefix = prefix;
                 new_prefix.push(path.ident.to_string());
                 self.process_use_tree(&path.tree, new_prefix);
             }
@@ -239,7 +238,7 @@ impl<'a> UseStatementScanner<'a> {
             }
             UseTree::Rename(rename) => {
                 // Aliased import: `use crate::foo::Bar as Baz;`
-                let mut full_path = prefix.clone();
+                let mut full_path = prefix;
                 full_path.push(rename.ident.to_string());
 
                 let local_name = rename.rename.to_string();

@@ -35,3 +35,6 @@ rs-hack = { path = "../rs-hack", version = "0.5.5" }
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+[lints]
+workspace = true

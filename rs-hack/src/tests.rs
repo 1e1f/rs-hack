@@ -599,8 +599,8 @@ fn new_user() -> User {
         };
 
         let result = editor.add_struct_literal_field(&op);
-        if result.is_err() {
-            eprintln!("Error: {:?}", result.as_ref().unwrap_err());
+        if let Err(err) = &result {
+            eprintln!("Error: {:?}", err);
         }
         assert!(result.is_ok());
         assert!(!result.unwrap().changed); // Should return false (already exists)
@@ -1045,7 +1045,7 @@ fn main() {
 
         // Should find: let binding, println argument, process argument
         // Note: May find more instances as identifiers appear in various contexts
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
         assert!(results.iter().all(|r| r.identifier == "config"));
     }
 
