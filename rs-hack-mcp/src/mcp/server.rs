@@ -4,7 +4,7 @@
 use std::io::{BufRead, Write};
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, error, info};
 
 use super::protocol::{JsonRpcRequest, JsonRpcResponse};
@@ -116,7 +116,7 @@ impl Server {
                 return JsonRpcResponse::invalid_params(
                     request.id.clone(),
                     "Missing params".to_string(),
-                )
+                );
             }
         };
 
@@ -126,7 +126,7 @@ impl Server {
                 return JsonRpcResponse::invalid_params(
                     request.id.clone(),
                     "Missing tool name".to_string(),
-                )
+                );
             }
         };
 

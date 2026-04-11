@@ -1090,9 +1090,11 @@ fn main() {
         let result = editor.inspect(Some("invalid-type"), None, None, false);
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unsupported node type"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported node type")
+        );
     }
 }

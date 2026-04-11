@@ -57,7 +57,7 @@ impl PartialOrd for Replacement {
 /// # Example
 /// ```
 /// use proc_macro2::LineColumn;
-/// use rs_hack::surgical::{apply_surgical_edits, Replacement};
+/// use rs_hack::surgical::{Replacement, apply_surgical_edits};
 ///
 /// let source = "fn foo() {\n    let x = 1;\n}\n";
 /// let replacements = vec![Replacement::new(

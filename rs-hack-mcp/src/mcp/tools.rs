@@ -3,8 +3,8 @@
 
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 use tracing::debug;
 
 #[derive(Debug, Clone)]
@@ -49,7 +49,6 @@ impl ToolRegistry {
                         "required": ["paths"]
                     }),
                 },
-
                 // ============================================================
                 // UNIFIED CRUD TOOLS (4) - v0.5.0
                 // These replace 17 legacy hyphenated commands with semantic operations
@@ -152,7 +151,6 @@ impl ToolRegistry {
                         "required": ["paths", "name", "to"]
                     }),
                 },
-
                 // ============================================================
                 // TRANSFORM (1)
                 // ============================================================
@@ -173,7 +171,6 @@ impl ToolRegistry {
                         "required": ["paths", "node_type", "action"]
                     }),
                 },
-
                 // ============================================================
                 // BATCH & UTILITY (4)
                 // ============================================================

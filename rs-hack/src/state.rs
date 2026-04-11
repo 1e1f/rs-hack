@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -295,7 +295,7 @@ pub fn restore_from_nodes(file_path: &Path, nodes: &[BackupNode], _state_dir: &P
 }
 
 fn restore_struct(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> Result<()> {
-    use syn::{parse_str, Item};
+    use syn::{Item, parse_str};
 
     // Parse the backup content
     let backup_item: Item =
@@ -313,7 +313,7 @@ fn restore_struct(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -
 }
 
 fn restore_enum(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> Result<()> {
-    use syn::{parse_str, Item};
+    use syn::{Item, parse_str};
 
     // Parse the backup content
     let backup_item: Item =
@@ -331,7 +331,7 @@ fn restore_enum(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> 
 }
 
 fn restore_impl(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> Result<()> {
-    use syn::{parse_str, Item};
+    use syn::{Item, parse_str};
 
     // Parse the backup content
     let backup_item: Item =
@@ -354,7 +354,7 @@ fn restore_impl(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> 
 }
 
 fn restore_function(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> Result<()> {
-    use syn::{parse_str, Item};
+    use syn::{Item, parse_str};
 
     // Parse the backup content
     let backup_item: Item =
@@ -376,9 +376,9 @@ fn restore_struct_literal(
     backup: &BackupNode,
 ) -> Result<()> {
     use quote::ToTokens;
+    use syn::ExprStruct;
     use syn::spanned::Spanned;
     use syn::visit::Visit;
-    use syn::ExprStruct;
 
     // Extract the struct name and counter from the identifier (format: "StructName#counter" or
     // "Enum::Variant#counter")

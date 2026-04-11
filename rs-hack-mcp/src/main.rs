@@ -2,7 +2,7 @@
 //! JSON-RPC stdio server that bridges AI tool calls to rs-hack CLI.
 
 use anyhow::Result;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber;
 
 mod mcp;

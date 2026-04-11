@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Debug)]
 pub struct User {
     pub id: u64,
