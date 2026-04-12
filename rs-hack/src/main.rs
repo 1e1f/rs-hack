@@ -1,3 +1,12 @@
+//! @arch:layer(cli)
+//! @arch:role(discovery)
+//! @arch:role(refactor)
+//! @arch:depends_on(core, reason = "uses editor, operations, state, diff")
+//! @arch:thread(main)
+//!
+//! CLI frontend for rs-hack. Parses clap commands and dispatches
+//! to core library operations.
+
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
@@ -1726,7 +1735,10 @@ fn target_exists(files: &[PathBuf], name: &str, node_type: Option<&str>) -> Resu
         let content = std::fs::read_to_string(file)
             .context(format!("Failed to read file: {:?}", file))?;
 
-        let editor = RustEditor::new(&content)?;
+        let editor = match RustEditor::new(&content) {
+            Ok(e) => e,
+            Err(_) => continue, // Skip unparseable files during discovery
+        };
         let results = editor.inspect(node_type, Some(name), None, false)?;
 
         if !results.is_empty() {
@@ -1742,7 +1754,10 @@ fn detect_target_type(files: &[PathBuf], name: &str) -> Result<Option<String>> {
         let content = std::fs::read_to_string(file)
             .context(format!("Failed to read file: {:?}", file))?;
 
-        let editor = RustEditor::new(&content)?;
+        let editor = match RustEditor::new(&content) {
+            Ok(e) => e,
+            Err(_) => continue, // Skip unparseable files during discovery
+        };
 
         // Try struct first
         let struct_results = editor.inspect(Some("struct"), Some(name), None, false)?;
@@ -1771,7 +1786,10 @@ fn show_target_hints(files: &[PathBuf], name: &str, expected_type: &str, paths: 
         let content = std::fs::read_to_string(file)
             .context(format!("Failed to read file: {:?}", file))?;
 
-        let editor = RustEditor::new(&content)?;
+        let editor = match RustEditor::new(&content) {
+            Ok(e) => e,
+            Err(_) => continue, // Skip unparseable files during discovery
+        };
         let mut results = editor.inspect(None, Some(name), None, false)?;
 
         for result in &mut results {
@@ -2051,7 +2069,10 @@ fn main() -> Result<()> {
                     let content = std::fs::read_to_string(file)
                         .context(format!("Failed to read file: {:?}", file))?;
 
-                    let editor = RustEditor::new(&content)?;
+                    let editor = match RustEditor::new(&content) {
+                        Ok(e) => e,
+                        Err(_) => continue, // Skip unparseable files during discovery
+                    };
                     // Search for enums
                     let enum_results = editor.inspect(Some("enum"), None, None, false)?;
 
@@ -2226,7 +2247,13 @@ fn main() -> Result<()> {
                     let content = std::fs::read_to_string(&file)
                         .context(format!("Failed to read file: {:?}", file))?;
 
-                    let editor = RustEditor::new(&content)?;
+                    let editor = match RustEditor::new(&content) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            eprintln!("⚠️  Skipping {}: {}", file.display(), e);
+                            continue;
+                        }
+                    };
                     let mut locations = editor.find_field_locations(&field)?;
 
                     // Fill in file paths
@@ -2322,7 +2349,13 @@ fn main() -> Result<()> {
                 let content = std::fs::read_to_string(&file)
                     .context(format!("Failed to read file: {:?}", file))?;
 
-                let editor = RustEditor::new(&content)?;
+                let editor = match RustEditor::new(&content) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("⚠️  Skipping {}: {}", file.display(), e);
+                        continue;
+                    }
+                };
 
                 // Search for all node types (if kind was provided, this will be multiple types)
                 for node_type_to_search in &node_types_to_search {
@@ -2356,7 +2389,10 @@ fn main() -> Result<()> {
                     let content = std::fs::read_to_string(&file)
                         .context(format!("Failed to read file: {:?}", file))?;
 
-                    let editor = RustEditor::new(&content)?;
+                    let editor = match RustEditor::new(&content) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
                     let mut results = editor.inspect(
                         None,  // Search all types
                         name.as_deref(),
@@ -3286,7 +3322,13 @@ fn main() -> Result<()> {
 
             for file in files {
                 let content = std::fs::read_to_string(&file)?;
-                let editor = RustEditor::new(&content)?;
+                let editor = match RustEditor::new(&content) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("⚠️  Skipping {}: {}", file.display(), e);
+                        continue;
+                    }
+                };
                 let locations = editor.find_field_locations(&field_name)?;
 
                 for mut loc in locations {
@@ -3926,11 +3968,23 @@ fn execute_operation(
     let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut last_error: Option<anyhow::Error> = None;
 
+    let mut parse_errors: Vec<(PathBuf, String)> = Vec::new();
+
     for file_path in files {
         let content = std::fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
 
-        let mut editor = RustEditor::new(&content)?;
+        let mut editor = match RustEditor::new(&content) {
+            Ok(editor) => editor,
+            Err(e) => {
+                if files.len() == 1 {
+                    return Err(e).with_context(|| format!("Failed to parse {}", file_path.display()));
+                }
+                eprintln!("⚠️  Skipping {}: {}", file_path.display(), e);
+                parse_errors.push((file_path.clone(), format!("{}", e)));
+                continue;
+            }
+        };
 
         match editor.apply_operation(op) {
             Ok(result) => {
@@ -4012,6 +4066,14 @@ fn execute_operation(
                 // Store for diagnostic output if nothing matches
                 last_error = Some(e);
             }
+        }
+    }
+
+    // Report parse errors summary
+    if !parse_errors.is_empty() {
+        eprintln!("\n⚠️  {} file(s) skipped due to parse errors:", parse_errors.len());
+        for (path, err) in &parse_errors {
+            eprintln!("   {} — {}", path.display(), err);
         }
     }
 
@@ -4130,11 +4192,23 @@ fn execute_operation_with_state(
     let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut last_error: Option<anyhow::Error> = None;
 
+    let mut parse_errors: Vec<(PathBuf, String)> = Vec::new();
+
     for file_path in files {
         let content = std::fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
 
-        let mut editor = RustEditor::new(&content)?;
+        let mut editor = match RustEditor::new(&content) {
+            Ok(editor) => editor,
+            Err(e) => {
+                if files.len() == 1 {
+                    return Err(e).with_context(|| format!("Failed to parse {}", file_path.display()));
+                }
+                eprintln!("⚠️  Skipping {}: {}", file_path.display(), e);
+                parse_errors.push((file_path.clone(), format!("{}", e)));
+                continue;
+            }
+        };
 
         match editor.apply_operation(op) {
             Ok(result) => {
@@ -4200,6 +4274,14 @@ fn execute_operation_with_state(
                 // Store for diagnostic output if nothing matches
                 last_error = Some(e);
             }
+        }
+    }
+
+    // Report parse errors summary
+    if !parse_errors.is_empty() {
+        eprintln!("\n⚠️  {} file(s) skipped due to parse errors:", parse_errors.len());
+        for (path, err) in &parse_errors {
+            eprintln!("   {} — {}", path.display(), err);
         }
     }
 

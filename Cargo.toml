@@ -8,11 +8,56 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 authors = ["Leif Shackelford <structuresound@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/1e1f/rs-hack"
+
+[workspace.metadata.arch]
+
+[workspace.metadata.arch.layers]
+core = { description = "AST parsing, node types, and edit operations", allowed_dependencies = [] }
+cli = { description = "Clap-based CLI frontend", allowed_dependencies = ["core"] }
+mcp = { description = "MCP server - JSON-RPC bridge to CLI", allowed_dependencies = ["core"] }
+arch = { description = "Architecture knowledge graph from source annotations", allowed_dependencies = ["core"] }
+
+[workspace.metadata.arch.roles]
+parser = "Parses Rust source into syn AST"
+refactor = "Transforms AST nodes (add, remove, rename, update)"
+discovery = "Finds and inspects AST nodes across files"
+emit = "Produces modified source code (surgical or reformat)"
+diff = "Computes and displays diffs between original and modified code"
+state = "Manages run history, backups, and revert capability"
+resolve = "Resolves qualified paths against use statements"
+traverse = "Walks AST trees to collect node matches"
+protocol = "JSON-RPC message framing and serialization"
+bridge = "Translates between MCP tool calls and CLI operations"
+extract = "Extracts @arch: annotations from Rust source"
+graph = "Stores and queries the architecture knowledge graph"
+validate = "Checks architecture rules against the graph"
+query = "Query language for architecture graph predicates"
+schema = "Defines valid annotation vocabulary from Cargo.toml metadata"
+
+[workspace.metadata.arch.threads]
+main = { priority = "normal", description = "Single-threaded CLI execution" }
+async_io = { priority = "normal", description = "Tokio async for MCP stdio" }
+
+[[workspace.metadata.arch.rules]]
+name = "core-independence"
+description = "Core layer cannot depend on CLI, MCP, or arch layers"
+severity = "error"
+type = "layer_dependency"
+layer = "core"
+allowed = []
+
+[[workspace.metadata.arch.rules]]
+name = "arch-independence"
+description = "Arch layer only depends on core (for shared types, if any)"
+severity = "warning"
+type = "layer_dependency"
+layer = "arch"
+allowed = ["core"]
 
 [profile.release]
 opt-level = 3

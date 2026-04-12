@@ -1,3 +1,11 @@
+//! @arch:layer(mcp)
+//! @arch:role(bridge)
+//! @arch:thread(async_io)
+//! @arch:note(Reads JSON-RPC from stdin, dispatches to tool registry, writes responses to stdout)
+//!
+//! MCP server: stdio-based JSON-RPC loop that handles initialize,
+//! tools/list, and tools/call methods.
+
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -84,7 +92,13 @@ impl Server {
                 1. Use inspect_* tools to explore code\n\
                 2. Preview changes (dry-run)\n\
                 3. Apply changes with apply=true\n\
-                4. Use history/revert if needed"
+                4. Use history/revert if needed\n\n\
+                Architecture tools (arch_*):\n\
+                If the codebase has @arch: annotations in doc comments, use arch_context \
+                BEFORE editing a file to understand its architectural layer, role, and constraints. \
+                Use arch_query to find related modules (e.g., 'layer:core AND role:parser'). \
+                Use arch_schema to see valid annotation vocabulary. \
+                Use arch_validate after changes to check architecture rules."
         });
 
         JsonRpcResponse::success(request.id, result)

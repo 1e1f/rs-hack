@@ -1,3 +1,9 @@
+//! @arch:layer(arch)
+//! @arch:role(extract)
+//! @arch:role(graph)
+//! @arch:role(query)
+//! @arch:role(validate)
+//!
 //! # Architecture Knowledge Graph
 //!
 //! A queryable knowledge graph of Rust codebase architecture, extracted from

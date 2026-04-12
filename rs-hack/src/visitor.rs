@@ -1,5 +1,8 @@
-// Future: Advanced AST traversal utilities for finding specific patterns
-// For now, basic traversal is handled in editor.rs
+//! @arch:layer(core)
+//! @arch:role(traverse)
+//!
+//! AST visitor that walks syn trees to collect node matches
+//! (structs, enums, functions, match expressions).
 
 use syn::visit::Visit;
 use syn::{*, spanned::Spanned};

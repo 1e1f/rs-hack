@@ -1,7 +1,9 @@
-//! Annotation data structures and parsing.
+//! @arch:layer(arch)
+//! @arch:role(parser)
 //!
-//! Annotations are extracted from doc comments with the `@arch:` prefix.
-//! They can appear at module, struct, enum, function, or impl levels.
+//! Annotation data structures and parsing.
+//! Defines ArchAnnotation, AnnotationTarget, ArchKind, and all
+//! the typed annotation variants (layer, role, thread, qos, etc.).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

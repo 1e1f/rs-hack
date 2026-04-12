@@ -1,5 +1,7 @@
-//! MCP (Model Context Protocol) integration for rs-hack-arch.
+//! @arch:layer(arch)
+//! @arch:role(bridge)
 //!
+//! MCP (Model Context Protocol) integration for rs-hack-arch.
 //! Exposes architecture queries as tools for Claude and other AI assistants.
 //!
 //! ## Tools

@@ -1,7 +1,9 @@
-//! Annotation extraction from Rust source files.
+//! @arch:layer(arch)
+//! @arch:role(extract)
+//! @arch:role(parser)
 //!
-//! Uses syn to parse Rust source and extract `@arch:` annotations from
-//! doc comments.
+//! Annotation extraction from Rust source files.
+//! Uses syn to parse source and extract `@arch:` annotations from doc comments.
 
 use crate::annotation::{AnnotationTarget, ArchAnnotation, ArchKind};
 use anyhow::{Context, Result};

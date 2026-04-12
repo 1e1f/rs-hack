@@ -731,7 +731,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "rs-hack"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "blake3",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "rs-hack-arch"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "blake3",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "rs-hack-mcp"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "rshack"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "chrono",

@@ -1,3 +1,10 @@
+//! @arch:layer(core)
+//! @arch:role(state)
+//! @arch:note(Run IDs, backup nodes, and revert history enable safe undo)
+//!
+//! State management: tracks run history with unique IDs, stores
+//! backup nodes for revert, and manages the .rs-hack state directory.
+
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc, Duration};
 use directories::ProjectDirs;

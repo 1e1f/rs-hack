@@ -1,3 +1,10 @@
+//! @arch:layer(core)
+//! @arch:role(refactor)
+//!
+//! Data types for all refactoring operations: add, remove, rename,
+//! update, transform, and batch. Defines EditMode, BackupNode,
+//! and the operation result types.
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

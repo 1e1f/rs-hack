@@ -1,7 +1,9 @@
-//! Schema definition for architectural vocabulary.
+//! @arch:layer(arch)
+//! @arch:role(schema)
 //!
-//! The schema defines valid values for each annotation kind, enabling
-//! validation and autocomplete in tooling.
+//! Schema definition for architectural vocabulary.
+//! Defines valid values for each annotation kind, loaded from
+//! `[workspace.metadata.arch]` in Cargo.toml.
 //!
 //! ## Loading from Cargo.toml
 //!

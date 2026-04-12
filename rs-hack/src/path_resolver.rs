@@ -1,7 +1,8 @@
-/// Path resolution module for safely matching qualified paths in Rust code.
-///
-/// This module helps determine whether a path in code refers to a specific target
-/// by tracking use statements and validating path qualifications.
+//! @arch:layer(core)
+//! @arch:role(resolve)
+//!
+//! Path resolution for safely matching qualified paths in Rust code.
+//! Tracks use statements and validates whether a path refers to a specific target.
 ///
 /// Example: When looking for `crate::compiler::types::IRValue::Variant`, this resolver
 /// will match:

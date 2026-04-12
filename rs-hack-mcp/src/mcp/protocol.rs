@@ -1,3 +1,8 @@
+//! @arch:layer(mcp)
+//! @arch:role(protocol)
+//!
+//! JSON-RPC 2.0 request/response types for MCP wire protocol.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

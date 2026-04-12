@@ -1,3 +1,13 @@
+//! @arch:layer(core)
+//! @arch:role(parser)
+//! @arch:role(refactor)
+//! @arch:role(emit)
+//! @arch:note(Central engine: parses source, applies operations, emits modified code)
+//!
+//! The RustEditor is the core engine of rs-hack. It parses Rust source
+//! into a syn AST, applies refactoring operations (add/remove/rename/update),
+//! and emits modified code via surgical edits or prettyplease reformatting.
+
 use anyhow::{Context, Result};
 use proc_macro2::{LineColumn, Span};
 use syn::{
@@ -20,7 +30,7 @@ pub struct RustEditor {
 impl RustEditor {
     pub fn new(content: &str) -> Result<Self> {
         let syntax_tree: File = syn::parse_str(content)
-            .context("Failed to parse Rust code")?;
+            .map_err(|e| anyhow::anyhow!("Failed to parse Rust code at line {}, column {}: {}", e.span().start().line, e.span().start().column, e))?;
 
         let line_offsets = Self::compute_line_offsets(content);
 

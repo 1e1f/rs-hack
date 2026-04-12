@@ -1,5 +1,7 @@
-//! Graph data structure for architectural relationships.
+//! @arch:layer(arch)
+//! @arch:role(graph)
 //!
+//! Graph data structure for architectural relationships.
 //! Uses petgraph to store nodes (code entities) and edges (relationships).
 
 use crate::annotation::{AnnotationTarget, ArchAnnotation, ArchKind, MessageSpec, ThreadSpec};

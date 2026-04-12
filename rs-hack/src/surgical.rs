@@ -1,10 +1,9 @@
-/// Surgical edit module for making minimal, targeted changes to source code.
-///
-/// This module provides infrastructure for applying precise edits to source code
-/// while preserving all formatting, comments, and whitespace.
-///
-/// Unlike the "reformat" approach which uses prettyplease to reformat the entire file,
-/// surgical edits only modify the specific locations that need to change.
+//! @arch:layer(core)
+//! @arch:role(emit)
+//! @arch:note(Preserves all formatting - only modifies specific byte ranges)
+//!
+//! Surgical edit engine: applies precise, minimal text replacements
+//! to source code while preserving all formatting, comments, and whitespace.
 
 use proc_macro2::LineColumn;
 use std::cmp::Ordering;

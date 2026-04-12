@@ -1,5 +1,7 @@
-//! Architecture validation rules.
+//! @arch:layer(arch)
+//! @arch:role(validate)
 //!
+//! Architecture validation rules.
 //! Rules are defined in TOML or in Cargo.toml metadata, and checked against the graph.
 //!
 //! ## Rules in Cargo.toml

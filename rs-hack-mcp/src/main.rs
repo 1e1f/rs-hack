@@ -1,3 +1,11 @@
+//! @arch:layer(mcp)
+//! @arch:role(bridge)
+//! @arch:thread(async_io)
+//! @arch:depends_on(cli, reason = "shells out to rs-hack CLI binary")
+//!
+//! MCP server entry point. Initializes tracing and runs the
+//! JSON-RPC stdio server that bridges AI tool calls to rs-hack CLI.
+
 use anyhow::Result;
 use tracing::{info, Level};
 use tracing_subscriber;

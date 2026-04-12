@@ -1,10 +1,9 @@
-//! Query language for the architecture graph.
+//! @arch:layer(arch)
+//! @arch:role(query)
 //!
-//! Supports simple predicate queries like:
-//! - `layer:vivarium`
-//! - `role:synthesis AND thread:audio`
-//! - `produces:impulse:*`
-//! - `gateway`
+//! Query language for the architecture graph.
+//! Supports predicate queries like `layer:core AND role:parser`,
+//! path tracing, and file context extraction for IDE integration.
 
 use crate::graph::{ArchGraph, ArchNode};
 use crate::annotation::ThreadSpec;
