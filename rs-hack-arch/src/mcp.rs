@@ -1,5 +1,9 @@
 //! @arch:layer(arch)
 //! @arch:role(bridge)
+//! @hack:ticket(T01, "Promote: board writes relay annotation back to source via rs-hack MCP")
+//! @hack:parent(R001)
+//! @hack:phase(P2)
+//! @hack:status(open)
 //!
 //! MCP (Model Context Protocol) integration for rs-hack-arch.
 //! Exposes architecture queries as tools for Claude and other AI assistants.
@@ -19,6 +23,8 @@
 use crate::extract::extract_from_workspace;
 use crate::graph::ArchGraph;
 use crate::query::{get_file_context, trace_path, Query};
+use crate::summary;
+use crate::ticket::TicketBoard;
 use crate::validate::{load_rules_from_metadata, validate, Severity};
 use serde::{Deserialize, Serialize};
 
@@ -132,6 +138,58 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "hack_tickets".into(),
+            description: "Scan workspace for @hack:ticket and @hack:bug annotations. Returns a kanban board of all work items with status, assignee, phase, severity, and handoff messages. Use format=json for web UI consumption.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to workspace root (default: current directory)"
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["markdown", "json"],
+                        "description": "Output format (default: markdown)"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status (open, claimed, in-progress, handoff, review, done)"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "Filter by assignee (e.g., agent:claude)"
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "hack_summary".into(),
+            description: "Write a freeform summary for the hack-board. Use this when you want to record what you did, what's left, or anything the next agent should know. The board can later promote this to a structured relay ticket. Low friction — just dump your thoughts as markdown.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Freeform markdown summary of what you did, what's left, gotchas, etc."
+                    },
+                    "ticket": {
+                        "type": "string",
+                        "description": "Ticket ID to link this summary to (e.g., F003). Optional — orphan summaries go to the board inbox."
+                    },
+                    "author": {
+                        "type": "string",
+                        "description": "Who wrote this (e.g., agent:claude). Optional."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Path to workspace root (default: current directory)"
+                    }
+                },
+                "required": ["text"]
+            }),
+        },
+        ToolDefinition {
             name: "arch_validate".into(),
             description: "Validate architecture rules. Returns violations with file locations. Use after making changes to ensure architecture constraints are satisfied.".into(),
             input_schema: serde_json::json!({
@@ -158,6 +216,8 @@ pub fn handle_tool(name: &str, args: serde_json::Value) -> ToolResult {
         "arch_trace" => handle_trace(args),
         "arch_context" => handle_context(args),
         "arch_validate" => handle_validate(args),
+        "hack_tickets" => handle_tickets(args),
+        "hack_summary" => handle_summary(args),
         _ => ToolResult::error(format!("Unknown tool: {}", name)),
     }
 }
@@ -343,6 +403,82 @@ fn handle_validate(args: serde_json::Value) -> ToolResult {
     }
 }
 
+fn handle_tickets(args: serde_json::Value) -> ToolResult {
+    let path = args["path"].as_str().unwrap_or(".");
+    let format = args["format"].as_str().unwrap_or("markdown");
+    let status_filter = args["status"].as_str();
+    let assignee_filter = args["assignee"].as_str();
+
+    let annotations = match extract_from_workspace(path) {
+        Ok(a) => a,
+        Err(e) => return ToolResult::error(format!("Failed to extract annotations: {}", e)),
+    };
+
+    let board = TicketBoard::from_annotations(&annotations);
+
+    // Apply filters
+    let tickets: Vec<_> = board
+        .tickets
+        .iter()
+        .filter(|t| {
+            if let Some(sf) = status_filter {
+                let expected = crate::ticket::TicketStatus::parse(sf);
+                if t.status != expected {
+                    return false;
+                }
+            }
+            if let Some(af) = assignee_filter {
+                if t.assignee.as_deref() != Some(af) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    if tickets.is_empty() {
+        return ToolResult::text("No tickets found");
+    }
+
+    match format {
+        "json" => {
+            let json = serde_json::to_string_pretty(&tickets).unwrap_or_default();
+            ToolResult::text(json)
+        }
+        _ => {
+            // Build a filtered board for markdown output
+            let filtered = TicketBoard {
+                tickets: tickets.into_iter().cloned().collect(),
+            };
+            ToolResult::text(filtered.to_markdown())
+        }
+    }
+}
+
+fn handle_summary(args: serde_json::Value) -> ToolResult {
+    let text = match args["text"].as_str() {
+        Some(t) => t,
+        None => return ToolResult::error("Missing required 'text' parameter"),
+    };
+    let ticket = args["ticket"].as_str();
+    let author = args["author"].as_str();
+    let path = args["path"].as_str().unwrap_or(".");
+
+    match summary::write_summary(std::path::Path::new(path), text, ticket, author) {
+        Ok(s) => {
+            let mut msg = format!("Summary written: {}", s.file.display());
+            if let Some(ref tid) = s.ticket {
+                msg.push_str(&format!("\nLinked to ticket: {}", tid));
+            } else {
+                msg.push_str("\nNo ticket linked (will appear in board inbox)");
+            }
+            msg.push_str(&format!("\nID: {}", s.id));
+            ToolResult::text(msg)
+        }
+        Err(e) => ToolResult::error(format!("Failed to write summary: {}", e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,7 +486,7 @@ mod tests {
     #[test]
     fn test_tool_definitions() {
         let defs = tool_definitions();
-        assert_eq!(defs.len(), 4);
+        assert_eq!(defs.len(), 6);
         assert!(defs.iter().any(|d| d.name == "arch_query"));
         assert!(defs.iter().any(|d| d.name == "arch_context"));
     }

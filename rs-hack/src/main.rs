@@ -3,6 +3,10 @@
 //! @arch:role(refactor)
 //! @arch:depends_on(core, reason = "uses editor, operations, state, diff")
 //! @arch:thread(main)
+//! @hack:ticket(T04, "Electrobun: evaluate as Mac-native alternative to Bun server")
+//! @hack:parent(R001)
+//! @hack:phase(P3)
+//! @hack:status(open)
 //!
 //! CLI frontend for rs-hack. Parses clap commands and dispatches
 //! to core library operations.
@@ -1449,6 +1453,25 @@ WHAT IT DOES:
     /// Architecture knowledge graph - extract and query @arch: annotations
     #[command(subcommand)]
     Arch(ArchCommands),
+
+    /// Start the hack-board kanban server
+    Serve {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// HTTP port
+        #[arg(long, default_value = "3333")]
+        port: u16,
+
+        /// UDP nudge port
+        #[arg(long, default_value = "3334")]
+        udp_port: u16,
+
+        /// Open browser automatically
+        #[arg(long)]
+        open: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1558,6 +1581,51 @@ enum ArchCommands {
         /// Write to Cargo.toml instead of printing
         #[arg(long)]
         apply: bool,
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// List @hack:ticket and @hack:bug work items from source
+    Tickets {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (markdown, json)
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+
+        /// Filter by status (open, claimed, in-progress, handoff, review, done)
+        #[arg(short, long)]
+        status: Option<String>,
+
+        /// Filter by assignee (e.g., agent:claude)
+        #[arg(short, long)]
+        assignee: Option<String>,
+
+        /// Generate continuation prompt for a specific ticket ID (e.g., R001)
+        #[arg(long)]
+        prompt: Option<String>,
+
+        /// Generate relay doc for a specific ticket ID
+        #[arg(long)]
+        relay_doc: Option<String>,
+    },
+
+    /// Write a freeform summary to the hack-board inbox
+    Summary {
+        /// Summary text (markdown). Use - to read from stdin.
+        text: String,
+
+        /// Link to a ticket ID (e.g., F003)
+        #[arg(short, long)]
+        ticket: Option<String>,
+
+        /// Author (e.g., agent:claude)
+        #[arg(short, long)]
+        author: Option<String>,
+
         /// Path to workspace root
         #[arg(short, long, default_value = ".")]
         path: PathBuf,
@@ -3406,9 +3474,88 @@ fn main() -> Result<()> {
         Commands::Arch(arch_cmd) => {
             handle_arch_command(arch_cmd)?;
         }
+
+        Commands::Serve { path, port, udp_port, open } => {
+            let workspace = std::fs::canonicalize(&path)
+                .unwrap_or_else(|_| path.clone());
+
+            // Find hack-board directory (shipped alongside rs-hack, or in the rs-hack source)
+            let hack_board_dir = find_hack_board_dir();
+
+            match hack_board_dir {
+                Some(dir) => {
+                    eprintln!("hack-board: http://localhost:{}", port);
+                    eprintln!("workspace:  {}", workspace.display());
+                    eprintln!("server:     {}", dir.display());
+
+                    if open {
+                        let _ = std::process::Command::new("open")
+                            .arg(format!("http://localhost:{}", port))
+                            .spawn();
+                    }
+
+                    let status = std::process::Command::new("bun")
+                        .arg("run")
+                        .arg("src/server.ts")
+                        .current_dir(&dir)
+                        .env("HACK_WORKSPACE", workspace.to_string_lossy().as_ref())
+                        .env("HACK_PORT", port.to_string())
+                        .env("HACK_UDP_PORT", udp_port.to_string())
+                        .env("RS_HACK_BIN", std::env::current_exe().unwrap_or_else(|_| "rs-hack".into()))
+                        .status();
+
+                    match status {
+                        Ok(s) if !s.success() => {
+                            eprintln!("hack-board exited with: {}", s);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to start bun: {}", e);
+                            eprintln!("Install bun: https://bun.sh");
+                            std::process::exit(1);
+                        }
+                        _ => {}
+                    }
+                }
+                None => {
+                    eprintln!("Could not find hack-board directory.");
+                    eprintln!("Expected at: <rs-hack-source>/hack-board/");
+                    eprintln!("Make sure rs-hack was installed from source with the hack-board directory present.");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Find the hack-board directory relative to the rs-hack binary or source.
+fn find_hack_board_dir() -> Option<PathBuf> {
+    // Try relative to the binary (installed via cargo install)
+    if let Ok(exe) = std::env::current_exe() {
+        // Binary is at target/release/rs-hack or ~/.cargo/bin/rs-hack
+        // hack-board would be alongside the source
+        let candidates = [
+            // Running from cargo run (target/debug/ or target/release/)
+            exe.parent()?.parent()?.parent()?.join("hack-board"),
+            // Installed - check common source locations
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent()?.join("hack-board"),
+        ];
+        for candidate in &candidates {
+            if candidate.join("src/server.ts").exists() {
+                return Some(candidate.clone());
+            }
+        }
+    }
+
+    // Try current directory (if running from rs-hack source)
+    let cwd = std::env::current_dir().ok()?;
+    let cwd_candidate = cwd.join("hack-board");
+    if cwd_candidate.join("src/server.ts").exists() {
+        return Some(cwd_candidate);
+    }
+
+    None
 }
 
 fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
@@ -3675,6 +3822,102 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
                 "example" => print_arch_example_annotations(),
                 _ => eprintln!("Unknown format: {}", format),
             }
+        }
+
+        ArchCommands::Tickets { path, format, status, assignee, prompt, relay_doc } => {
+            use rs_hack_arch::ticket::{TicketBoard, TicketStatus};
+
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let board = TicketBoard::from_annotations(&annotations);
+
+            // --prompt R001: generate continuation prompt for a ticket
+            if let Some(ref ticket_id) = prompt {
+                match board.get(ticket_id) {
+                    Some(ticket) => {
+                        println!("{}", ticket.to_prompt());
+                        return Ok(());
+                    }
+                    None => {
+                        eprintln!("Ticket '{}' not found", ticket_id);
+                        eprintln!("Available: {}", board.tickets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join(", "));
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            // --relay-doc R001: generate relay markdown doc
+            if let Some(ref ticket_id) = relay_doc {
+                match board.get(ticket_id) {
+                    Some(ticket) => {
+                        println!("{}", ticket.to_relay_doc());
+                        return Ok(());
+                    }
+                    None => {
+                        eprintln!("Ticket '{}' not found", ticket_id);
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            // Apply filters
+            let tickets: Vec<_> = board.tickets.iter().filter(|t| {
+                if let Some(ref sf) = status {
+                    let expected = TicketStatus::parse(sf);
+                    if t.status != expected {
+                        return false;
+                    }
+                }
+                if let Some(ref af) = assignee {
+                    if t.assignee.as_deref() != Some(af.as_str()) {
+                        return false;
+                    }
+                }
+                true
+            }).collect();
+
+            if tickets.is_empty() {
+                match format.as_str() {
+                    "json" => println!("[]"),
+                    _ => println!("No tickets found"),
+                }
+                return Ok(());
+            }
+
+            match format.as_str() {
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&tickets)?);
+                }
+                _ => {
+                    let filtered = TicketBoard { tickets: tickets.into_iter().cloned().collect() };
+                    println!("{}", filtered.to_markdown());
+                }
+            }
+        }
+
+        ArchCommands::Summary { text, ticket, author, path } => {
+            let text = if text == "-" {
+                use std::io::Read;
+                let mut buf = String::new();
+                std::io::stdin().read_to_string(&mut buf)?;
+                buf
+            } else {
+                text
+            };
+
+            let summary = rs_hack_arch::summary::write_summary(
+                &path,
+                &text,
+                ticket.as_deref(),
+                author.as_deref(),
+            )?;
+
+            eprintln!("Summary written: {}", summary.file.display());
+            if let Some(ref tid) = summary.ticket {
+                eprintln!("Linked to: {}", tid);
+            } else {
+                eprintln!("No ticket linked (board inbox)");
+            }
+            println!("{}", summary.id);
         }
     }
 

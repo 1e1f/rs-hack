@@ -1,6 +1,8 @@
 /tmp
 /src
 target
+node_modules
+dist
 /*.md
 !README.md
 !HUMAN.md

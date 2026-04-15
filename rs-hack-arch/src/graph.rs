@@ -1,5 +1,9 @@
 //! @arch:layer(arch)
 //! @arch:role(graph)
+//! @hack:ticket(B01, "Multiple @hack:ticket on same AST target only produces one ticket")
+//! @hack:parent(R001)
+//! @hack:phase(P2)
+//! @hack:status(open)
 //!
 //! Graph data structure for architectural relationships.
 //! Uses petgraph to store nodes (code entities) and edges (relationships).
@@ -239,6 +243,20 @@ impl ArchGraph {
                         }
                     }
                     ArchKind::Unknown { .. } => {}
+
+                    // @hack: annotations are handled by TicketBoard, not the arch graph
+                    ArchKind::Ticket { .. }
+                    | ArchKind::Relay { .. }
+                    | ArchKind::Kind(_)
+                    | ArchKind::Status(_)
+                    | ArchKind::Assignee(_)
+                    | ArchKind::Phase(_)
+                    | ArchKind::Parent(_)
+                    | ArchKind::HackSeverity(_)
+                    | ArchKind::Handoff(_)
+                    | ArchKind::Next(_)
+                    | ArchKind::Cleanup(_)
+                    | ArchKind::Verify(_) => {}
                 }
             }
 

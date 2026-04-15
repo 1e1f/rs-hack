@@ -1,0 +1,19 @@
+{
+  "name": "hack-board",
+  "version": "0.1.0",
+  "description": "Kanban board for @hack: tickets embedded in Rust source",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "build": "bun build src/app.tsx --outdir public/dist"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "typescript": "^5.8.3"
+  }
+}

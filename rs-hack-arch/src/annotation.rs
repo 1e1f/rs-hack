@@ -116,6 +116,46 @@ pub enum ArchKind {
 
     /// Unknown annotation (preserved for extensibility)
     Unknown { key: String, value: String },
+
+    // ── @hack: work-item annotations ──────────────────────────────
+    // Two nouns: Ticket (unit of work) and Relay (thread of work).
+    // Everything else is a tag on one of these.
+
+    /// @hack:ticket(ID, "title") - a unit of work
+    Ticket { id: String, title: String },
+
+    /// @hack:relay(ID, "title") - a thread of work / coordination point
+    Relay { id: String, title: String },
+
+    /// @hack:kind(feature|bug|task) - what kind of ticket
+    Kind(String),
+
+    /// @hack:status(open|claimed|in-progress|handoff|review|done)
+    Status(String),
+
+    /// @hack:assignee(agent:claude, user:leif, etc.)
+    Assignee(String),
+
+    /// @hack:phase(P1) - ordering tag within a relay
+    Phase(String),
+
+    /// @hack:parent(R001) - relay-to-relay hierarchy (epic = relay with children)
+    Parent(String),
+
+    /// @hack:severity(low|medium|high|critical)
+    HackSeverity(String),
+
+    /// @hack:handoff("summary of work done and what remains")
+    Handoff(String),
+
+    /// @hack:next("description of what the next agent should do")
+    Next(String),
+
+    /// @hack:cleanup("dead code or deferred work item")
+    Cleanup(String),
+
+    /// @hack:verify("how to know this relay is complete")
+    Verify(String),
 }
 
 /// Thread specification.
@@ -278,11 +318,54 @@ impl ArchKind {
             "aggregate_root" => Self::AggregateRoot,
             "note" => Self::Note(value.to_string()),
             "see" => Self::See(value.to_string()),
+
+            // ── @hack: work-item annotations ──────────────────────
+            // All work items map to Ticket. "feature", "bug", "task" are legacy
+            // aliases that also set the kind implicitly.
+            "ticket" | "feature" | "bug" | "task" => {
+                let (id, title) = parse_id_title(value);
+                Self::Ticket { id, title }
+                // Note: legacy "bug"/"feature"/"task" callers should also emit
+                // a Kind annotation. The extractor handles this by checking the
+                // original key and injecting the kind.
+            }
+            "relay" => {
+                let (id, title) = parse_id_title(value);
+                Self::Relay { id, title }
+            }
+            "kind" => Self::Kind(value.to_string()),
+            "status" => Self::Status(value.to_string()),
+            "assignee" => Self::Assignee(value.to_string()),
+            "phase" => Self::Phase(value.to_string()),
+            "parent" => Self::Parent(value.to_string()),
+            "severity" => Self::HackSeverity(value.to_string()),
+            "handoff" => Self::Handoff(value.trim_matches('"').to_string()),
+            "next" => Self::Next(value.trim_matches('"').to_string()),
+            "cleanup" => Self::Cleanup(value.trim_matches('"').to_string()),
+            "verify" => Self::Verify(value.trim_matches('"').to_string()),
+            // Legacy aliases — story/epic become parent on the relay
+            "story" | "epic" => Self::Parent(value.split(',').next().unwrap_or(value).trim().to_string()),
+
             _ => Self::Unknown {
                 key: key.to_string(),
                 value: value.to_string(),
             },
         }
+    }
+}
+
+/// Parse "ID, title" or "ID, \"title\"" format used by @hack:ticket and @hack:bug.
+fn parse_id_title(value: &str) -> (String, String) {
+    if let Some(comma_pos) = value.find(',') {
+        let id = value[..comma_pos].trim().to_string();
+        let title = value[comma_pos + 1..]
+            .trim()
+            .trim_matches('"')
+            .to_string();
+        (id, title)
+    } else {
+        // Just an ID, no title
+        (value.trim().to_string(), String::new())
     }
 }
 

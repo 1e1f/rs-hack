@@ -1,6 +1,10 @@
 //! @arch:layer(arch)
 //! @arch:role(extract)
 //! @arch:role(parser)
+//! @hack:ticket(T02, "Scan non-Rust files for @hack: annotations (md, ts, toml)")
+//! @hack:parent(R001)
+//! @hack:phase(P3)
+//! @hack:status(open)
 //!
 //! Annotation extraction from Rust source files.
 //! Uses syn to parse source and extract `@arch:` annotations from doc comments.
@@ -136,7 +140,10 @@ fn extract_from_inner_attrs(
         // Parse each line
         for line in doc_content.lines() {
             let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix("@arch:") {
+            let annotation_rest = trimmed
+                .strip_prefix("@arch:")
+                .or_else(|| trimmed.strip_prefix("@hack:"));
+            if let Some(rest) = annotation_rest {
                 if let Some(kind) = parse_single_annotation(rest.trim()) {
                     annotations.push(ArchAnnotation {
                         file: file.to_path_buf(),
@@ -258,7 +265,10 @@ fn extract_from_attrs(
         // Parse each line
         for line in doc_content.lines() {
             let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix("@arch:") {
+            let annotation_rest = trimmed
+                .strip_prefix("@arch:")
+                .or_else(|| trimmed.strip_prefix("@hack:"));
+            if let Some(rest) = annotation_rest {
                 if let Some(kind) = parse_single_annotation(rest.trim()) {
                     annotations.push(ArchAnnotation {
                         file: file.to_path_buf(),

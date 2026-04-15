@@ -3,6 +3,10 @@
 //! @arch:role(graph)
 //! @arch:role(query)
 //! @arch:role(validate)
+//! @hack:ticket(T05, "Board UI: group-by-relay view showing relay hierarchy with child tickets")
+//! @hack:parent(R001)
+//! @hack:phase(P2)
+//! @hack:status(open)
 //!
 //! # Architecture Knowledge Graph
 //!
@@ -62,6 +66,8 @@ pub mod graph;
 pub mod mcp;
 pub mod query;
 pub mod schema;
+pub mod summary;
+pub mod ticket;
 pub mod validate;
 
 pub use annotation::{ArchAnnotation, ArchKind};
@@ -69,4 +75,5 @@ pub use extract::{extract_from_workspace, extract_from_workspace_verbose};
 pub use graph::ArchGraph;
 pub use query::{Query, QueryResult};
 pub use schema::Schema;
+pub use ticket::{Ticket, TicketBoard, ItemType, TicketStatus};
 pub use validate::{Rule, Violation};
