@@ -228,7 +228,10 @@ impl ToolRegistry {
                 // ============================================================
                 // ARCHITECTURE TOOLS (4) - query @arch: annotations
                 // Use these to understand codebase architecture before editing.
-                // Requires @arch: annotations in doc comments (see rs-hack arch init).
+                // Requires @arch: annotations in doc comments and an optional
+                // [workspace.metadata.arch] schema in Cargo.toml — bootstrap with
+                // `rs-hack arch init --apply`. (Note: `rs-hack board init` is a
+                // different thing — it installs hack-board slash commands.)
                 // ============================================================
                 Tool {
                     name: "arch_context",
@@ -278,6 +281,91 @@ impl ToolRegistry {
                         }
                     }),
                 },
+
+                // ============================================================
+                // HACK-BOARD TOOLS (5) - source-embedded kanban / SDLC
+                // Tickets and relays live as @hack: doc-comment annotations in
+                // Rust source. Board state is branch-scoped; moving a ticket
+                // is a source edit and shows up in `git diff`. Bootstrap a
+                // project with `rs-hack board init`.
+                // ============================================================
+                Tool {
+                    name: "board_status",
+                    description: "One-shot board snapshot for planning. Returns per-column counts, tickets actively held (with owners — off-limits for refactor per R5), the handoff queue with one-line next steps, epic child rollups (done/active/handoff/open), pending todos from .hack/todo.md, and a smell signal for `disappeared` tickets in the event log. USE BEFORE picking up work or planning a new relay — it's the fastest orientation on 'what's in flight'.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
+                            "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"}
+                        }
+                    }),
+                },
+                Tool {
+                    name: "board_tickets",
+                    description: "List tickets/relays, or synthesize a pickup prompt. Default mode dumps all @hack: items grouped by column. Use `prompt` to get a continuation prompt for a specific ticket — the output includes the embedded SDLC playbook (R1, C1, R3, R4, R2) so a picking-up agent sees the rules before acting. Use `relay_doc` for a markdown doc of a relay. Filter with `status` / `assignee` / `epics_only`.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
+                            "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format for list mode (default: markdown)"},
+                            "status": {"type": "string", "enum": ["open", "claimed", "in-progress", "handoff", "review", "done"], "description": "Filter by column/status"},
+                            "assignee": {"type": "string", "description": "Filter by assignee (e.g., 'agent:claude')"},
+                            "epics_only": {"type": "boolean", "description": "Only include epics (relays with @hack:kind(epic) or inferred children)"},
+                            "prompt": {"type": "string", "description": "Synthesize a continuation prompt for this ticket ID (e.g., 'R001'). Includes embedded SDLC playbook."},
+                            "relay_doc": {"type": "string", "description": "Synthesize a relay markdown doc for this ticket ID"}
+                        }
+                    }),
+                },
+                Tool {
+                    name: "board_rules",
+                    description: "Print the canonical hack-board SDLC ruleset (R1–R7 + C1 column rule). The same rules are embedded in every pickup prompt from `board_tickets` with `prompt`. USE THIS to orient on how work flows through the board when picking up a ticket or finishing a phase. Narrow by situation with `context` to get only the rules relevant right now.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "context": {"type": "string", "enum": ["pickup", "finishing", "new-work", "archive", "refactor"], "description": "Narrow ruleset to one situation. Omit for the full set."},
+                            "format": {"type": "string", "enum": ["markdown", "json", "terse"], "description": "Output format: markdown (with why/apply), json, or terse (one-line rules). Default markdown."}
+                        }
+                    }),
+                },
+                Tool {
+                    name: "board_claim",
+                    description: "Atomically claim the next ticket / relay ID and write the @hack: annotation block. ALWAYS use this instead of picking an ID yourself — the command takes a file lock and scans source for the highest existing ID, so two agents running concurrently can't collide (SDLC rule R2). The annotation is written as a module-level doc-comment (`//! @hack:…`) at the top of `file`. Returns the claimed ID (e.g., 'R008', 'F03'). Set `json` for structured output with id/file/line.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string", "enum": ["relay", "epic", "feature", "bug", "task"], "description": "Kind of item to create. `relay` for a new thread of work; `epic` for a coordination point that owns child relays; feature/bug/task for work units."},
+                            "file": {"type": "string", "description": "Target source file where the annotation will be written"},
+                            "title": {"type": "string", "description": "Short human-readable title"},
+                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
+                            "assignee": {"type": "string", "description": "@hack:assignee(...) value (e.g., 'agent:claude')"},
+                            "status": {"type": "string", "enum": ["open", "claimed", "in-progress", "handoff", "review", "done"], "description": "Initial status. Defaults to 'in-progress' for tickets, 'handoff' for relays."},
+                            "phase": {"type": "string", "description": "@hack:phase(...) — e.g., 'P1'"},
+                            "parent": {"type": "string", "description": "@hack:parent(RXXX) — parent relay ID (only set for epic children)"},
+                            "severity": {"type": "string", "description": "@hack:severity(...) — bug-specific"},
+                            "handoff_msg": {"type": "string", "description": "@hack:handoff(\"...\") — message describing what's done and what remains"},
+                            "next": {"type": "array", "items": {"type": "string"}, "description": "@hack:next(\"...\") — concrete next steps (repeatable)"},
+                            "verify": {"type": "array", "items": {"type": "string"}, "description": "@hack:verify(\"...\") — verification commands (repeatable)"},
+                            "cleanup": {"type": "array", "items": {"type": "string"}, "description": "@hack:cleanup(\"...\") — deferred cleanup items (repeatable)"},
+                            "see": {"type": "array", "items": {"type": "string"}, "description": "@arch:see(path) — architecture doc links (repeatable)"},
+                            "json": {"type": "boolean", "description": "Emit {id, file, line} JSON instead of just the ID"}
+                        },
+                        "required": ["kind", "file", "title"]
+                    }),
+                },
+                Tool {
+                    name: "board_summary",
+                    description: "Write a freeform progress summary to the hack-board inbox (`.hack/summaries/*.md`). Use for ad-hoc notes that aren't a full handoff — what you just did, what's blocking, gotchas for the next agent. A summary with a `ticket` attaches to that ticket's card; otherwise it lands in the board Inbox. Use this instead of creating a stale ticket annotation just to record progress.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string", "description": "Summary body (markdown). Pass '-' to read from stdin (CLI only — not useful here)."},
+                            "ticket": {"type": "string", "description": "Ticket/relay ID this summary is attached to (e.g., 'R001'). Omit for inbox."},
+                            "author": {"type": "string", "description": "Author tag (e.g., 'agent:claude')"},
+                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"}
+                        },
+                        "required": ["text"]
+                    }),
+                },
             ],
         }
     }
@@ -308,7 +396,12 @@ impl ToolRegistry {
 
             // If operation completed and apply was false, add reminder
             // (skip for read-only tools that don't have an apply parameter)
-            let is_read_only = name.starts_with("arch_") || name == "find" || name == "history";
+            let is_read_only = name.starts_with("arch_")
+                || name == "find"
+                || name == "history"
+                || name == "board_status"
+                || name == "board_tickets"
+                || name == "board_rules";
             if !is_read_only && !self.get_bool(&arguments, "apply") && !result.is_empty() {
                 Ok(format!("{}\n\n💡 This was a DRY RUN. Use apply=true to make actual changes.", result))
             } else {
@@ -405,6 +498,27 @@ impl ToolRegistry {
             "arch_schema" => {
                 self.add_arch_schema_args(&arguments, &mut args);
                 "arch schema"
+            }
+            // hack-board tools - map to "rs-hack board <subcommand>"
+            "board_status" => {
+                self.add_board_status_args(&arguments, &mut args);
+                "board status"
+            }
+            "board_tickets" => {
+                self.add_board_tickets_args(&arguments, &mut args);
+                "board tickets"
+            }
+            "board_rules" => {
+                self.add_board_rules_args(&arguments, &mut args);
+                "board rules"
+            }
+            "board_claim" => {
+                self.add_board_claim_args(&arguments, &mut args);
+                "board claim"
+            }
+            "board_summary" => {
+                self.add_board_summary_args(&arguments, &mut args);
+                "board summary"
             }
             // All other commands map 1:1 (with underscores -> dashes)
             _ => {
@@ -916,5 +1030,222 @@ impl ToolRegistry {
             args.push("--format".to_string());
             args.push(format.to_string());
         }
+    }
+
+    // ============================================================
+    // hack-board args
+    // ============================================================
+
+    fn add_board_status_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
+            args.push("--path".to_string());
+            args.push(path.to_string());
+        }
+        if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
+            args.push("--format".to_string());
+            args.push(format.to_string());
+        }
+    }
+
+    fn add_board_tickets_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
+            args.push("--path".to_string());
+            args.push(path.to_string());
+        }
+        if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
+            args.push("--format".to_string());
+            args.push(format.to_string());
+        }
+        if let Some(status) = arguments.get("status").and_then(|v| v.as_str()) {
+            args.push("--status".to_string());
+            args.push(status.to_string());
+        }
+        if let Some(assignee) = arguments.get("assignee").and_then(|v| v.as_str()) {
+            args.push("--assignee".to_string());
+            args.push(assignee.to_string());
+        }
+        if self.get_bool(arguments, "epics_only") {
+            args.push("--epics".to_string());
+        }
+        if let Some(prompt) = arguments.get("prompt").and_then(|v| v.as_str()) {
+            args.push("--prompt".to_string());
+            args.push(prompt.to_string());
+        }
+        if let Some(relay_doc) = arguments.get("relay_doc").and_then(|v| v.as_str()) {
+            args.push("--relay-doc".to_string());
+            args.push(relay_doc.to_string());
+        }
+    }
+
+    fn add_board_rules_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        if let Some(context) = arguments.get("context").and_then(|v| v.as_str()) {
+            args.push("--context".to_string());
+            args.push(context.to_string());
+        }
+        if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
+            args.push("--format".to_string());
+            args.push(format.to_string());
+        }
+    }
+
+    fn add_board_claim_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
+            args.push("--path".to_string());
+            args.push(path.to_string());
+        }
+        if let Some(kind) = arguments.get("kind").and_then(|v| v.as_str()) {
+            args.push("--kind".to_string());
+            args.push(kind.to_string());
+        }
+        if let Some(file) = arguments.get("file").and_then(|v| v.as_str()) {
+            args.push("--file".to_string());
+            args.push(file.to_string());
+        }
+        if let Some(title) = arguments.get("title").and_then(|v| v.as_str()) {
+            args.push("--title".to_string());
+            args.push(title.to_string());
+        }
+        if let Some(assignee) = arguments.get("assignee").and_then(|v| v.as_str()) {
+            args.push("--assignee".to_string());
+            args.push(assignee.to_string());
+        }
+        if let Some(status) = arguments.get("status").and_then(|v| v.as_str()) {
+            args.push("--status".to_string());
+            args.push(status.to_string());
+        }
+        if let Some(phase) = arguments.get("phase").and_then(|v| v.as_str()) {
+            args.push("--phase".to_string());
+            args.push(phase.to_string());
+        }
+        if let Some(parent) = arguments.get("parent").and_then(|v| v.as_str()) {
+            args.push("--parent".to_string());
+            args.push(parent.to_string());
+        }
+        if let Some(severity) = arguments.get("severity").and_then(|v| v.as_str()) {
+            args.push("--severity".to_string());
+            args.push(severity.to_string());
+        }
+        if let Some(handoff) = arguments.get("handoff_msg").and_then(|v| v.as_str()) {
+            args.push("--handoff".to_string());
+            args.push(handoff.to_string());
+        }
+        for key in ["next", "verify", "cleanup", "see"] {
+            if let Some(arr) = arguments.get(key).and_then(|v| v.as_array()) {
+                let flag = format!("--{}", key);
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        args.push(flag.clone());
+                        args.push(s.to_string());
+                    }
+                }
+            }
+        }
+        if self.get_bool(arguments, "json") {
+            args.push("--json".to_string());
+        }
+    }
+
+    fn add_board_summary_args(&self, arguments: &Value, args: &mut Vec<String>) {
+        // Positional `text` comes last; flags before.
+        if let Some(ticket) = arguments.get("ticket").and_then(|v| v.as_str()) {
+            args.push("--ticket".to_string());
+            args.push(ticket.to_string());
+        }
+        if let Some(author) = arguments.get("author").and_then(|v| v.as_str()) {
+            args.push("--author".to_string());
+            args.push(author.to_string());
+        }
+        if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
+            args.push("--path".to_string());
+            args.push(path.to_string());
+        }
+        if let Some(text) = arguments.get("text").and_then(|v| v.as_str()) {
+            args.push(text.to_string());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn board_tools_are_registered() {
+        let reg = ToolRegistry::new();
+        let names: Vec<&str> = reg.list().iter().map(|t| t.name).collect();
+        for expected in [
+            "board_status",
+            "board_tickets",
+            "board_rules",
+            "board_claim",
+            "board_summary",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "{} missing from tool registry. Registered: {:?}",
+                expected,
+                names
+            );
+        }
+    }
+
+    #[test]
+    fn board_tickets_builds_prompt_command() {
+        let reg = ToolRegistry::new();
+        let (cmd, args) = reg
+            .build_command(
+                "board_tickets",
+                &json!({"prompt": "R001", "path": "/tmp/ws"}),
+            )
+            .unwrap();
+        assert_eq!(cmd, "board tickets");
+        assert!(args.contains(&"--prompt".to_string()));
+        assert!(args.contains(&"R001".to_string()));
+        assert!(args.contains(&"--path".to_string()));
+    }
+
+    #[test]
+    fn board_rules_passes_context() {
+        let reg = ToolRegistry::new();
+        let (cmd, args) = reg
+            .build_command("board_rules", &json!({"context": "pickup"}))
+            .unwrap();
+        assert_eq!(cmd, "board rules");
+        assert_eq!(args, vec!["--context".to_string(), "pickup".to_string()]);
+    }
+
+    #[test]
+    fn board_claim_passes_repeatable_next() {
+        let reg = ToolRegistry::new();
+        let (cmd, args) = reg
+            .build_command(
+                "board_claim",
+                &json!({
+                    "kind": "relay",
+                    "file": "src/mod.rs",
+                    "title": "test",
+                    "next": ["first step", "second step"],
+                }),
+            )
+            .unwrap();
+        assert_eq!(cmd, "board claim");
+        // Two --next flags, each followed by its value
+        let next_count = args.iter().filter(|a| a.as_str() == "--next").count();
+        assert_eq!(next_count, 2);
+        assert!(args.contains(&"first step".to_string()));
+        assert!(args.contains(&"second step".to_string()));
+    }
+
+    #[test]
+    fn board_summary_positional_text_comes_last() {
+        let reg = ToolRegistry::new();
+        let (_, args) = reg
+            .build_command(
+                "board_summary",
+                &json!({"text": "did some work", "ticket": "R001"}),
+            )
+            .unwrap();
+        assert_eq!(args.last().map(|s| s.as_str()), Some("did some work"));
+        assert!(args.contains(&"--ticket".to_string()));
     }
 }

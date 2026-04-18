@@ -3,8 +3,7 @@
 //! @arch:role(graph)
 //! @arch:role(query)
 //! @arch:role(validate)
-//! @hack:ticket(T05, "Board UI: group-by-relay view showing relay hierarchy with child tickets")
-//! @hack:parent(R001)
+//! @hack:ticket(R001-T5, "Board UI: group-by-relay view showing relay hierarchy with child tickets")
 //! @hack:phase(P2)
 //! @hack:status(open)
 //!
@@ -66,6 +65,8 @@ pub mod graph;
 pub mod mcp;
 pub mod query;
 pub mod schema;
+pub mod sdlc;
+pub mod status;
 pub mod summary;
 pub mod ticket;
 pub mod validate;

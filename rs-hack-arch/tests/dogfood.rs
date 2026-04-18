@@ -436,7 +436,8 @@ fn test_hack_tickets_from_workspace() {
     // Verify prompt generation works end-to-end
     let prompt = r001.to_prompt();
     assert!(prompt.contains("# Continue: R001"));
-    assert!(prompt.contains("/handoff"));
+    assert!(prompt.contains("Playbook"));
+    assert!(prompt.contains("**R1"), "prompt should embed the pickup playbook leading with R1");
 
     // Verify markdown output shows [R] badge
     let md = board.to_markdown();

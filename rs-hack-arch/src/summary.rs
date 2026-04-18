@@ -1,7 +1,6 @@
 //! @arch:layer(arch)
 //! @arch:role(ticket)
-//! @hack:ticket(T03, "Remove @anthropic-ai/sdk dep from hack-board package.json if unused")
-//! @hack:parent(R001)
+//! @hack:ticket(R001-T3, "Remove @anthropic-ai/sdk dep from hack-board package.json if unused")
 //! @hack:status(open)
 //!
 //! Agent summary capture and storage.

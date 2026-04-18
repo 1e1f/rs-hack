@@ -42,12 +42,35 @@ Three levels of documentation for different needs:
 - Architecture and design decisions
 - Integration guides
 
+## Beyond refactoring
+
+The `rs-hack` binary ships three domains. The refactoring tool above is the
+top-level one. Two subcommands extend it with source-embedded metadata:
+
+- **`rs-hack arch …`** — Architecture knowledge graph built from
+  `@arch:…` doc-comment annotations. Query layers/roles, trace paths,
+  validate architecture rules encoded in `Cargo.toml` metadata. Backed
+  by the `rs-hack-arch` crate.
+- **`rs-hack board …`** — [hack-board](hack-board/README.md): a
+  source-embedded kanban for AI agents. Tickets, relays, and epics live
+  as `@hack:…` annotations in source. Includes a live web UI
+  (`rs-hack board serve`), atomic ID allocation (`rs-hack board claim`),
+  and an SDLC ruleset (`rs-hack board rules`). See
+  [hack-board/README.md](hack-board/README.md) for the full model.
+
+Both subcommands read from source, so board/arch state is branch-scoped,
+diffable, and PR-reviewable. There's no separate database.
+
 ## Installation
 
-This project is organized as a Cargo workspace with three crates:
-- **rs-hack** - The main CLI tool for AST-aware refactoring
-- **rshack** - Convenient alias (no hyphens!) - same tool, easier to type
-- **rs-hack-mcp** - MCP server for AI agent integration (Claude Desktop, etc.)
+This project is organized as a Cargo workspace with four crates plus a
+TypeScript/Bun app:
+
+- **rs-hack** — The main CLI tool (refactoring + `arch` + `board` subcommands)
+- **rshack** — Convenient alias (no hyphens!) — same binary, easier to type
+- **rs-hack-mcp** — MCP server for AI agent integration (Claude Desktop, etc.)
+- **rs-hack-arch** — Library crate backing `rs-hack arch …` and `rs-hack board …`
+- **hack-board/** — Bun + React web UI served by `rs-hack board serve`
 
 ### CLI Tool
 
@@ -234,6 +257,28 @@ rs-hack add --name Rectangle --field "color: String" --paths src --apply
 - ✅ Auto-detection: less typing, fewer flags to remember
 - ✅ Helpful hints when targets aren't found
 - ✅ Same mental model as Unix tools (find → operate)
+
+## hack-board — source-embedded kanban
+
+rs-hack also ships a lightweight kanban board for coordinating work across
+agents. Tickets and relays live as `@hack:` doc-comment annotations in Rust
+source — no separate issue tracker, no sync problem. See
+[hack-board/README.md](hack-board/README.md) for the full model.
+
+```bash
+rs-hack board serve            # start the kanban UI (port auto-picked per workspace)
+rs-hack board init             # install /handoff, /refine, /comment slash commands
+rs-hack board status           # one-shot snapshot for planning (counts, active, handoffs, smell)
+rs-hack board tickets          # full per-ticket dump (filters: --status, --assignee, --epics)
+rs-hack board tickets --prompt R001   # continuation prompt with embedded SDLC playbook
+rs-hack board claim --kind relay --file src/mod.rs --title "…"  # atomic ID + annotation writer
+rs-hack board rules [--context pickup|finishing|new-work|archive|refactor]   # SDLC ruleset
+```
+
+The SDLC rules (R1–R7 + C1) are canonical in
+[`rs-hack-arch/src/sdlc.rs`](rs-hack-arch/src/sdlc.rs) and embedded in every
+pickup prompt — an agent picking up a ticket via `--prompt` sees the
+playbook inline, so the right status/column moves happen before work starts.
 
 ## Supported Operations
 

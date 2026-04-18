@@ -1,7 +1,7 @@
 //! @arch:layer(arch)
 //! @arch:role(graph)
-//! @hack:ticket(B01, "Multiple @hack:ticket on same AST target only produces one ticket")
-//! @hack:parent(R001)
+//! @hack:ticket(R001-T6, "Multiple @hack:ticket on same AST target only produces one ticket")
+//! @hack:kind(bug)
 //! @hack:phase(P2)
 //! @hack:status(open)
 //!
@@ -256,7 +256,9 @@ impl ArchGraph {
                     | ArchKind::Handoff(_)
                     | ArchKind::Next(_)
                     | ArchKind::Cleanup(_)
-                    | ArchKind::Verify(_) => {}
+                    | ArchKind::Verify(_)
+                    | ArchKind::Gotcha(_)
+                    | ArchKind::Assumes(_) => {}
                 }
             }
 

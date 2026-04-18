@@ -1,10 +1,18 @@
 //! @arch:layer(arch)
 //! @arch:role(extract)
 //! @arch:role(parser)
-//! @hack:ticket(T02, "Scan non-Rust files for @hack: annotations (md, ts, toml)")
-//! @hack:parent(R001)
+//! @hack:ticket(R001-T2, "Scan non-Rust files for @hack: annotations (md, ts, toml, yaml)")
 //! @hack:phase(P3)
 //! @hack:status(open)
+//! @hack:handoff("Plan refined — see architecture/ts-annotation-scanning.md. Scope is extraction only (not TS AST refactoring). Add AnnotationTarget::File { path, anchor } variant; dispatch extractor by extension (rs → existing syn path; ts/tsx/js/jsx/md/toml/yaml → new line_extract with per-language comment prefixes). Board shard routing already works for non-Rust tickets — shardNameForTicket routes by id/parent, not language. Biggest follow-up is the TS archive endpoint's block-strip rule (P3 in the doc). Concrete smell: R002-T1 in hack-board/src/server.ts is invisible on the board today; landing P1 of this ticket makes it appear.")
+//! @hack:next("P1: Add AnnotationTarget::File variant + line_extract function. Wire into extract_from_workspace via extension dispatch. Smoke: rs-hack board status picks up R002-T1 from hack-board/src/server.ts.")
+//! @hack:next("P2: Test fixtures for each file type under rs-hack-arch/tests/. Include a .md with annotation inside vs outside a ``` code fence (fenced should be ignored — see 'False positives in prose' in the arch doc).")
+//! @hack:next("P3: Non-Rust archive endpoint. Extend stripHackAnnotations in hack-board/src/server.ts to dispatch by extension; TS accepts //!///, //, and `* @hack:…` inside /** */; MD/TOML/YAML accept contiguous plain or #-prefixed lines. Blocker for the terminal lifecycle (R4) on TS/MD tickets.")
+//! @hack:next("P4 (optional, defer): Decide whether @arch: annotations on non-Rust files participate in the architecture graph / query engine. Probably yes for architecture/*.md but the target shape needs rethinking — File targets don't have syn::Item kinds. Skip until someone asks for it.")
+//! @hack:verify("After P1: rs-hack board status shows R002-T1 with source hack-board/src/server.ts:1")
+//! @hack:verify("After P1: a .md file with '@hack:ticket(T99, \"test\")' on a bare line (not fenced) produces an annotation; same line inside ``` produces nothing")
+//! @hack:verify("cargo test -p rs-hack-arch")
+//! @arch:see(architecture/ts-annotation-scanning.md)
 //!
 //! Annotation extraction from Rust source files.
 //! Uses syn to parse source and extract `@arch:` annotations from doc comments.

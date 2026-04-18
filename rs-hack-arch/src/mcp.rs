@@ -1,7 +1,6 @@
 //! @arch:layer(arch)
 //! @arch:role(bridge)
-//! @hack:ticket(T01, "Promote: board writes relay annotation back to source via rs-hack MCP")
-//! @hack:parent(R001)
+//! @hack:ticket(R001-T1, "Promote: board writes relay annotation back to source via rs-hack MCP")
 //! @hack:phase(P2)
 //! @hack:status(open)
 //!
@@ -139,7 +138,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "hack_tickets".into(),
-            description: "Scan workspace for @hack:ticket and @hack:bug annotations. Returns a kanban board of all work items with status, assignee, phase, severity, and handoff messages. Use format=json for web UI consumption.".into(),
+            description: "Scan workspace for @hack:ticket and @hack:relay annotations. Returns a kanban board (Epics/Open/Active/Handoff/Review) of all work items with status, assignee, phase, parent, severity, and handoff messages. Compound sub-ticket IDs (e.g. R007-T1) are recognized and their parent is inferred from the prefix. Use format=json for web UI consumption.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -175,7 +174,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "ticket": {
                         "type": "string",
-                        "description": "Ticket ID to link this summary to (e.g., F003). Optional — orphan summaries go to the board inbox."
+                        "description": "Ticket ID to link this summary to — bare (e.g. T03, R012) or compound (e.g. R007-T1). Optional — orphan summaries go to the board inbox."
                     },
                     "author": {
                         "type": "string",

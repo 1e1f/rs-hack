@@ -156,6 +156,19 @@ pub enum ArchKind {
 
     /// @hack:verify("how to know this relay is complete")
     Verify(String),
+
+    /// @hack:gotcha("pre-existing breakage / trap the next agent needs to know up front")
+    ///
+    /// Rendered at the **top** of the pickup prompt, before the context block,
+    /// so the next agent doesn't stub their toe on a known issue. Repeatable.
+    Gotcha(String),
+
+    /// @hack:assumes("claim I didn't fully verify — next agent should confirm or challenge")
+    ///
+    /// Flags an unverified assumption that was baked into the handoff. Rendered
+    /// in its own section in the pickup prompt so the next agent can treat it
+    /// as a risk rather than as ground truth. Repeatable.
+    Assumes(String),
 }
 
 /// Thread specification.
@@ -343,6 +356,8 @@ impl ArchKind {
             "next" => Self::Next(value.trim_matches('"').to_string()),
             "cleanup" => Self::Cleanup(value.trim_matches('"').to_string()),
             "verify" => Self::Verify(value.trim_matches('"').to_string()),
+            "gotcha" => Self::Gotcha(value.trim_matches('"').to_string()),
+            "assumes" => Self::Assumes(value.trim_matches('"').to_string()),
             // Legacy aliases — story/epic become parent on the relay
             "story" | "epic" => Self::Parent(value.split(',').next().unwrap_or(value).trim().to_string()),
 
@@ -354,7 +369,7 @@ impl ArchKind {
     }
 }
 
-/// Parse "ID, title" or "ID, \"title\"" format used by @hack:ticket and @hack:bug.
+/// Parse "ID, title" or "ID, \"title\"" format used by @hack:ticket and @hack:relay.
 fn parse_id_title(value: &str) -> (String, String) {
     if let Some(comma_pos) = value.find(',') {
         let id = value[..comma_pos].trim().to_string();

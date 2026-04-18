@@ -3,13 +3,46 @@
 //! @arch:role(refactor)
 //! @arch:depends_on(core, reason = "uses editor, operations, state, diff")
 //! @arch:thread(main)
-//! @hack:ticket(T04, "Electrobun: evaluate as Mac-native alternative to Bun server")
-//! @hack:parent(R001)
+//! @hack:ticket(R001-T4, "Electrobun: evaluate as Mac-native alternative to Bun server")
 //! @hack:phase(P3)
 //! @hack:status(open)
 //!
 //! CLI frontend for rs-hack. Parses clap commands and dispatches
 //! to core library operations.
+//!
+//! @hack:relay(R002, "Multi-worktree sync: worktree-aware claim + CRDT .hack/ + rebase-ids")
+//! @hack:status(handoff)
+//! @hack:assignee(agent:claude)
+//! @hack:phase(P1)
+//! @hack:handoff("Design doc at architecture/multi-worktree-sync.md. P2 LANDED (see R002-T1 in hack-board/src/server.ts): per-relay shards at .hack/events/<id>.jsonl, 'scan' event type keyed on content hash, legacy-log migration on first serve. diffTicket / diffAndLog / snapshot / replaySnapshot removed from server.ts; scan_disappeared in status.rs now walks shards with legacy fallback. Dogfooded against this repo: 18 legacy events migrated into R001/R002 shards; rescan is quiet when nothing changed. Phases remaining: P1 (worktree-aware claim), P3 (per-todo files), P4 (scoped merge driver), P5 (rebase-ids).")
+//! @hack:next("P1: Worktree-aware `board claim`. Walk siblings via 'git worktree list --porcelain', union IDs, take shared lock at <git-common-dir>/hack-id.lock. Fall back to current per-workspace lock when not in a git repo.")
+//! @hack:next("P3: Per-todo files .hack/todos/<id>.md. Dir instead of single file. Update both parse_todos in status.rs and parseTodos in server.ts. One-shot migration on first serve/status.")
+//! @hack:next("P4: Scoped merge driver for _todos.jsonl / _renamed.jsonl. Hidden `rs-hack board _merge-events %O %A %B` subcommand (concat + sort by t,id,type + dedupe). .gitattributes + `git config merge.hack-events.driver` installed by `board init`. Per-relay shards do not depend on it.")
+//! @hack:next("P5: `rs-hack board rebase-ids`. Detect duplicate @hack:ticket/@hack:relay IDs after cross-machine merge. Pick winner by earliest `git log --follow --diff-filter=A` timestamp on the annotation line. Rename loser via existing AST machinery, plus scoped string-replacement inside @hack: citation strings. Shard-rename the ticket's events file (OLD.jsonl → NEW.jsonl via `git mv`). Append to _renamed.jsonl. Dry-run by default.")
+//! @hack:verify("cargo test -p rs-hack-arch")
+//! @hack:verify("cargo test -p rs-hack-mcp")
+//! @hack:verify("Smoke: create two worktrees via 'git worktree add', 'rs-hack board claim' in each, confirm different IDs.")
+//! @hack:cleanup("Consider @hack: citation sigil (e.g. {R008}) for unambiguous cross-reference — deferred; not required for phase 1.")
+//! @arch:see(architecture/multi-worktree-sync.md)
+//!
+//! @hack:relay(R003, "Split board claim into open/claim/move verbs")
+//! @hack:status(review)
+//! @hack:assignee(agent:claude)
+//! @hack:handoff("Current 'board claim' is overloaded — it creates a ticket in any column via --status (defaults to 'handoff' for relays, 'in-progress' for tickets). The verb 'claim' semantically means 'take ownership of existing work', not 'create a new item'. Splitting into three verbs clarifies intent and aligns with R1/R3.")
+//! @hack:handoff("Design agreed with user: (1) 'open <kind>' creates in Open column, no assignee, refuses --assignee/--handoff payload. (2) 'claim <kind>' creates in Active, self-assigned (defaults assignee to current agent); 'claim <ID>' flips an existing Open ticket to Active. (3) 'move <ID> <column>' handles all other transitions and carries --handoff/--next/--verify/--gotcha/--assumes/--cleanup payload. Nothing is ever created directly in Handoff.")
+//! @hack:next("P1: Add 'open' subcommand to Commands enum in rs-hack/src/main.rs. Wraps existing handle_claim logic with status=open forced, rejects --assignee and --handoff flags at arg-parse time.")
+//! @hack:next("P2: Refactor 'claim' — when given --kind: create in Active with assignee defaulting to current agent (env CLAUDE_AGENT or 'agent:claude'); when given a bare ID: flip that ticket's @hack:status from 'open' to 'in-progress' and set assignee. Reject if ticket is not currently in Open.")
+//! @hack:next("P3: Add 'move <ID> <column>' subcommand. Accepts the same payload flags as current 'claim' (--handoff/--next/--verify/--gotcha/--assumes/--cleanup). Enforces the transition matrix already in hack-board (open→active, active→handoff|review, etc.). Appends payload annotations to the existing ticket's block in source.")
+//! @hack:next("P4: Update slash commands — /handoff calls 'move <current-ID> handoff --handoff ...' on the agent's existing relay (matches R3 better than today's create-new-in-handoff). /refine calls 'open' for each child relay it generates.")
+//! @hack:next("P5: Update CLAUDE.md 'Never pick IDs yourself' section with the new three-verb surface and examples.")
+//! @hack:next("P6: Deprecate old 'claim --status <col>' — warn on stderr for one release, then remove the flag.")
+//! @hack:verify("cargo run -- board open --kind task --file /tmp/x.rs --title 'demo' prints a T-ID and the ticket appears with status(open)")
+//! @hack:verify("cargo run -- board claim --kind task --file /tmp/x.rs --title 'demo' prints a T-ID and the ticket appears with status(in-progress) and assignee set")
+//! @hack:verify("cargo run -- board move <existing-R> handoff --handoff 'x' --next 'y' flips status and appends payload lines")
+//! @hack:verify("/handoff end-to-end still produces a valid handoff-column relay update (now via move, not claim)")
+//! @hack:gotcha("Current /handoff and /refine implementations both call 'claim --status handoff'. Don't remove --status from claim until P4 ships, or those slash commands will break mid-migration.")
+//! @hack:assumes("Assumes CLAUDE_AGENT env var (or similar) is available to default the assignee in 'claim'. If not, we'll need a config lookup or require --assignee explicitly — revisit in P2.")
+//! @hack:assumes("Assumes the transition matrix for 'move' is already implemented server-side for the drag-and-drop UI, so the CLI can reuse that validation logic rather than reimplementing it.")
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -1454,24 +1487,9 @@ WHAT IT DOES:
     #[command(subcommand)]
     Arch(ArchCommands),
 
-    /// Start the hack-board kanban server
-    Serve {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// HTTP port
-        #[arg(long, default_value = "3333")]
-        port: u16,
-
-        /// UDP nudge port
-        #[arg(long, default_value = "3334")]
-        udp_port: u16,
-
-        /// Open browser automatically
-        #[arg(long)]
-        open: bool,
-    },
+    /// hack-board — kanban, tickets, relays, SDLC rules (see: rs-hack board --help)
+    #[command(subcommand)]
+    Board(BoardCommands),
 }
 
 #[derive(Subcommand)]
@@ -1586,7 +1604,50 @@ enum ArchCommands {
         path: PathBuf,
     },
 
-    /// List @hack:ticket and @hack:bug work items from source
+}
+
+/// Subcommands for `rs-hack board` — the hack-board kanban surface.
+///
+/// Everything here is board-facing: running the UI, installing slash
+/// commands, listing tickets, claiming IDs, writing summaries, and
+/// surfacing the SDLC ruleset. Kept out of the top-level namespace so
+/// that `rs-hack --help` stays focused on refactoring.
+#[derive(Subcommand)]
+enum BoardCommands {
+    /// Start the hack-board kanban server
+    Serve {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// HTTP port (default: auto-picked from workspace hash in [3333, 3998])
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// UDP nudge port (default: HTTP port + 1)
+        #[arg(long)]
+        udp_port: Option<u16>,
+
+        /// Open browser automatically
+        #[arg(long)]
+        open: bool,
+    },
+
+    /// Install hack-board slash commands and CLAUDE.md snippet into a project
+    ///
+    /// Writes .claude/commands/{comment,handoff,refine}.md and appends a
+    /// hack-board section to CLAUDE.md (or creates it). Idempotent.
+    Init {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Overwrite existing files instead of skipping them
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List @hack:ticket and @hack:relay work items from source
     Tickets {
         /// Path to workspace root
         #[arg(short, long, default_value = ".")]
@@ -1604,6 +1665,10 @@ enum ArchCommands {
         #[arg(short, long)]
         assignee: Option<String>,
 
+        /// Only include epics (relays with @hack:kind(epic) or inferred children)
+        #[arg(long)]
+        epics: bool,
+
         /// Generate continuation prompt for a specific ticket ID (e.g., R001)
         #[arg(long)]
         prompt: Option<String>,
@@ -1611,6 +1676,220 @@ enum ArchCommands {
         /// Generate relay doc for a specific ticket ID
         #[arg(long)]
         relay_doc: Option<String>,
+    },
+
+    /// Take ownership of work — either by creating a new ticket/relay in the
+    /// **Active** column, or by flipping an existing Open ticket into Active.
+    ///
+    /// Two forms:
+    ///
+    ///   rs-hack board claim --kind <K> --file <F> --title <T>   → create + claim
+    ///   rs-hack board claim <ID>                                → claim existing
+    ///
+    /// Creating: scans source for the next free ID under a file lock so two
+    /// agents running concurrently can't collide, writes the annotation block
+    /// at the top of `--file`, and sets assignee to the current agent.
+    ///
+    /// Flipping: finds the ticket with ID `<ID>`, rewrites its `@hack:status`
+    /// from `open` to `in-progress`, and sets assignee. Refuses if the ticket
+    /// isn't currently Open.
+    ///
+    /// Prints the claimed ID to stdout.
+    Claim {
+        /// Existing ticket/relay ID to claim (e.g. R003). Mutually exclusive
+        /// with `--kind` / `--file` / `--title`.
+        #[arg(
+            conflicts_with_all = ["kind", "file", "title"],
+        )]
+        id: Option<String>,
+
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Kind of item to create: relay | feature | bug | task | epic
+        #[arg(short, long, required_unless_present = "id")]
+        kind: Option<String>,
+
+        /// Target source file the annotation will be written to
+        #[arg(short, long, required_unless_present = "id")]
+        file: Option<PathBuf>,
+
+        /// Title (required when creating)
+        #[arg(short, long, required_unless_present = "id")]
+        title: Option<String>,
+
+        /// @hack:assignee(...)
+        #[arg(long)]
+        assignee: Option<String>,
+
+        /// @hack:status(...). Defaults to `in-progress` for tickets and `handoff` for relays.
+        #[arg(long)]
+        status: Option<String>,
+
+        /// @hack:phase(...)
+        #[arg(long)]
+        phase: Option<String>,
+
+        /// @hack:parent(...)
+        #[arg(long)]
+        parent: Option<String>,
+
+        /// @hack:severity(...) (bug-specific)
+        #[arg(long)]
+        severity: Option<String>,
+
+        /// @hack:handoff("...") — repeatable. Pass multiple times for a
+        /// file-grouped / bullet-per-chunk handoff; single use renders as
+        /// a paragraph.
+        #[arg(long)]
+        handoff: Vec<String>,
+
+        /// @hack:next("...") — repeatable
+        #[arg(long)]
+        next: Vec<String>,
+
+        /// @hack:verify("...") — repeatable
+        #[arg(long)]
+        verify: Vec<String>,
+
+        /// @hack:cleanup("...") — repeatable
+        #[arg(long)]
+        cleanup: Vec<String>,
+
+        /// @hack:gotcha("...") — repeatable. Pre-existing breakage / traps the
+        /// next agent needs to know up front. Rendered above the context block
+        /// in the pickup prompt.
+        #[arg(long)]
+        gotcha: Vec<String>,
+
+        /// @hack:assumes("...") — repeatable. Flags an unverified claim that
+        /// was baked into the handoff. Rendered as a risks section in the
+        /// pickup prompt so the next agent knows to confirm or challenge.
+        #[arg(long)]
+        assumes: Vec<String>,
+
+        /// @arch:see(...) — repeatable
+        #[arg(long)]
+        see: Vec<String>,
+
+        /// Emit machine-readable JSON `{id, file, line}` instead of just the ID
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Declare a new unclaimed ticket / relay in the **Open** column.
+    ///
+    /// This is the "file an issue" verb — it creates the ID and annotation but
+    /// leaves the work unassigned. No assignee, no handoff payload. When an
+    /// agent is ready to take it on, they run `rs-hack board claim <ID>` which
+    /// flips it into Active.
+    ///
+    /// Accepts the same ID/placement flags as `claim` (kind/file/title/phase/
+    /// parent/severity) plus structural payload that survives claim
+    /// (next/verify/cleanup/see). Rejects `--assignee`, `--handoff`,
+    /// `--gotcha`, `--assumes` — those belong to a handoff, not an inbox item.
+    Open {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Kind of item to create: relay | feature | bug | task | epic
+        #[arg(short, long)]
+        kind: String,
+
+        /// Target source file the annotation will be written to
+        #[arg(short, long)]
+        file: PathBuf,
+
+        /// Title (required)
+        #[arg(short, long)]
+        title: String,
+
+        /// @hack:phase(...)
+        #[arg(long)]
+        phase: Option<String>,
+
+        /// @hack:parent(...)
+        #[arg(long)]
+        parent: Option<String>,
+
+        /// @hack:severity(...) (bug-specific)
+        #[arg(long)]
+        severity: Option<String>,
+
+        /// @hack:next("...") — repeatable
+        #[arg(long)]
+        next: Vec<String>,
+
+        /// @hack:verify("...") — repeatable
+        #[arg(long)]
+        verify: Vec<String>,
+
+        /// @hack:cleanup("...") — repeatable
+        #[arg(long)]
+        cleanup: Vec<String>,
+
+        /// @arch:see(...) — repeatable
+        #[arg(long)]
+        see: Vec<String>,
+
+        /// Emit machine-readable JSON `{id, file, line}` instead of just the ID
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Transition an existing ticket to a target column.
+    ///
+    /// Mirrors the drag-and-drop transitions the board UI enforces:
+    ///   open → active
+    ///   active → open | handoff | review
+    ///   handoff → active | review
+    ///   review → handoff
+    ///
+    /// Carries the same payload flags as `claim` — `--handoff`, `--next`,
+    /// `--verify`, `--gotcha`, `--assumes`, `--cleanup` — and appends them
+    /// to the ticket's existing annotation block. Use this instead of
+    /// creating a new annotation when finishing a phase (R3: update the same
+    /// relay in place).
+    Move {
+        /// Ticket or relay ID (e.g. R003, F02, R007-T1)
+        id: String,
+
+        /// Target column: open | active | handoff | review
+        column: String,
+
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Set/overwrite @hack:assignee(...)
+        #[arg(long)]
+        assignee: Option<String>,
+
+        /// @hack:handoff("...") — repeatable. Appended to the existing block.
+        #[arg(long)]
+        handoff: Vec<String>,
+
+        /// @hack:next("...") — repeatable
+        #[arg(long)]
+        next: Vec<String>,
+
+        /// @hack:verify("...") — repeatable
+        #[arg(long)]
+        verify: Vec<String>,
+
+        /// @hack:cleanup("...") — repeatable
+        #[arg(long)]
+        cleanup: Vec<String>,
+
+        /// @hack:gotcha("...") — repeatable
+        #[arg(long)]
+        gotcha: Vec<String>,
+
+        /// @hack:assumes("...") — repeatable
+        #[arg(long)]
+        assumes: Vec<String>,
     },
 
     /// Write a freeform summary to the hack-board inbox
@@ -1629,6 +1908,66 @@ enum ArchCommands {
         /// Path to workspace root
         #[arg(short, long, default_value = ".")]
         path: PathBuf,
+    },
+
+    /// Print the hack-board SDLC ruleset (R1-R7 + column map).
+    ///
+    /// The same rules are embedded in every continuation prompt
+    /// (`rs-hack board tickets --prompt <ID>`). Running this command directly
+    /// is the quickest way for an agent to orient itself on how work flows
+    /// through the board.
+    Rules {
+        /// Narrow the ruleset to a specific situation:
+        /// pickup | finishing | new-work | archive | refactor
+        #[arg(short, long)]
+        context: Option<String>,
+
+        /// Output format: markdown (default) | json | terse (one-line rules, no why/apply)
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+    },
+
+    /// Scannable "what's already in flight" view for planning agents (R10).
+    ///
+    /// Lists every Open / Active / Handoff relay and ticket, one line per
+    /// item — `ID · assignee · title → arch-doc-ref`. Review, Done, and
+    /// archived items are excluded (not in flight). Epics are excluded by
+    /// default — they coordinate relays, not carry work (R6).
+    ///
+    /// Run this before `/refine` or `rs-hack board open --kind relay` so
+    /// you notice when someone is already working on the problem you were
+    /// about to plan. If you see overlap: claim the existing relay, add
+    /// your plan as a sub-ticket under it, or reference it in your own arch
+    /// doc.
+    Inflight {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format: markdown (default) | json | grep (one line per item)
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+
+        /// Include epics in the output (off by default — epics don't carry work)
+        #[arg(long)]
+        include_epics: bool,
+    },
+
+    /// One-shot summary of everything in flight — for planning agents.
+    ///
+    /// Counts per column, who's actively holding what (R5 off-limits), the
+    /// handoff queue with one-line next steps, epic child rollups, pending
+    /// todos, and smell from the event log (disappeared tickets). Different
+    /// shape from `board tickets` — that's a per-ticket dump; this is a
+    /// snapshot for orientation.
+    Status {
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output format: markdown (default) | json
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
     },
 }
 
@@ -3475,22 +3814,46 @@ fn main() -> Result<()> {
             handle_arch_command(arch_cmd)?;
         }
 
-        Commands::Serve { path, port, udp_port, open } => {
+        Commands::Board(board_cmd) => {
+            handle_board_command(board_cmd)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_board_command(cmd: BoardCommands) -> Result<()> {
+    match cmd {
+        BoardCommands::Serve { path, port, udp_port, open } => {
             let workspace = std::fs::canonicalize(&path)
                 .unwrap_or_else(|_| path.clone());
+
+            // Auto-pick port pair from workspace hash if not explicitly set.
+            // Mirrors the logic in hack-board/src/server.ts so `rs-hack board serve`
+            // and `bun run src/server.ts` pick the same port for the same workspace.
+            let auto_port = {
+                let s = workspace.to_string_lossy();
+                let mut h: u32 = 5381;
+                for b in s.bytes() {
+                    h = h.wrapping_mul(33).wrapping_add(b as u32);
+                }
+                3333 + ((h % 333) as u16) * 2
+            };
+            let http_port = port.unwrap_or(auto_port);
+            let udp = udp_port.unwrap_or(http_port + 1);
 
             // Find hack-board directory (shipped alongside rs-hack, or in the rs-hack source)
             let hack_board_dir = find_hack_board_dir();
 
             match hack_board_dir {
                 Some(dir) => {
-                    eprintln!("hack-board: http://localhost:{}", port);
+                    eprintln!("hack-board: http://localhost:{}", http_port);
                     eprintln!("workspace:  {}", workspace.display());
                     eprintln!("server:     {}", dir.display());
 
                     if open {
                         let _ = std::process::Command::new("open")
-                            .arg(format!("http://localhost:{}", port))
+                            .arg(format!("http://localhost:{}", http_port))
                             .spawn();
                     }
 
@@ -3499,8 +3862,8 @@ fn main() -> Result<()> {
                         .arg("src/server.ts")
                         .current_dir(&dir)
                         .env("HACK_WORKSPACE", workspace.to_string_lossy().as_ref())
-                        .env("HACK_PORT", port.to_string())
-                        .env("HACK_UDP_PORT", udp_port.to_string())
+                        .env("HACK_PORT", http_port.to_string())
+                        .env("HACK_UDP_PORT", udp.to_string())
                         .env("RS_HACK_BIN", std::env::current_exe().unwrap_or_else(|_| "rs-hack".into()))
                         .status();
 
@@ -3524,8 +3887,427 @@ fn main() -> Result<()> {
                 }
             }
         }
+
+        BoardCommands::Init { path, force } => {
+            handle_init(&path, force)?;
+        }
+
+        BoardCommands::Tickets { path, format, status, assignee, epics, prompt, relay_doc } => {
+            use rs_hack_arch::extract::extract_from_workspace_verbose;
+            use rs_hack_arch::ticket::{TicketBoard, TicketStatus};
+
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let board = TicketBoard::from_annotations(&annotations);
+
+            // --prompt R001: generate continuation prompt for a ticket
+            if let Some(ref ticket_id) = prompt {
+                match board.get(ticket_id) {
+                    Some(ticket) => {
+                        // Surface live sub-tickets so the prompt can teach
+                        // the R8 cycle when picking up a relay-with-children.
+                        let mut live_children: Vec<&rs_hack_arch::ticket::Ticket> = board
+                            .tickets
+                            .iter()
+                            .filter(|t| t.parent.as_deref() == Some(ticket.id.as_str()))
+                            .filter(|t| {
+                                matches!(
+                                    t.status,
+                                    TicketStatus::Open
+                                        | TicketStatus::Claimed
+                                        | TicketStatus::InProgress
+                                        | TicketStatus::Handoff
+                                )
+                            })
+                            .collect();
+                        live_children.sort_by(|a, b| a.id.cmp(&b.id));
+                        println!("{}", ticket.to_prompt_with_context(&live_children));
+                        return Ok(());
+                    }
+                    None => {
+                        eprintln!("Ticket '{}' not found", ticket_id);
+                        eprintln!("Available: {}", board.tickets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join(", "));
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            // --relay-doc R001: generate relay markdown doc
+            if let Some(ref ticket_id) = relay_doc {
+                match board.get(ticket_id) {
+                    Some(ticket) => {
+                        println!("{}", ticket.to_relay_doc());
+                        return Ok(());
+                    }
+                    None => {
+                        eprintln!("Ticket '{}' not found", ticket_id);
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            // Apply filters
+            let tickets: Vec<_> = board.tickets.iter().filter(|t| {
+                if epics && !t.is_epic {
+                    return false;
+                }
+                if let Some(ref sf) = status {
+                    let expected = TicketStatus::parse(sf);
+                    if t.status != expected {
+                        return false;
+                    }
+                }
+                if let Some(ref af) = assignee {
+                    if t.assignee.as_deref() != Some(af.as_str()) {
+                        return false;
+                    }
+                }
+                true
+            }).collect();
+
+            if tickets.is_empty() {
+                match format.as_str() {
+                    "json" => println!("[]"),
+                    _ => println!("No tickets found"),
+                }
+                return Ok(());
+            }
+
+            match format.as_str() {
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&tickets)?);
+                }
+                _ => {
+                    let filtered = TicketBoard { tickets: tickets.into_iter().cloned().collect() };
+                    println!("{}", filtered.to_markdown());
+                }
+            }
+        }
+
+        BoardCommands::Claim {
+            id,
+            path,
+            kind,
+            file,
+            title,
+            assignee,
+            status,
+            phase,
+            parent,
+            severity,
+            handoff,
+            next,
+            verify,
+            cleanup,
+            gotcha,
+            assumes,
+            see,
+            json,
+        } => {
+            if let Some(existing_id) = id {
+                // Flip-mode: claim an existing Open ticket.
+                if status.is_some() {
+                    anyhow::bail!(
+                        "`--status` is not valid when claiming an existing ticket; \
+                         use `rs-hack board move {} <column>` instead.",
+                        existing_id
+                    );
+                }
+                if !handoff.is_empty()
+                    || !next.is_empty()
+                    || !verify.is_empty()
+                    || !cleanup.is_empty()
+                    || !gotcha.is_empty()
+                    || !assumes.is_empty()
+                    || !see.is_empty()
+                    || phase.is_some()
+                    || parent.is_some()
+                    || severity.is_some()
+                {
+                    anyhow::bail!(
+                        "`claim <ID>` only flips status and sets assignee. \
+                         Use `rs-hack board move {} active --handoff '...' --next '...'` \
+                         to attach payload, or edit the annotation directly.",
+                        existing_id
+                    );
+                }
+                let resolved_assignee = assignee.unwrap_or_else(current_agent_id);
+                handle_claim_existing(&existing_id, &path, &resolved_assignee)?;
+            } else {
+                // Create-mode: unwrap required-when-creating flags (clap enforced).
+                let kind = kind.expect("clap required_unless_present");
+                let file = file.expect("clap required_unless_present");
+                let title = title.expect("clap required_unless_present");
+
+                // Default-assignee-to-current-agent only when no --status was
+                // passed (back-compat: legacy slash commands call
+                // `claim --status handoff` and must not get a self-assign).
+                let resolved_assignee = if assignee.is_some() {
+                    assignee
+                } else if status.is_none() {
+                    Some(current_agent_id())
+                } else {
+                    None
+                };
+                if status.is_some() {
+                    eprintln!(
+                        "warning: `rs-hack board claim --status` is deprecated. \
+                         Use `board open` (open column), bare `board claim` (active), \
+                         or `board move <ID> <column>` (transition)."
+                    );
+                }
+                handle_claim(ClaimArgs {
+                    path,
+                    kind,
+                    file,
+                    title,
+                    assignee: resolved_assignee,
+                    status,
+                    phase,
+                    parent,
+                    severity,
+                    handoff,
+                    next,
+                    verify,
+                    cleanup,
+                    gotcha,
+                    assumes,
+                    see,
+                    json,
+                })?;
+            }
+        }
+
+        BoardCommands::Open {
+            path,
+            kind,
+            file,
+            title,
+            phase,
+            parent,
+            severity,
+            next,
+            verify,
+            cleanup,
+            see,
+            json,
+        } => {
+            handle_claim(ClaimArgs {
+                path,
+                kind,
+                file,
+                title,
+                assignee: None,
+                status: Some("open".to_string()),
+                phase,
+                parent,
+                severity,
+                handoff: Vec::new(),
+                next,
+                verify,
+                cleanup,
+                gotcha: Vec::new(),
+                assumes: Vec::new(),
+                see,
+                json,
+            })?;
+        }
+
+        BoardCommands::Move {
+            id,
+            column,
+            path,
+            assignee,
+            handoff,
+            next,
+            verify,
+            cleanup,
+            gotcha,
+            assumes,
+        } => {
+            handle_move(MoveArgs {
+                id,
+                column,
+                path,
+                assignee,
+                handoff,
+                next,
+                verify,
+                cleanup,
+                gotcha,
+                assumes,
+            })?;
+        }
+
+        BoardCommands::Summary { text, ticket, author, path } => {
+            let text = if text == "-" {
+                use std::io::Read;
+                let mut buf = String::new();
+                std::io::stdin().read_to_string(&mut buf)?;
+                buf
+            } else {
+                text
+            };
+
+            let summary = rs_hack_arch::summary::write_summary(
+                &path,
+                &text,
+                ticket.as_deref(),
+                author.as_deref(),
+            )?;
+
+            eprintln!("Summary written: {}", summary.file.display());
+            if let Some(ref tid) = summary.ticket {
+                eprintln!("Linked to: {}", tid);
+            } else {
+                eprintln!("No ticket linked (board inbox)");
+            }
+            println!("{}", summary.id);
+        }
+
+        BoardCommands::Status { path, format } => {
+            use rs_hack_arch::extract::extract_from_workspace_verbose;
+            use rs_hack_arch::status::BoardStatus;
+            use rs_hack_arch::ticket::TicketBoard;
+
+            let annotations = extract_from_workspace_verbose(&path, false)?;
+            let board = TicketBoard::from_annotations(&annotations);
+            let status = BoardStatus::compute(&board, &path);
+
+            match format.as_str() {
+                "json" => println!("{}", serde_json::to_string_pretty(&status)?),
+                _ => print!("{}", status.to_markdown()),
+            }
+        }
+
+        BoardCommands::Inflight {
+            path,
+            format,
+            include_epics,
+        } => {
+            handle_inflight(&path, &format, include_epics)?;
+        }
+
+        BoardCommands::Rules { context, format } => {
+            use rs_hack_arch::sdlc;
+
+            let selected: Vec<&sdlc::SdlcRule> = match context.as_deref() {
+                Some(label) => match sdlc::Context::parse(label) {
+                    Some(ctx) => sdlc::rules_for(ctx),
+                    None => {
+                        eprintln!(
+                            "Unknown context '{}'. Valid: pickup, finishing, new-work, archive, refactor",
+                            label
+                        );
+                        std::process::exit(1);
+                    }
+                },
+                None => sdlc::RULES.iter().collect(),
+            };
+
+            match format.as_str() {
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&selected)?);
+                }
+                "terse" => {
+                    println!("{}", sdlc::format_markdown(&selected, true));
+                }
+                _ => {
+                    let header = match context.as_deref() {
+                        Some(label) => format!("# hack-board rules — {}\n\n", label),
+                        None => String::from("# hack-board rules\n\n"),
+                    };
+                    print!("{}", header);
+                    print!("{}", sdlc::format_markdown(&selected, false));
+                    println!(
+                        "---\n\nFilter by situation: `rs-hack board rules --context pickup|finishing|new-work|archive|refactor`"
+                    );
+                }
+            }
+        }
     }
 
+    Ok(())
+}
+
+// ── Onboarding templates (embedded at compile time) ─────────────────────
+
+const TPL_COMMENT: &str = include_str!("../../templates/commands/comment.md");
+const TPL_HANDOFF: &str = include_str!("../../templates/commands/handoff.md");
+const TPL_REFINE: &str = include_str!("../../templates/commands/refine.md");
+const TPL_CLAUDE_MD_SNIPPET: &str =
+    include_str!("../../templates/claude-md-hackboard.md");
+
+const CLAUDE_MD_MARKER_START: &str = "<!-- rs-hack:hack-board:start -->";
+const CLAUDE_MD_MARKER_END: &str = "<!-- rs-hack:hack-board:end -->";
+
+fn handle_init(path: &Path, force: bool) -> Result<()> {
+    let root = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let commands_dir = root.join(".claude").join("commands");
+    std::fs::create_dir_all(&commands_dir)?;
+
+    let files: &[(&str, &str)] = &[
+        ("comment.md", TPL_COMMENT),
+        ("handoff.md", TPL_HANDOFF),
+        ("refine.md", TPL_REFINE),
+    ];
+
+    let mut wrote = 0usize;
+    let mut skipped = 0usize;
+    for (name, body) in files {
+        let dest = commands_dir.join(name);
+        if dest.exists() && !force {
+            eprintln!("  skip  .claude/commands/{name} (exists, use --force to overwrite)");
+            skipped += 1;
+            continue;
+        }
+        std::fs::write(&dest, body)?;
+        eprintln!("  write .claude/commands/{name}");
+        wrote += 1;
+    }
+
+    // CLAUDE.md — append snippet if not already present; replace between
+    // rs-hack markers if --force is set.
+    let claude_md = root.join("CLAUDE.md");
+    let existing = std::fs::read_to_string(&claude_md).unwrap_or_default();
+    let has_markers =
+        existing.contains(CLAUDE_MD_MARKER_START) && existing.contains(CLAUDE_MD_MARKER_END);
+
+    if !has_markers {
+        let separator = if existing.is_empty() || existing.ends_with("\n\n") {
+            ""
+        } else if existing.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
+        let new_content = format!("{existing}{separator}{TPL_CLAUDE_MD_SNIPPET}");
+        std::fs::write(&claude_md, new_content)?;
+        eprintln!(
+            "  {} CLAUDE.md (hack-board section)",
+            if existing.is_empty() { "write" } else { "append" }
+        );
+        wrote += 1;
+    } else if force {
+        // Replace between markers.
+        let start = existing.find(CLAUDE_MD_MARKER_START).unwrap();
+        let end = existing.find(CLAUDE_MD_MARKER_END).unwrap()
+            + CLAUDE_MD_MARKER_END.len();
+        let mut new_content = String::new();
+        new_content.push_str(&existing[..start]);
+        new_content.push_str(TPL_CLAUDE_MD_SNIPPET.trim_end());
+        new_content.push_str(&existing[end..]);
+        std::fs::write(&claude_md, new_content)?;
+        eprintln!("  rewrite CLAUDE.md (hack-board section, --force)");
+        wrote += 1;
+    } else {
+        eprintln!("  skip  CLAUDE.md (hack-board section already present, use --force to refresh)");
+        skipped += 1;
+    }
+
+    eprintln!();
+    eprintln!("Done. {wrote} written, {skipped} skipped.");
+    eprintln!();
+    eprintln!("Next: `rs-hack board serve` (auto-picks a port from the workspace path).");
     Ok(())
 }
 
@@ -3824,104 +4606,959 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
             }
         }
 
-        ArchCommands::Tickets { path, format, status, assignee, prompt, relay_doc } => {
-            use rs_hack_arch::ticket::{TicketBoard, TicketStatus};
-
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let board = TicketBoard::from_annotations(&annotations);
-
-            // --prompt R001: generate continuation prompt for a ticket
-            if let Some(ref ticket_id) = prompt {
-                match board.get(ticket_id) {
-                    Some(ticket) => {
-                        println!("{}", ticket.to_prompt());
-                        return Ok(());
-                    }
-                    None => {
-                        eprintln!("Ticket '{}' not found", ticket_id);
-                        eprintln!("Available: {}", board.tickets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join(", "));
-                        std::process::exit(1);
-                    }
-                }
-            }
-
-            // --relay-doc R001: generate relay markdown doc
-            if let Some(ref ticket_id) = relay_doc {
-                match board.get(ticket_id) {
-                    Some(ticket) => {
-                        println!("{}", ticket.to_relay_doc());
-                        return Ok(());
-                    }
-                    None => {
-                        eprintln!("Ticket '{}' not found", ticket_id);
-                        std::process::exit(1);
-                    }
-                }
-            }
-
-            // Apply filters
-            let tickets: Vec<_> = board.tickets.iter().filter(|t| {
-                if let Some(ref sf) = status {
-                    let expected = TicketStatus::parse(sf);
-                    if t.status != expected {
-                        return false;
-                    }
-                }
-                if let Some(ref af) = assignee {
-                    if t.assignee.as_deref() != Some(af.as_str()) {
-                        return false;
-                    }
-                }
-                true
-            }).collect();
-
-            if tickets.is_empty() {
-                match format.as_str() {
-                    "json" => println!("[]"),
-                    _ => println!("No tickets found"),
-                }
-                return Ok(());
-            }
-
-            match format.as_str() {
-                "json" => {
-                    println!("{}", serde_json::to_string_pretty(&tickets)?);
-                }
-                _ => {
-                    let filtered = TicketBoard { tickets: tickets.into_iter().cloned().collect() };
-                    println!("{}", filtered.to_markdown());
-                }
-            }
-        }
-
-        ArchCommands::Summary { text, ticket, author, path } => {
-            let text = if text == "-" {
-                use std::io::Read;
-                let mut buf = String::new();
-                std::io::stdin().read_to_string(&mut buf)?;
-                buf
-            } else {
-                text
-            };
-
-            let summary = rs_hack_arch::summary::write_summary(
-                &path,
-                &text,
-                ticket.as_deref(),
-                author.as_deref(),
-            )?;
-
-            eprintln!("Summary written: {}", summary.file.display());
-            if let Some(ref tid) = summary.ticket {
-                eprintln!("Linked to: {}", tid);
-            } else {
-                eprintln!("No ticket linked (board inbox)");
-            }
-            println!("{}", summary.id);
-        }
     }
 
     Ok(())
+}
+
+// ── `rs-hack board claim` — atomic next-ID picker + annotation writer ────
+
+struct ClaimArgs {
+    path: PathBuf,
+    kind: String,
+    file: PathBuf,
+    title: String,
+    assignee: Option<String>,
+    status: Option<String>,
+    phase: Option<String>,
+    parent: Option<String>,
+    severity: Option<String>,
+    handoff: Vec<String>,
+    next: Vec<String>,
+    verify: Vec<String>,
+    cleanup: Vec<String>,
+    gotcha: Vec<String>,
+    assumes: Vec<String>,
+    see: Vec<String>,
+    json: bool,
+}
+
+/// Holds an exclusive lock on `.hack/id.lock` for the duration of an ID claim.
+/// Uses create_new so the first process wins atomically; later ones busy-wait
+/// up to ~5 seconds with exponential backoff.
+struct IdLock {
+    path: PathBuf,
+}
+
+impl IdLock {
+    fn acquire(workspace: &Path) -> Result<Self> {
+        let hack_dir = workspace.join(".hack");
+        std::fs::create_dir_all(&hack_dir)?;
+        let path = hack_dir.join("id.lock");
+        let start = std::time::Instant::now();
+        let mut delay_ms = 10u64;
+        loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let _ = writeln!(
+                        f,
+                        "pid={} claimed_at={}",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0)
+                    );
+                    return Ok(IdLock { path });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if start.elapsed() > std::time::Duration::from_secs(5) {
+                        anyhow::bail!(
+                            "Another rs-hack process is holding {}; \
+                             waited 5s. Delete the lock file if stale.",
+                            path.display()
+                        );
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    delay_ms = (delay_ms * 2).min(200);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+}
+
+impl Drop for IdLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn handle_claim(args: ClaimArgs) -> Result<()> {
+    use rs_hack_arch::ticket::{ItemType, TicketBoard};
+
+    let workspace = std::fs::canonicalize(&args.path).unwrap_or(args.path.clone());
+    // Resolve the target file relative to the workspace if not already absolute
+    let target = if args.file.is_absolute() {
+        args.file.clone()
+    } else {
+        workspace.join(&args.file)
+    };
+    if !target.exists() {
+        anyhow::bail!("Target file does not exist: {}", target.display());
+    }
+    // Only .rs files are scanned by the extractor today — writing an
+    // annotation to a non-Rust file silently drops the ticket off the board.
+    // See @hack:ticket(R001-T2) in rs-hack-arch/src/extract.rs for the tracked
+    // fix (AnnotationTarget::File + per-language comment prefixes).
+    match target.extension().and_then(|e| e.to_str()) {
+        Some("rs") => {}
+        Some(ext) => anyhow::bail!(
+            "board claim only supports .rs files; .{} is not scanned by the extractor \
+             yet (see R001-T2 in rs-hack-arch/src/extract.rs). \
+             Anchor the ticket on a .rs file (use @arch:see(...) to point at the doc).",
+            ext
+        ),
+        None => anyhow::bail!(
+            "board claim requires a file with a .rs extension; got {}",
+            target.display()
+        ),
+    }
+    let target = std::fs::canonicalize(&target).unwrap_or(target);
+
+    // Normalize kind. `epic` is shorthand for "relay with @hack:kind(epic)".
+    let kind = args.kind.to_lowercase();
+    let (prefix, pad, is_relay, force_kind) = match kind.as_str() {
+        "relay" | "r" => ("R", 3, true, None),
+        "epic" | "e" => ("R", 3, true, Some("epic")),
+        "feature" | "f" => ("F", 2, false, None),
+        "bug" | "b" => ("B", 2, false, None),
+        "task" | "t" => ("T", 2, false, None),
+        other => anyhow::bail!(
+            "Unknown kind '{}'. Expected: relay | epic | feature | bug | task",
+            other
+        ),
+    };
+
+    // Acquire lock → scan → pick → write → release (lock auto-released on drop).
+    let _lock = IdLock::acquire(&workspace)?;
+
+    let annotations = rs_hack_arch::extract::extract_from_workspace(&workspace)?;
+    let board = TicketBoard::from_annotations(&annotations);
+
+    // If --parent is set and this isn't itself a relay, allocate a compound
+    // sub-ticket ID of the form `<parent>-T<n>` (e.g. R007-T1, R007-T2).
+    // The parent's first work item *is* the bare R-number; sub-tickets start
+    // at -T1. Sub-tickets always use "T" regardless of --kind; the kind is
+    // preserved as a @hack:kind(...) tag.
+    let id = if !is_relay {
+        if let Some(ref parent_id) = args.parent {
+            let parent_prefix = format!("{}-T", parent_id);
+            let next_sub: u32 = board
+                .tickets
+                .iter()
+                .filter_map(|t| {
+                    t.id.strip_prefix(&parent_prefix)
+                        .and_then(|rest| rest.parse::<u32>().ok())
+                })
+                .max()
+                .map(|n| n + 1)
+                .unwrap_or(1);
+            format!("{}-T{}", parent_id, next_sub)
+        } else {
+            // Standalone one-off (no parent) — bare kind-prefix numbering.
+            let existing_max: u32 = board
+                .tickets
+                .iter()
+                .filter_map(|t| {
+                    let id = &t.id;
+                    // Skip compound IDs when counting standalone ones.
+                    if id.contains('-') {
+                        return None;
+                    }
+                    if !id.starts_with(prefix) {
+                        return None;
+                    }
+                    id[prefix.len()..].parse::<u32>().ok()
+                })
+                .max()
+                .unwrap_or(0);
+            format!("{}{:0pad$}", prefix, existing_max + 1, pad = pad)
+        }
+    } else {
+        // Relay: bare R-number. Skip compound IDs when scanning.
+        let existing_max: u32 = board
+            .tickets
+            .iter()
+            .filter_map(|t| {
+                let id = &t.id;
+                if id.contains('-') {
+                    return None;
+                }
+                if !id.starts_with(prefix) {
+                    return None;
+                }
+                id[prefix.len()..].parse::<u32>().ok()
+            })
+            .max()
+            .unwrap_or(0);
+        format!("{}{:0pad$}", prefix, existing_max + 1, pad = pad)
+    };
+
+    // Build the @hack: annotation lines.
+    // Epics: status is derived from children, so no default line is written
+    // (leave `status` blank so the annotation omits it entirely — an explicit
+    // user-provided --status still gets written for backwards compat).
+    let default_status = if force_kind == Some("epic") {
+        "" // epics compute their status from children
+    } else if is_relay {
+        "handoff"
+    } else {
+        "in-progress"
+    };
+    let status = args.status.as_deref().unwrap_or(default_status);
+    let status_opt = if status.is_empty() { None } else { Some(status) };
+    let ann = build_annotation_block(
+        is_relay,
+        &id,
+        &args.title,
+        status_opt,
+        force_kind,
+        args.assignee.as_deref(),
+        args.phase.as_deref(),
+        args.parent.as_deref(),
+        args.severity.as_deref(),
+        &args.handoff,
+        &args.next,
+        &args.verify,
+        &args.cleanup,
+        &args.gotcha,
+        &args.assumes,
+        &args.see,
+    );
+
+    // Insert into target file: append to leading //! block if present, else prepend.
+    let original = std::fs::read_to_string(&target)?;
+    let (new_content, line) = insert_module_doc_block(&original, &ann);
+    std::fs::write(&target, new_content)?;
+
+    // Output: workspace-relative path when possible
+    let rel_file: PathBuf = target
+        .strip_prefix(&workspace)
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|_| target.clone());
+    if args.json {
+        let out = serde_json::json!({
+            "id": id,
+            "file": rel_file.display().to_string(),
+            "line": line,
+        });
+        println!("{}", out);
+    } else {
+        println!("{}", id);
+        eprintln!("{}:{}", rel_file.display(), line);
+    }
+    Ok(())
+}
+
+// ── `rs-hack board claim <ID>` — flip an Open ticket into Active ────────
+
+fn current_agent_id() -> String {
+    std::env::var("CLAUDE_AGENT")
+        .or_else(|_| std::env::var("HACK_AGENT"))
+        .unwrap_or_else(|_| "agent:claude".to_string())
+}
+
+// ── `rs-hack board inflight` — plan-time discovery view (R10) ────────────
+
+fn handle_inflight(path: &Path, format: &str, include_epics: bool) -> Result<()> {
+    use rs_hack_arch::ticket::{TicketBoard, TicketStatus};
+
+    let workspace = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let annotations = rs_hack_arch::extract::extract_from_workspace(&workspace)?;
+    let board = TicketBoard::from_annotations(&annotations);
+
+    // Bucket into the three in-flight columns. Everything else (review, done,
+    // unrecognized) is dropped — by definition not in flight.
+    let mut active = Vec::new();
+    let mut handoff = Vec::new();
+    let mut open = Vec::new();
+    for t in &board.tickets {
+        if t.is_epic && !include_epics {
+            continue;
+        }
+        match t.status {
+            TicketStatus::Claimed | TicketStatus::InProgress => active.push(t),
+            TicketStatus::Handoff => handoff.push(t),
+            TicketStatus::Open => open.push(t),
+            TicketStatus::Review | TicketStatus::Done => {}
+        }
+    }
+    active.sort_by(|a, b| a.id.cmp(&b.id));
+    handoff.sort_by(|a, b| a.id.cmp(&b.id));
+    open.sort_by(|a, b| a.id.cmp(&b.id));
+
+    match format {
+        "json" => {
+            let payload = serde_json::json!({
+                "active": active.iter().map(inflight_json_row).collect::<Vec<_>>(),
+                "handoff": handoff.iter().map(inflight_json_row).collect::<Vec<_>>(),
+                "open": open.iter().map(inflight_json_row).collect::<Vec<_>>(),
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+        }
+        "grep" => {
+            for t in &active {
+                println!("{}", inflight_grep_row("active", t));
+            }
+            for t in &handoff {
+                println!("{}", inflight_grep_row("handoff", t));
+            }
+            for t in &open {
+                println!("{}", inflight_grep_row("open", t));
+            }
+        }
+        _ => {
+            let total = active.len() + handoff.len() + open.len();
+            println!("# In-flight — {} relay{}/tickets", total, if total == 1 { "" } else { "s" });
+            println!();
+            render_inflight_column("ACTIVE", &active);
+            render_inflight_column("HANDOFF", &handoff);
+            render_inflight_column("OPEN", &open);
+            if total == 0 {
+                println!("_No relays or tickets currently in flight._");
+                println!();
+            }
+            println!("---");
+            println!();
+            println!(
+                "Scanning for overlap before `/refine` or `rs-hack board open --kind relay` \
+                 (R10). If your planned work matches an existing relay's purpose, claim it, \
+                 open a sub-ticket under it (`--parent R<n>`), or reference it in your arch doc."
+            );
+        }
+    }
+    Ok(())
+}
+
+fn render_inflight_column(header: &str, items: &[&rs_hack_arch::ticket::Ticket]) {
+    if items.is_empty() {
+        return;
+    }
+    println!("## {} ({})", header, items.len());
+    println!();
+    // Calculate ID / assignee column widths for alignment.
+    let id_w = items.iter().map(|t| t.id.len()).max().unwrap_or(4);
+    let assignee_w = items
+        .iter()
+        .map(|t| t.assignee.as_deref().unwrap_or("—").len())
+        .max()
+        .unwrap_or(1);
+    for t in items {
+        let assignee = t.assignee.as_deref().unwrap_or("—");
+        let parent_tag = t
+            .parent
+            .as_deref()
+            .map(|p| format!("  (parent: {})", p))
+            .unwrap_or_default();
+        let see_tag = if t.see_also.is_empty() {
+            String::new()
+        } else {
+            format!("  → {}", t.see_also.join(", "))
+        };
+        println!(
+            "  {:<id_w$}  {:<assignee_w$}  {}{}{}",
+            t.id,
+            assignee,
+            t.title,
+            parent_tag,
+            see_tag,
+            id_w = id_w,
+            assignee_w = assignee_w
+        );
+    }
+    println!();
+}
+
+fn inflight_grep_row(column: &str, t: &rs_hack_arch::ticket::Ticket) -> String {
+    let assignee = t.assignee.as_deref().unwrap_or("—");
+    let see = if t.see_also.is_empty() {
+        String::new()
+    } else {
+        format!(" see={}", t.see_also.join(","))
+    };
+    let parent = t
+        .parent
+        .as_deref()
+        .map(|p| format!(" parent={}", p))
+        .unwrap_or_default();
+    format!("{} {} {} {:?}{}{}", column, t.id, assignee, t.title, parent, see)
+}
+
+fn inflight_json_row(t: &&rs_hack_arch::ticket::Ticket) -> serde_json::Value {
+    serde_json::json!({
+        "id": t.id,
+        "title": t.title,
+        "assignee": t.assignee,
+        "parent": t.parent,
+        "phase": t.phase,
+        "see_also": t.see_also,
+        "is_epic": t.is_epic,
+    })
+}
+
+fn handle_claim_existing(id: &str, path: &Path, assignee: &str) -> Result<()> {
+    use rs_hack_arch::ticket::{TicketBoard, TicketStatus};
+
+    let workspace = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let annotations = rs_hack_arch::extract::extract_from_workspace(&workspace)?;
+    let board = TicketBoard::from_annotations(&annotations);
+    let ticket = board
+        .tickets
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| anyhow::anyhow!("Ticket '{}' not found in workspace", id))?;
+
+    if ticket.status != TicketStatus::Open {
+        anyhow::bail!(
+            "Ticket '{}' is in status '{}', not 'open'. Use `rs-hack board move {} active` \
+             to transition from handoff, or edit the annotation directly.",
+            id,
+            ticket_status_str(&ticket.status),
+            id
+        );
+    }
+
+    let target_file = if ticket.file.is_absolute() {
+        ticket.file.clone()
+    } else {
+        workspace.join(&ticket.file)
+    };
+    let content = std::fs::read_to_string(&target_file)
+        .with_context(|| format!("Failed to read {}", target_file.display()))?;
+    let block = locate_ticket_block(&content, id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not locate @hack:ticket/@hack:relay({}, ...) decl in {}",
+            id,
+            target_file.display()
+        )
+    })?;
+
+    let mut new_content =
+        set_or_insert_annotation(&content, &block, "status", "in-progress", true);
+    let block2 = locate_ticket_block(&new_content, id).unwrap();
+    new_content = set_or_insert_annotation(&new_content, &block2, "assignee", assignee, true);
+    std::fs::write(&target_file, &new_content)
+        .with_context(|| format!("Failed to write {}", target_file.display()))?;
+
+    let rel_file: PathBuf = target_file
+        .strip_prefix(&workspace)
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|_| target_file.clone());
+    eprintln!(
+        "{}:{}  open → in-progress  (assignee={})",
+        rel_file.display(),
+        block.decl_line,
+        assignee
+    );
+    println!("{}", id);
+    Ok(())
+}
+
+// ── `rs-hack board move` — column transition + payload append ───────────
+
+struct MoveArgs {
+    id: String,
+    column: String,
+    path: PathBuf,
+    assignee: Option<String>,
+    handoff: Vec<String>,
+    next: Vec<String>,
+    verify: Vec<String>,
+    cleanup: Vec<String>,
+    gotcha: Vec<String>,
+    assumes: Vec<String>,
+}
+
+/// Column buckets surfaced on the UI → canonical status strings. Kept in
+/// sync with `BUCKET_TO_STATUS` in hack-board/src/server.ts.
+fn bucket_to_status(bucket: &str) -> Option<&'static str> {
+    match bucket {
+        "open" => Some("open"),
+        "active" => Some("in-progress"),
+        "handoff" => Some("handoff"),
+        "review" => Some("review"),
+        _ => None,
+    }
+}
+
+/// Stringify a parsed TicketStatus back to the wire form used in @hack:status(...).
+fn ticket_status_str(s: &rs_hack_arch::ticket::TicketStatus) -> &'static str {
+    use rs_hack_arch::ticket::TicketStatus as S;
+    match s {
+        S::Open => "open",
+        S::Claimed => "claimed",
+        S::InProgress => "in-progress",
+        S::Handoff => "handoff",
+        S::Review => "review",
+        S::Done => "done",
+    }
+}
+
+/// Canonical status → bucket. Kept in sync with `STATUS_TO_BUCKET` in
+/// hack-board/src/server.ts.
+fn status_to_bucket(status: &str) -> &'static str {
+    match status {
+        "open" => "open",
+        "claimed" | "in-progress" => "active",
+        "handoff" => "handoff",
+        "review" | "done" => "review",
+        _ => "",
+    }
+}
+
+/// Allowed column-to-column transitions. Mirror of `TRANSITIONS` in the
+/// hack-board server.
+fn allowed_transitions(from: &str) -> &'static [&'static str] {
+    match from {
+        "open" => &["active"],
+        "active" => &["open", "handoff", "review"],
+        "handoff" => &["active", "review"],
+        "review" => &["handoff"],
+        _ => &[],
+    }
+}
+
+fn handle_move(args: MoveArgs) -> Result<()> {
+    use rs_hack_arch::ticket::TicketBoard;
+
+    let workspace = std::fs::canonicalize(&args.path).unwrap_or(args.path.clone());
+
+    let to_bucket = args.column.to_lowercase();
+    let new_status = bucket_to_status(&to_bucket).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown target column '{}'. Expected: open | active | handoff | review",
+            args.column
+        )
+    })?;
+
+    let annotations = rs_hack_arch::extract::extract_from_workspace(&workspace)?;
+    let board = TicketBoard::from_annotations(&annotations);
+    let ticket = board
+        .tickets
+        .iter()
+        .find(|t| t.id == args.id)
+        .ok_or_else(|| anyhow::anyhow!("Ticket '{}' not found in workspace", args.id))?;
+
+    if ticket.is_epic {
+        anyhow::bail!(
+            "'{}' is an epic; its status is derived from children and cannot be set directly.",
+            args.id
+        );
+    }
+
+    let from_status_str = ticket_status_str(&ticket.status);
+    let from_bucket = status_to_bucket(from_status_str);
+    if from_bucket.is_empty() {
+        anyhow::bail!(
+            "Ticket '{}' has unrecognized status '{}' — cannot move.",
+            args.id,
+            from_status_str
+        );
+    }
+
+    if from_bucket == to_bucket {
+        // Still allow payload append even when the column doesn't change.
+        if args.handoff.is_empty()
+            && args.next.is_empty()
+            && args.verify.is_empty()
+            && args.cleanup.is_empty()
+            && args.gotcha.is_empty()
+            && args.assumes.is_empty()
+            && args.assignee.is_none()
+        {
+            eprintln!("{} already in column '{}' — noop", args.id, to_bucket);
+            println!("{}", args.id);
+            return Ok(());
+        }
+    } else {
+        let allowed = allowed_transitions(from_bucket);
+        if !allowed.contains(&to_bucket.as_str()) {
+            anyhow::bail!(
+                "Transition {} → {} is not allowed (from {}). Allowed targets: {:?}",
+                from_bucket,
+                to_bucket,
+                from_status_str,
+                allowed
+            );
+        }
+    }
+
+    let target_file = if ticket.file.is_absolute() {
+        ticket.file.clone()
+    } else {
+        workspace.join(&ticket.file)
+    };
+    let content = std::fs::read_to_string(&target_file)
+        .with_context(|| format!("Failed to read {}", target_file.display()))?;
+
+    let block = locate_ticket_block(&content, &args.id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not locate @hack:ticket/@hack:relay({}, ...) decl in {}",
+            args.id,
+            target_file.display()
+        )
+    })?;
+
+    let mut new_content = content.clone();
+    let mut block = block;
+
+    if from_bucket != to_bucket {
+        new_content = set_or_insert_annotation(
+            &new_content,
+            &block,
+            "status",
+            new_status,
+            true,
+        );
+        // Re-locate — line numbers may have shifted by one insert.
+        block = locate_ticket_block(&new_content, &args.id).unwrap();
+    }
+
+    if let Some(ref who) = args.assignee {
+        new_content = set_or_insert_annotation(
+            &new_content,
+            &block,
+            "assignee",
+            who,
+            true,
+        );
+        block = locate_ticket_block(&new_content, &args.id).unwrap();
+    }
+
+    let mut appended = Vec::<String>::new();
+    for h in &args.handoff {
+        appended.push(format!("//! @hack:handoff({:?})", h));
+    }
+    for n in &args.next {
+        appended.push(format!("//! @hack:next({:?})", n));
+    }
+    for v in &args.verify {
+        appended.push(format!("//! @hack:verify({:?})", v));
+    }
+    for c in &args.cleanup {
+        appended.push(format!("//! @hack:cleanup({:?})", c));
+    }
+    for g in &args.gotcha {
+        appended.push(format!("//! @hack:gotcha({:?})", g));
+    }
+    for a in &args.assumes {
+        appended.push(format!("//! @hack:assumes({:?})", a));
+    }
+    if !appended.is_empty() {
+        new_content = append_lines_to_block(&new_content, &block, &appended);
+    }
+
+    std::fs::write(&target_file, &new_content)
+        .with_context(|| format!("Failed to write {}", target_file.display()))?;
+
+    let rel_file: PathBuf = target_file
+        .strip_prefix(&workspace)
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|_| target_file.clone());
+    eprintln!(
+        "{}:{}  {} → {} (status: {})",
+        rel_file.display(),
+        block.decl_line,
+        from_status_str,
+        new_status,
+        if from_bucket == to_bucket { "unchanged" } else { "rewritten" }
+    );
+    println!("{}", args.id);
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct TicketBlock {
+    /// 1-indexed: the `@hack:ticket(ID,...)` or `@hack:relay(ID,...)` line.
+    decl_line: usize,
+    /// 1-indexed: first line of the contiguous @hack/@arch annotation run.
+    start_line: usize,
+    /// 1-indexed: last line of that run.
+    end_line: usize,
+}
+
+/// Find the contiguous run of `//! @hack:...` / `//! @arch:...` lines that
+/// belongs to the ticket or relay with the given ID. Runs are separated by
+/// blank `//!` lines (as written by `insert_module_doc_block`), by a
+/// non-doc-comment line, or by another `@hack:ticket(...)` / `@hack:relay(...)`
+/// declaration.
+fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
+    let lines: Vec<&str> = content.split('\n').collect();
+
+    let decl_ticket = format!("@hack:ticket({},", id);
+    let decl_relay = format!("@hack:relay({},", id);
+    let decl_ticket_sp = format!("@hack:ticket({} ,", id);
+    let decl_relay_sp = format!("@hack:relay({} ,", id);
+
+    let is_this_decl = |line: &str| -> bool {
+        line.contains(&decl_ticket)
+            || line.contains(&decl_relay)
+            || line.contains(&decl_ticket_sp)
+            || line.contains(&decl_relay_sp)
+    };
+    let is_any_decl = |line: &str| -> bool {
+        line.contains("@hack:ticket(") || line.contains("@hack:relay(")
+    };
+
+    let is_doc = |i: usize| -> bool {
+        let t = lines[i].trim_start();
+        t.starts_with("//!") || t.starts_with("///")
+    };
+    let is_blank_doc = |i: usize| -> bool {
+        let t = lines[i].trim();
+        t == "//!" || t == "///"
+    };
+    let is_hack_or_arch = |i: usize| -> bool {
+        let t = lines[i].trim_start();
+        (t.starts_with("//!") || t.starts_with("///"))
+            && (t.contains("@hack:") || t.contains("@arch:"))
+    };
+
+    let decl_idx = (0..lines.len()).find(|&i| is_doc(i) && is_this_decl(lines[i]))?;
+
+    // Walk up
+    let mut start = decl_idx;
+    while start > 0 {
+        let prev = start - 1;
+        if !is_doc(prev) || is_blank_doc(prev) {
+            break;
+        }
+        if prev != decl_idx && is_hack_or_arch(prev) && is_any_decl(lines[prev]) {
+            break;
+        }
+        if !is_hack_or_arch(prev) {
+            // Non-annotation doc text — stop.
+            break;
+        }
+        start = prev;
+    }
+
+    // Walk down
+    let mut end = decl_idx;
+    while end + 1 < lines.len() {
+        let nxt = end + 1;
+        if !is_doc(nxt) || is_blank_doc(nxt) {
+            break;
+        }
+        if is_hack_or_arch(nxt) && is_any_decl(lines[nxt]) {
+            break;
+        }
+        if !is_hack_or_arch(nxt) {
+            break;
+        }
+        end = nxt;
+    }
+
+    Some(TicketBlock {
+        decl_line: decl_idx + 1,
+        start_line: start + 1,
+        end_line: end + 1,
+    })
+}
+
+/// Rewrite `@hack:<key>(<value>)` inside `block` if present; otherwise insert
+/// it immediately after the declaration line. When `replace` is false and the
+/// key already exists, the value is left alone.
+fn set_or_insert_annotation(
+    content: &str,
+    block: &TicketBlock,
+    key: &str,
+    value: &str,
+    replace: bool,
+) -> String {
+    let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
+    let needle = format!("@hack:{}(", key);
+
+    for i in (block.start_line - 1)..block.end_line {
+        let trimmed = lines[i].trim_start();
+        let prefix_end = lines[i].len() - trimmed.len();
+        let indent = &lines[i][..prefix_end];
+        let rest_after_sigil = if let Some(r) = trimmed.strip_prefix("//!") {
+            Some(("//!", r))
+        } else if let Some(r) = trimmed.strip_prefix("///") {
+            Some(("///", r))
+        } else {
+            None
+        };
+        let Some((sigil, after)) = rest_after_sigil else {
+            continue;
+        };
+        if after.trim_start().starts_with(&needle) {
+            if replace {
+                lines[i] = format!("{}{} @hack:{}({})", indent, sigil, key, value);
+            }
+            return lines.join("\n");
+        }
+    }
+
+    // Not present — insert immediately after decl_line, preserving the decl's
+    // indentation / doc-comment sigil.
+    let decl_idx = block.decl_line - 1;
+    let prefix = extract_doc_prefix(&lines[decl_idx]);
+    let new_line = format!("{} @hack:{}({})", prefix, key, value);
+    lines.insert(decl_idx + 1, new_line);
+    lines.join("\n")
+}
+
+/// Append raw annotation lines to the end of a ticket's block. The lines are
+/// assumed to be pre-formatted with `//!` — this function adjusts the sigil
+/// to match the block's existing style (`//!` vs `///`) before inserting.
+fn append_lines_to_block(
+    content: &str,
+    block: &TicketBlock,
+    new_lines_raw: &[String],
+) -> String {
+    let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
+    let decl_idx = block.decl_line - 1;
+    let prefix = extract_doc_prefix(&lines[decl_idx]);
+    let adjusted: Vec<String> = new_lines_raw
+        .iter()
+        .map(|l| {
+            // Strip leading `//!` / `///` and re-attach the block's prefix.
+            let trimmed = l.trim_start();
+            let rest = if let Some(r) = trimmed.strip_prefix("//!") {
+                r
+            } else if let Some(r) = trimmed.strip_prefix("///") {
+                r
+            } else {
+                trimmed
+            };
+            format!("{}{}", prefix, rest)
+        })
+        .collect();
+    let insert_at = block.end_line; // 1-indexed end → 0-indexed insert position
+    for (off, l) in adjusted.into_iter().enumerate() {
+        lines.insert(insert_at + off, l);
+    }
+    lines.join("\n")
+}
+
+fn extract_doc_prefix(line: &str) -> String {
+    // Preserve leading whitespace + `//!` or `///`.
+    let ws_end = line.find(|c: char| !c.is_whitespace()).unwrap_or(0);
+    let ws = &line[..ws_end];
+    let rest = &line[ws_end..];
+    if rest.starts_with("//!") {
+        format!("{}//!", ws)
+    } else if rest.starts_with("///") {
+        format!("{}///", ws)
+    } else {
+        format!("{}//!", ws)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_annotation_block(
+    is_relay: bool,
+    id: &str,
+    title: &str,
+    status: Option<&str>,
+    kind_override: Option<&str>,
+    assignee: Option<&str>,
+    phase: Option<&str>,
+    parent: Option<&str>,
+    severity: Option<&str>,
+    handoff: &[String],
+    next: &[String],
+    verify: &[String],
+    cleanup: &[String],
+    gotcha: &[String],
+    assumes: &[String],
+    see: &[String],
+) -> String {
+    let mut lines = Vec::<String>::new();
+    let head = if is_relay { "relay" } else { "ticket" };
+    lines.push(format!(
+        "//! @hack:{}({}, {:?})",
+        head, id, title
+    ));
+    if let Some(k) = kind_override {
+        lines.push(format!("//! @hack:kind({})", k));
+    }
+    if let Some(s) = status {
+        lines.push(format!("//! @hack:status({})", s));
+    }
+    if let Some(a) = assignee {
+        lines.push(format!("//! @hack:assignee({})", a));
+    }
+    if let Some(p) = phase {
+        lines.push(format!("//! @hack:phase({})", p));
+    }
+    if let Some(p) = parent {
+        lines.push(format!("//! @hack:parent({})", p));
+    }
+    if let Some(s) = severity {
+        lines.push(format!("//! @hack:severity({})", s));
+    }
+    for h in handoff {
+        lines.push(format!("//! @hack:handoff({:?})", h));
+    }
+    for n in next {
+        lines.push(format!("//! @hack:next({:?})", n));
+    }
+    for v in verify {
+        lines.push(format!("//! @hack:verify({:?})", v));
+    }
+    for c in cleanup {
+        lines.push(format!("//! @hack:cleanup({:?})", c));
+    }
+    for g in gotcha {
+        lines.push(format!("//! @hack:gotcha({:?})", g));
+    }
+    for a in assumes {
+        lines.push(format!("//! @hack:assumes({:?})", a));
+    }
+    for s in see {
+        lines.push(format!("//! @arch:see({})", s));
+    }
+    lines.join("\n")
+}
+
+/// Insert `block` into `content` as a module-level doc comment. If the file
+/// already starts with `//!` lines, append the block to that run (separated by
+/// a blank `//!` line). Otherwise insert at the very top.
+/// Returns the new content and the 1-indexed line number of the block's first
+/// line in the new content.
+fn insert_module_doc_block(content: &str, block: &str) -> (String, usize) {
+    let lines: Vec<&str> = content.split('\n').collect();
+    let mut head_end = 0usize;
+    while head_end < lines.len() {
+        let l = lines[head_end];
+        let trimmed = l.trim_start();
+        if trimmed.starts_with("//!") {
+            head_end += 1;
+        } else {
+            break;
+        }
+    }
+
+    if head_end > 0 {
+        // Append to existing `//!` block.
+        let mut new_lines: Vec<String> = lines[..head_end].iter().map(|s| s.to_string()).collect();
+        // Separator between existing block and new annotations
+        new_lines.push("//!".to_string());
+        let insert_start_line = new_lines.len() + 1; // 1-indexed
+        for l in block.split('\n') {
+            new_lines.push(l.to_string());
+        }
+        for l in &lines[head_end..] {
+            new_lines.push((*l).to_string());
+        }
+        (new_lines.join("\n"), insert_start_line)
+    } else {
+        // No leading doc block — prepend.
+        let mut out = String::new();
+        out.push_str(block);
+        out.push_str("\n\n");
+        out.push_str(content);
+        (out, 1)
+    }
 }
 
 fn apply_arch_init_template(path: &Path) -> Result<()> {
