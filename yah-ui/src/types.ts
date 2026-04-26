@@ -27,8 +27,10 @@ export interface Ticket {
   verify?: string[];
   file: string;
   line: number;
-  // Zone-only: per-child counts
-  childCounts?: { open: number; active: number; handoff: number };
+  // Zone-only: per-child counts. `relays` is the count of child *relays* —
+  // when a relay has both child relays AND (open|active|handoff > relays)
+  // worth of loose tickets, the card surfaces a "mixed children" smell.
+  childCounts?: { open: number; active: number; handoff: number; relays?: number };
   isZone?: boolean;
 }
 

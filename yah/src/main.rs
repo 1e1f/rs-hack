@@ -9,113 +9,135 @@
 //!
 //! @arch:see(architecture/multi-worktree-sync.md)
 //!
-//! @hack:relay(R006, "yah-ui: Tauri/React frontend port")
-//! @hack:status(open)
+//! @yah:relay(R006, "yah-ui: Tauri/React frontend port")
+//! @yah:status(open)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @hack:relay(R007, "yah-ui P1: design system + shell")
-//! @hack:status(open)
-//! @hack:phase(P1)
-//! @hack:parent(R006)
+//! @yah:relay(R007, "yah-ui P1: design system + shell")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @hack:relay(R008, "yah-ui P2: Board")
-//! @hack:status(open)
-//! @hack:phase(P2)
-//! @hack:parent(R006)
+//! @yah:relay(R008, "yah-ui P2: Board")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @hack:relay(R009, "yah-ui P3: Architecture (mermaid)")
-//! @hack:status(open)
-//! @hack:phase(P3)
-//! @hack:parent(R006)
+//! @yah:relay(R009, "yah-ui P3: Architecture (mermaid)")
+//! @yah:status(open)
+//! @yah:phase(P3)
+//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @hack:relay(R010, "yah-ui P4: Agent")
-//! @hack:status(open)
-//! @hack:phase(P4)
-//! @hack:parent(R006)
+//! @yah:relay(R010, "yah-ui P4: Agent")
+//! @yah:status(open)
+//! @yah:phase(P4)
+//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @hack:relay(R011, "yah-ui P5: splash assets + empty states")
-//! @hack:status(open)
-//! @hack:phase(P5)
-//! @hack:parent(R006)
+//! @yah:relay(R011, "yah-ui P5: splash assets + empty states")
+//! @yah:status(open)
+//! @yah:phase(P5)
+//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
 //!
-//! @hack:ticket(R007-T2, "yah-ui shared primitives: Pill, Glyph, Menu, SectionHeader")
-//! @hack:assignee(agent:claude)
-//! @hack:status(review)
-//! @hack:phase(P1)
-//! @hack:parent(R007)
-//! @hack:handoff("Built four shared primitives in yah-ui/src/components/shared/: Pill (hue-keyed: open/active/handoff/review/bug/feature/task/epic, plus StatusPill, KindPill, KindBadge — all driven by --color-st-* tokens), Glyph (Icon line set + Glyph silhouette set ported from yah-design/project/data.jsx), Menu (anchored popover with click-outside via mousedown listener that ignores anchorRef) + MenuItem (leading/hint/danger slots), SectionHeader (illuminated drop-cap + small-caps eyebrow + horizontal rule, optional right slot for count badge). Refactored existing Pill.tsx off the generic Tailwind color tones (bg-blue, text-cyan, etc.) onto the new parchment palette. Typecheck clean, bun run build:css and build:js both green. Tailwind v4 emits text-st-{open|active|handoff|review|bug|feature|task|epic} + bg-vellum/70 + border-rule/50 + illum-cap/eyebrow/smallcaps utilities used by primitives.")
-//! @hack:next("R007-T3 picks up next: replace TitleBar/RigSelector/RelaySelector/SplitModeToggle/TabStrip with versions consuming these primitives. Existing shell files (yah-ui/src/components/shell/*.tsx) still reference pre-yah-design Tailwind classes (bg-elevated, text-text-muted, bg-green/red) that don't exist in new globals.css — replace, don't extend.")
-//! @hack:next("Visual verification of the primitives is deferred to R007-T3 — they're not wired into App.tsx. R007-T3's TitleBar+selectors will exercise Pill/Glyph/Menu against both themes.")
-//! @hack:next("Note: yah-ui/src/components/board/TicketCard.tsx imports KindPill/StatusPill from shared/Pill — same export names + same prop shapes preserved, so it builds. But its inline Tailwind classes (bg-elevated, text-yellow, etc.) are still pre-yah-design — that's R008-T2 scope, not R007.")
+//! @yah:ticket(R007-T2, "yah-ui shared primitives: Pill, Glyph, Menu, SectionHeader")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R007)
+//! @yah:handoff("Built four shared primitives in yah-ui/src/components/shared/: Pill (hue-keyed: open/active/handoff/review/bug/feature/task/epic, plus StatusPill, KindPill, KindBadge — all driven by --color-st-* tokens), Glyph (Icon line set + Glyph silhouette set ported from yah-design/project/data.jsx), Menu (anchored popover with click-outside via mousedown listener that ignores anchorRef) + MenuItem (leading/hint/danger slots), SectionHeader (illuminated drop-cap + small-caps eyebrow + horizontal rule, optional right slot for count badge). Refactored existing Pill.tsx off the generic Tailwind color tones (bg-blue, text-cyan, etc.) onto the new parchment palette. Typecheck clean, bun run build:css and build:js both green. Tailwind v4 emits text-st-{open|active|handoff|review|bug|feature|task|epic} + bg-vellum/70 + border-rule/50 + illum-cap/eyebrow/smallcaps utilities used by primitives.")
+//! @yah:next("R007-T3 picks up next: replace TitleBar/RigSelector/RelaySelector/SplitModeToggle/TabStrip with versions consuming these primitives. Existing shell files (yah-ui/src/components/shell/*.tsx) still reference pre-yah-design Tailwind classes (bg-elevated, text-text-muted, bg-green/red) that don't exist in new globals.css — replace, don't extend.")
+//! @yah:next("Visual verification of the primitives is deferred to R007-T3 — they're not wired into App.tsx. R007-T3's TitleBar+selectors will exercise Pill/Glyph/Menu against both themes.")
+//! @yah:next("Note: yah-ui/src/components/board/TicketCard.tsx imports KindPill/StatusPill from shared/Pill — same export names + same prop shapes preserved, so it builds. But its inline Tailwind classes (bg-elevated, text-yellow, etc.) are still pre-yah-design — that's R008-T2 scope, not R007.")
 //!
-//! @hack:ticket(R007-T3, "yah-ui shell: TitleBar, RigSelector, RelaySelector, SplitModeToggle, TabStrip")
-//! @hack:status(review)
-//! @hack:phase(P1)
-//! @hack:parent(R007)
-//! @hack:handoff("Replaced 4 shell components + added SplitModeToggle, all built against the parchment palette + R007-T2 primitives (Pill/Glyph/Menu/SectionHeader/KindBadge). Extended Tab type to include the run cluster (terminal/preview/files/services) + Theme type. App.tsx now owns theme state (CSS-variable swap on documentElement.dataset.theme), splitMode state, and routes run-cluster tabs to a ComingSoon stub. Typecheck clean for new code (only pre-existing serve.ts ambient-types errors remain). bun build:js + build:css both green. Dev server boots cleanly.")
-//! @hack:next("Visual sign-off: open localhost:5173, exercise theme toggle, rig + relay menus (⌘K filter), split-mode menu (cross-cluster pairings first), and the seven tabs (run-cluster shows ComingSoon).")
-//! @hack:next("Once approved, archive R007-T2 + R007-T3 from the board (strips @hack lines from yah/src/main.rs).")
+//! @yah:ticket(R007-T3, "yah-ui shell: TitleBar, RigSelector, RelaySelector, SplitModeToggle, TabStrip")
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R007)
+//! @yah:handoff("Replaced 4 shell components + added SplitModeToggle, all built against the parchment palette + R007-T2 primitives (Pill/Glyph/Menu/SectionHeader/KindBadge). Extended Tab type to include the run cluster (terminal/preview/files/services) + Theme type. App.tsx now owns theme state (CSS-variable swap on documentElement.dataset.theme), splitMode state, and routes run-cluster tabs to a ComingSoon stub. Typecheck clean for new code (only pre-existing serve.ts ambient-types errors remain). bun build:js + build:css both green. Dev server boots cleanly.")
+//! @yah:next("Visual sign-off: open localhost:5173, exercise theme toggle, rig + relay menus (⌘K filter), split-mode menu (cross-cluster pairings first), and the seven tabs (run-cluster shows ComingSoon).")
+//! @yah:next("Once approved, archive R007-T2 + R007-T3 from the board (strips @hack lines from yah/src/main.rs).")
 //!
-//! @hack:ticket(R008-T1, "Board scaffold: 5 columns + dnd-kit drag-and-drop with transition rules")
-//! @hack:status(open)
-//! @hack:phase(P2)
-//! @hack:parent(R008)
+//! @yah:ticket(R008-T1, "Board scaffold: 5 columns + dnd-kit drag-and-drop with transition rules")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R008)
+//! @yah:handoff("Rewrote yah-ui/src/components/board/{Board,Column}.tsx onto the parchment palette. Board: 5 columns (Zones / Open / Active / Handoff / Review) with eyebrows, dnd-kit DndContext, ALLOWED_TARGETS transition matrix mirrored from CLAUDE.md (open->active; active->open|handoff|review; handoff->active|review; review->handoff). Drag start/end/cancel hooks track activeId; drop is rejected client-side when the target column is not in the source ticket's allowed set. Column: illuminated drop-cap initial + small-caps body + bordered count chip + italic eyebrow + filter button. Hover state uses color-mix(accent 9%, paper-2); disallowed columns dim to opacity-45; valid drop-hover gets accent border. Existing TicketCard left untouched (T2 scope). Typecheck clean apart from pre-existing serve.ts ambient-types errors. bun run build:css + build:js both green. Dev server boots.")
+//! @yah:next("Visual sign-off: open localhost:5173, drag a ticket open->active->handoff->review (mock data has R012-T2 in active you can drop into handoff), confirm zones rejects, confirm a card from review only allows drop on handoff (other cols dim).")
+//! @yah:next("Existing TicketCard renders with pre-yah-design Tailwind classes (bg-elevated, text-text-muted, etc.) that don't exist in globals.css — cards will look bare. That is R008-T2's problem, not T1's.")
+//! @yah:verify("cd yah-ui && bun run build")
+//! @yah:verify("cd yah-ui && bun run typecheck")
 //!
-//! @hack:ticket(R008-T2, "TicketCard + CardExpanded: relay rail, pennant, status pill, mixed-children smell")
-//! @hack:status(open)
-//! @hack:phase(P2)
-//! @hack:parent(R008)
+//! @yah:ticket(R008-T2, "TicketCard + CardExpanded: relay rail, pennant, status pill, mixed-children smell")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R008)
+//! @yah:handoff("Refactored TicketCard onto the parchment palette + extracted CardExpanded into its own file. TicketCard: cursor-grab article with bg-vellum, dnd-kit useDraggable on the whole card (chevron and footer buttons stopPropagation pointerdown so they don't start drags). Relay rail: 4px left strip with linear-gradient(transparent, accent, transparent), candle-rail animation + drop-shadow when live (relay + agent + status in {claimed,in-progress,handoff}). Pennant: top-right ribbon via clip-path polygon — 7x12 solid-accent for normal relays, 9x16 with five-stop gradient (accent-2 / accent / accent+vellum mix / accent / accent-2) for kind=epic. Header: chevron + KindBadge + id (with parent ↪ chip) + StatusPill (suppressed when STATUS_LABEL[status] === columnEyebrow) + mixed-children bug glyph + phase. Title in font-display 15px. Assignee row with midnight dot. Zone child counts inline (R008-T3 will replace with proper CountChip). CardExpanded: Handoff (serif prose) / Next steps (accent bullet) / Gotchas (st-bug warning icon) / Verify (mono code chip). Footer: file:line truncate + graph/agent/prompt buttons. Wired Column → TicketCard via columnEyebrow prop. Extended Ticket.childCounts with optional relays count to enable the mixed-children calculation; existing mock data left untouched (no mock ticket has mixed children, so the smell glyph won't render until real data comes in). Typecheck clean apart from pre-existing serve.ts ambient-types errors. bun run build:css + build:js green. Dev server boots.")
+//! @yah:next("Visual sign-off at localhost:5173: open Board tab, expand a few cards (R012, R012-T2, R007, etc.), confirm relay rail + pennant on relays only, candle-rail animation on R012/R012-T2/R007 (the active/handoff agent-driven ones), epic pennant on R012 (kind=epic + isZone), drag a card to verify status pill suppression in the right column. I built clean but did NOT exercise the UI in a browser this turn — flag any visual regressions.")
+//! @yah:next("If pennant overlaps the count chip on small relays or the chevron sits awkwardly under the rail, the easy tweak is the article's pl-3.5/pl-3 — increase by .5 if needed.")
+//! @yah:verify("cd yah-ui && bun run typecheck")
+//! @yah:verify("cd yah-ui && bun run build")
 //!
-//! @hack:ticket(R008-T3, "CountChip + EmptyColumn + FillerSplash")
-//! @hack:status(open)
-//! @hack:phase(P2)
-//! @hack:parent(R008)
+//! @yah:ticket(R008-T3, "CountChip + EmptyColumn + FillerSplash")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R008)
+//! @yah:handoff("Built CountChip (board/CountChip.tsx — serif numeral + small-caps label per chip, gilt rule divider via border-r, inherits hue text class), Splash (shared/Splash.tsx — placeholder vector ornaments per column-slug, prop-shape mirrors design return so R011/P5 can swap inner SVG for <img> without touching callers; legacy variant aliases scroll/lantern/camp/anvil/empty/signpost map to column slugs for run-tab + arch + agent reuse), EmptyColumn (board/EmptyColumn.tsx — themed Splash inside a dashed parchment frame, per-column caption/sub flavour) + FillerSplash (board/FillerSplash.tsx — bottom-of-column splash at width=140, opacity-45, pointer-events-none so it never blocks dnd-kit drops). Wired into Column.tsx: empty columns now render EmptyColumn instead of (empty) text; columns with 1-2 cards get FillerSplash pushed to the bottom. Refactored TicketCard's inline ZoneChildCounts to use CountChip. Typecheck clean apart from pre-existing serve.ts ambient-types errors. bun run build:css + build:js both green. I built clean but did NOT exercise the UI in a browser this turn — flag any visual regressions.")
+//! @yah:next("Visual sign-off: open localhost:5173, switch to Board tab. Empty columns (Zones in mock data) should show themed dashed-frame splash with caption + sub. Columns with ≤2 cards should show a smaller bottom splash at low opacity. Drag a card and confirm dnd-kit drops still land — pointer-events-none on FillerSplash is critical.")
+//! @yah:next("Zone child-counts on R012 should now render as serif numerals separated by gilt rules (CountChip) instead of inline separators. Hue tones: open=ochre, active=midnight-blue, handoff=sienna.")
+//! @yah:next("Splash ornaments are deliberate vector placeholders — R011/P5 swaps them for the wayfarer linocut PNG set + adds a useThemeAndSet hook for light/dark + arcane/wayfarer set switching. The variant alias map (scroll/lantern/camp/anvil/empty/signpost) is already in place for the run-cluster + arch/agent surfaces P5 will wire.")
+//! @yah:verify("cd yah-ui && bun run typecheck")
+//! @yah:verify("cd yah-ui && bun run build")
 //!
-//! @hack:ticket(R009-T1, "GraphPane: mermaid theming, dot-grid, post-render polish, click handlers")
-//! @hack:status(open)
-//! @hack:phase(P3)
-//! @hack:parent(R009)
+//! @yah:ticket(R009-T1, "GraphPane: mermaid theming, dot-grid, post-render polish, click handlers")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P3)
+//! @yah:parent(R009)
 //!
-//! @hack:ticket(R009-T2, "ArchToolbar: RootSelector, DepthControl, EdgeKindFilters, PinnedViews, Legend")
-//! @hack:status(open)
-//! @hack:phase(P3)
-//! @hack:parent(R009)
+//! @yah:ticket(R009-T2, "ArchToolbar: RootSelector, DepthControl, EdgeKindFilters, PinnedViews, Legend")
+//! @yah:status(open)
+//! @yah:phase(P3)
+//! @yah:parent(R009)
 //!
-//! @hack:ticket(R009-T3, "NodeHoverCard + NodeActionMenu + cross-tab nav (jumpToFile, openInAgent)")
-//! @hack:status(open)
-//! @hack:phase(P3)
-//! @hack:parent(R009)
+//! @yah:ticket(R009-T3, "NodeHoverCard + NodeActionMenu + cross-tab nav (jumpToFile, openInAgent)")
+//! @yah:status(open)
+//! @yah:phase(P3)
+//! @yah:parent(R009)
 //!
-//! @hack:ticket(R010-T1, "AgentView shell: SessionList, SessionPane, SessionHeader, StatusStrip")
-//! @hack:status(open)
-//! @hack:phase(P4)
-//! @hack:parent(R010)
+//! @yah:ticket(R010-T1, "AgentView shell: SessionList, SessionPane, SessionHeader, StatusStrip")
+//! @yah:status(open)
+//! @yah:phase(P4)
+//! @yah:parent(R010)
 //!
-//! @hack:ticket(R010-T2, "Message components: User, Assistant, Thinking, Avatar (path:line linkification)")
-//! @hack:status(open)
-//! @hack:phase(P4)
-//! @hack:parent(R010)
+//! @yah:ticket(R010-T2, "Message components: User, Assistant, Thinking, Avatar (path:line linkification)")
+//! @yah:status(open)
+//! @yah:phase(P4)
+//! @yah:parent(R010)
 //!
-//! @hack:ticket(R010-T3, "Tool result frames: ReadResult, GrepResult, EditDiff, BashOutput + ToolFrame")
-//! @hack:status(open)
-//! @hack:phase(P4)
-//! @hack:parent(R010)
+//! @yah:ticket(R010-T3, "Tool result frames: ReadResult, GrepResult, EditDiff, BashOutput + ToolFrame")
+//! @yah:status(open)
+//! @yah:phase(P4)
+//! @yah:parent(R010)
 //!
-//! @hack:ticket(R010-T4, "PromptBar + StreamingCursor + NoSession")
-//! @hack:status(open)
-//! @hack:phase(P4)
-//! @hack:parent(R010)
+//! @yah:ticket(R010-T4, "PromptBar + StreamingCursor + NoSession")
+//! @yah:status(open)
+//! @yah:phase(P4)
+//! @yah:parent(R010)
 //!
-//! @hack:ticket(R011-T1, "Splash component + wayfarer illustrations wired to Board/Arch/Agent/Run empty states")
-//! @hack:status(open)
-//! @hack:phase(P5)
-//! @hack:parent(R011)
+//! @yah:ticket(R011-T1, "Splash component + wayfarer illustrations wired to Board/Arch/Agent/Run empty states")
+//! @yah:status(open)
+//! @yah:phase(P5)
+//! @yah:parent(R011)
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -200,7 +222,40 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// [LEGACY] Add a field to a struct - use 'rs-hack add' instead
+    /// Refactor — AST-aware Rust code edits (yahh: short alias)
+    #[command(subcommand)]
+    Hack(HackCommands),
+
+    /// Architecture knowledge graph - extract and query @arch: annotations (yaha: short alias)
+    #[command(subcommand)]
+    Arch(ArchCommands),
+
+    /// hack-board — kanban, tickets, relays, SDLC rules (yahb: short alias)
+    #[command(subcommand)]
+    Board(BoardCommands),
+
+    /// MCP server — JSON-RPC stdio bridge for AI agents
+    Mcp {
+        /// Transport (currently stdio only)
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+    },
+
+    /// One-shot migration: rewrite legacy `@hack:` → `@yah:` in source, rename `.hack/` → `.yah/`
+    Migrate {
+        /// Workspace root to migrate
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Apply changes (default: dry-run prints what would change)
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum HackCommands {
+    /// [LEGACY] Add a field to a struct - use 'yah hack add' instead
     #[command(hide = true)]
     #[command(after_help = "EXAMPLES:
     # Add field to struct definition only
@@ -1558,21 +1613,6 @@ WHAT IT DOES:
         #[arg(long)]
         summary: bool,
     },
-
-    /// Architecture knowledge graph - extract and query @arch: annotations
-    #[command(subcommand)]
-    Arch(ArchCommands),
-
-    /// hack-board — kanban, tickets, relays, SDLC rules (see: yah board --help)
-    #[command(subcommand)]
-    Board(BoardCommands),
-
-    /// MCP server — JSON-RPC stdio bridge for AI agents
-    Mcp {
-        /// Transport (currently stdio only)
-        #[arg(long, default_value = "stdio")]
-        transport: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1773,7 +1813,7 @@ enum BoardCommands {
         name: Option<String>,
     },
 
-    /// List @hack:ticket and @hack:relay work items from source
+    /// List @yah:ticket and @yah:relay work items from source
     Tickets {
         /// Path to workspace root
         #[arg(short, long, default_value = ".")]
@@ -1791,7 +1831,7 @@ enum BoardCommands {
         #[arg(short, long)]
         assignee: Option<String>,
 
-        /// Only include epics (relays with @hack:kind(epic) or inferred children)
+        /// Only include epics (relays with @yah:kind(epic) or inferred children)
         #[arg(long)]
         epics: bool,
 
@@ -1816,7 +1856,7 @@ enum BoardCommands {
     /// agents running concurrently can't collide, writes the annotation block
     /// at the top of `--file`, and sets assignee to the current agent.
     ///
-    /// Flipping: finds the ticket with ID `<ID>`, rewrites its `@hack:status`
+    /// Flipping: finds the ticket with ID `<ID>`, rewrites its `@yah:status`
     /// from `open` to `in-progress`, and sets assignee. Refuses if the ticket
     /// isn't currently Open.
     ///
@@ -1845,51 +1885,51 @@ enum BoardCommands {
         #[arg(short, long, required_unless_present = "id")]
         title: Option<String>,
 
-        /// @hack:assignee(...)
+        /// @yah:assignee(...)
         #[arg(long)]
         assignee: Option<String>,
 
-        /// @hack:status(...). Defaults to `in-progress` for tickets and `handoff` for relays.
+        /// @yah:status(...). Defaults to `in-progress` for tickets and `handoff` for relays.
         #[arg(long)]
         status: Option<String>,
 
-        /// @hack:phase(...)
+        /// @yah:phase(...)
         #[arg(long)]
         phase: Option<String>,
 
-        /// @hack:parent(...)
+        /// @yah:parent(...)
         #[arg(long)]
         parent: Option<String>,
 
-        /// @hack:severity(...) (bug-specific)
+        /// @yah:severity(...) (bug-specific)
         #[arg(long)]
         severity: Option<String>,
 
-        /// @hack:handoff("...") — repeatable. Pass multiple times for a
+        /// @yah:handoff("...") — repeatable. Pass multiple times for a
         /// file-grouped / bullet-per-chunk handoff; single use renders as
         /// a paragraph.
         #[arg(long)]
         handoff: Vec<String>,
 
-        /// @hack:next("...") — repeatable
+        /// @yah:next("...") — repeatable
         #[arg(long)]
         next: Vec<String>,
 
-        /// @hack:verify("...") — repeatable
+        /// @yah:verify("...") — repeatable
         #[arg(long)]
         verify: Vec<String>,
 
-        /// @hack:cleanup("...") — repeatable
+        /// @yah:cleanup("...") — repeatable
         #[arg(long)]
         cleanup: Vec<String>,
 
-        /// @hack:gotcha("...") — repeatable. Pre-existing breakage / traps the
+        /// @yah:gotcha("...") — repeatable. Pre-existing breakage / traps the
         /// next agent needs to know up front. Rendered above the context block
         /// in the pickup prompt.
         #[arg(long)]
         gotcha: Vec<String>,
 
-        /// @hack:assumes("...") — repeatable. Flags an unverified claim that
+        /// @yah:assumes("...") — repeatable. Flags an unverified claim that
         /// was baked into the handoff. Rendered as a risks section in the
         /// pickup prompt so the next agent knows to confirm or challenge.
         #[arg(long)]
@@ -1932,27 +1972,27 @@ enum BoardCommands {
         #[arg(short, long)]
         title: String,
 
-        /// @hack:phase(...)
+        /// @yah:phase(...)
         #[arg(long)]
         phase: Option<String>,
 
-        /// @hack:parent(...)
+        /// @yah:parent(...)
         #[arg(long)]
         parent: Option<String>,
 
-        /// @hack:severity(...) (bug-specific)
+        /// @yah:severity(...) (bug-specific)
         #[arg(long)]
         severity: Option<String>,
 
-        /// @hack:next("...") — repeatable
+        /// @yah:next("...") — repeatable
         #[arg(long)]
         next: Vec<String>,
 
-        /// @hack:verify("...") — repeatable
+        /// @yah:verify("...") — repeatable
         #[arg(long)]
         verify: Vec<String>,
 
-        /// @hack:cleanup("...") — repeatable
+        /// @yah:cleanup("...") — repeatable
         #[arg(long)]
         cleanup: Vec<String>,
 
@@ -1989,37 +2029,37 @@ enum BoardCommands {
         #[arg(short, long, default_value = ".")]
         path: PathBuf,
 
-        /// Set/overwrite @hack:assignee(...)
+        /// Set/overwrite @yah:assignee(...)
         #[arg(long)]
         assignee: Option<String>,
 
-        /// @hack:handoff("...") — repeatable. Appended to the existing block.
+        /// @yah:handoff("...") — repeatable. Appended to the existing block.
         #[arg(long)]
         handoff: Vec<String>,
 
-        /// @hack:next("...") — repeatable
+        /// @yah:next("...") — repeatable
         #[arg(long)]
         next: Vec<String>,
 
-        /// @hack:verify("...") — repeatable
+        /// @yah:verify("...") — repeatable
         #[arg(long)]
         verify: Vec<String>,
 
-        /// @hack:cleanup("...") — repeatable
+        /// @yah:cleanup("...") — repeatable
         #[arg(long)]
         cleanup: Vec<String>,
 
-        /// @hack:gotcha("...") — repeatable
+        /// @yah:gotcha("...") — repeatable
         #[arg(long)]
         gotcha: Vec<String>,
 
-        /// @hack:assumes("...") — repeatable
+        /// @yah:assumes("...") — repeatable
         #[arg(long)]
         assumes: Vec<String>,
     },
 
-    /// Archive a ticket — strips its `@hack:` annotations from source and
-    /// appends an `archived` event to `.hack/events/<shard>.jsonl`.
+    /// Archive a ticket — strips its `@yah:` annotations from source and
+    /// appends an `archived` event to `.yah/events/<shard>.jsonl`.
     ///
     /// Allowed only when the ticket is in `review`, `done`, `handoff`, or
     /// `open`. Refuses `claimed` / `in-progress` (those must transition out
@@ -2061,13 +2101,13 @@ enum BoardCommands {
     /// Parallel to `summary`, but for design rationale rather than progress.
     /// Used by /refine and /design to record "why we picked this approach"
     /// without conflating it with the inbox-promotable summary stream.
-    /// Stored in `.hack/comments/{relay}/` (or `.hack/comments/_inbox/`).
+    /// Stored in `.yah/comments/{relay}/` (or `.yah/comments/_inbox/`).
     Comment {
         /// Comment text (markdown). Use - to read from stdin.
         text: String,
 
         /// Relay (or compound ticket) the comment is attached to. If omitted,
-        /// the comment lands in `.hack/comments/_inbox/`.
+        /// the comment lands in `.yah/comments/_inbox/`.
         #[arg(short, long)]
         relay: Option<String>,
 
@@ -2080,17 +2120,17 @@ enum BoardCommands {
         path: PathBuf,
     },
 
-    /// Promote an inbox summary to a real `@hack:relay(...)` annotation.
+    /// Promote an inbox summary to a real `@yah:relay(...)` annotation.
     ///
     /// Allocates the next R-number under the workspace ID lock, writes the
     /// relay block to `--file` (must be a `.rs` file), and updates the
     /// summary's frontmatter to `promoted: true` with `relay_id` and
     /// `relay_title`. The relay lands in the Handoff column with the
-    /// summary's first paragraph as `@hack:handoff(...)`.
+    /// summary's first paragraph as `@yah:handoff(...)`.
     ///
     /// Prints the new relay ID to stdout (or `{id, file, line}` JSON with `--json`).
     Promote {
-        /// Summary ID — the filename stem under `.hack/summaries/`
+        /// Summary ID — the filename stem under `.yah/summaries/`
         /// (e.g. `summary-1776192331` or `R007-1776200000`).
         #[arg(long = "summary-id", visible_alias = "id")]
         summary_id: String,
@@ -2104,7 +2144,7 @@ enum BoardCommands {
         #[arg(short, long)]
         title: Option<String>,
 
-        /// `@hack:assignee(...)` value (e.g. `agent:claude`).
+        /// `@yah:assignee(...)` value (e.g. `agent:claude`).
         #[arg(long)]
         assignee: Option<String>,
 
@@ -2187,7 +2227,7 @@ enum BoardCommands {
     /// Same-machine `git worktree add` subtrees are auto-discovered from
     /// `git worktree list --porcelain` and don't need a registry entry.
     /// Use this command for separate clones (`local`) and SSH peers
-    /// (`remote`). Stored at `.hack/worktrees.json` (gitignored — every
+    /// (`remote`). Stored at `.yah/worktrees.json` (gitignored — every
     /// clone owns its own view of the network).
     #[command(subcommand)]
     Worktrees(WorktreesCommands),
@@ -2512,7 +2552,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::AddStructField { paths, struct_name, field, position, literal_default, output, apply } => {
+        Commands::Hack(hack_cmd) => match hack_cmd {
+        HackCommands::AddStructField { paths, struct_name, field, position, literal_default, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddStructField(AddStructFieldOp {
                 struct_name: struct_name.clone(),
@@ -2525,7 +2566,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::UpdateStructField { paths, struct_name, field, output, apply } => {
+        HackCommands::UpdateStructField { paths, struct_name, field, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateStructField(UpdateStructFieldOp {
                 struct_name: struct_name.clone(),
@@ -2536,7 +2577,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::RemoveStructField { paths, struct_name, field_name, literal_only, output, apply } => {
+        HackCommands::RemoveStructField { paths, struct_name, field_name, literal_only, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveStructField(RemoveStructFieldOp {
                 struct_name: struct_name.clone(),
@@ -2548,7 +2589,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::AddStructLiteralField { paths, struct_name, field, position, apply } => {
+        HackCommands::AddStructLiteralField { paths, struct_name, field, position, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddStructLiteralField(AddStructLiteralFieldOp {
                 struct_name: struct_name.clone(),
@@ -2560,7 +2601,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::AddEnumVariant { paths, enum_name, variant, position, output, apply } => {
+        HackCommands::AddEnumVariant { paths, enum_name, variant, position, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddEnumVariant(AddEnumVariantOp {
                 enum_name: enum_name.clone(),
@@ -2572,7 +2613,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::UpdateEnumVariant { paths, enum_name, variant, output, apply } => {
+        HackCommands::UpdateEnumVariant { paths, enum_name, variant, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateEnumVariant(UpdateEnumVariantOp {
                 enum_name: enum_name.clone(),
@@ -2583,7 +2624,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::RemoveEnumVariant { paths, enum_name, variant_name, output, apply } => {
+        HackCommands::RemoveEnumVariant { paths, enum_name, variant_name, output, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveEnumVariant(RemoveEnumVariantOp {
                 enum_name: enum_name.clone(),
@@ -2594,7 +2635,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, output.as_ref(), &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::RenameEnumVariant { paths, enum_name, old_variant, new_variant, enum_path, edit_mode, validate, apply } => {
+        HackCommands::RenameEnumVariant { paths, enum_name, old_variant, new_variant, enum_path, edit_mode, validate, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // If validate mode, run validation instead of rename
@@ -2617,7 +2658,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::RenameFunction { paths, old_name, new_name, function_path, edit_mode, validate, apply } => {
+        HackCommands::RenameFunction { paths, old_name, new_name, function_path, edit_mode, validate, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // If validate mode, run validation instead of rename
@@ -2639,7 +2680,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Rename { paths, name, to, enum_path, function_path, kind, node_type, edit_mode, validate, apply } => {
+        HackCommands::Rename { paths, name, to, enum_path, function_path, kind, node_type, edit_mode, validate, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // Parse edit mode
@@ -2822,7 +2863,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::AddMatchArm { paths, pattern, body, function, auto_detect, enum_name, apply } => {
+        HackCommands::AddMatchArm { paths, pattern, body, function, auto_detect, enum_name, apply } => {
             // Validate auto_detect requires enum_name
             if auto_detect && enum_name.is_none() {
                 anyhow::bail!("--enum-name is required when using --auto-detect");
@@ -2845,7 +2886,7 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::UpdateMatchArm { paths, pattern, body, function, apply } => {
+        HackCommands::UpdateMatchArm { paths, pattern, body, function, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateMatchArm(UpdateMatchArmOp {
                 pattern: pattern.clone(),
@@ -2856,7 +2897,7 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::RemoveMatchArm { paths, pattern, function, apply } => {
+        HackCommands::RemoveMatchArm { paths, pattern, function, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveMatchArm(RemoveMatchArmOp {
                 pattern: pattern.clone(),
@@ -2866,7 +2907,7 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::Batch { spec, apply } => {
+        HackCommands::Batch { spec, apply } => {
             let content = std::fs::read_to_string(&spec)
                 .context("Failed to read batch spec file")?;
 
@@ -2885,7 +2926,7 @@ fn main() -> Result<()> {
             execute_batch(&batch, apply, &cli.exclude)?;
         }
         
-        Commands::Find { paths, kind, node_type, name, variant, content_filter, field_name, include_comments, format } => {
+        HackCommands::Find { paths, kind, node_type, name, variant, content_filter, field_name, include_comments, format } => {
             use operations::InspectResult;
 
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
@@ -3301,7 +3342,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::AddDerive { paths, target_type, name, derives, apply } => {
+        HackCommands::AddDerive { paths, target_type, name, derives, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let derive_vec: Vec<String> = derives
                 .split(',')
@@ -3318,7 +3359,7 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::AddImplMethod { paths, target, method, position, apply } => {
+        HackCommands::AddImplMethod { paths, target, method, position, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::AddImplMethod(AddImplMethodOp {
@@ -3330,7 +3371,7 @@ fn main() -> Result<()> {
             execute_operation(&files, &op, apply, None, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::AddUse { paths, use_path, position, apply } => {
+        HackCommands::AddUse { paths, use_path, position, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::AddUseStatement(AddUseStatementOp {
@@ -3341,7 +3382,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only, default_rest, base, call, arg, arg_position, call_type, content_filter, position, apply } => {
+        HackCommands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only, default_rest, base, call, arg, arg_position, call_type, content_filter, position, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // Handle --call operations first (add argument to function/method calls)
@@ -3605,7 +3646,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Remove { paths, name, field_name, variant, method, derive, match_arm, function, doc_comment, kind, node_type, literal_only, call, arg_index, call_type, content_filter, apply } => {
+        HackCommands::Remove { paths, name, field_name, variant, method, derive, match_arm, function, doc_comment, kind, node_type, literal_only, call, arg_index, call_type, content_filter, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // Handle --call operations first (remove argument from function/method calls)
@@ -3753,7 +3794,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Update { paths, name, field, field_name, field_type, variant, match_arm, body, function, doc_comment, kind, node_type, call, arg_index, arg, call_type, content_filter, apply } => {
+        HackCommands::Update { paths, name, field, field_name, field_type, variant, match_arm, body, function, doc_comment, kind, node_type, call, arg_index, arg, call_type, content_filter, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // Handle --call operations first (update argument in function/method calls)
@@ -3898,22 +3939,22 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::History { limit } => {
+        HackCommands::History { limit } => {
             let state_dir = get_state_dir(cli.local_state)?;
             show_history(limit, &state_dir)?;
         }
 
-        Commands::Revert { run_id, force } => {
+        HackCommands::Revert { run_id, force } => {
             let state_dir = get_state_dir(cli.local_state)?;
             revert_run(&run_id, force, &state_dir)?;
         }
 
-        Commands::Clean { keep_days } => {
+        HackCommands::Clean { keep_days } => {
             let state_dir = get_state_dir(cli.local_state)?;
             clean_old_state(keep_days, &state_dir)?;
         }
 
-        Commands::Transform { paths, node_type, name, content_filter, action, with, apply } => {
+        HackCommands::Transform { paths, node_type, name, content_filter, action, with, apply } => {
             use operations::{TransformOp, TransformAction};
 
             // Parse the action
@@ -3938,7 +3979,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::AddDocComment { paths, target_type, name, doc_comment, style, apply } => {
+        HackCommands::AddDocComment { paths, target_type, name, doc_comment, style, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // Parse style
@@ -3955,7 +3996,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::UpdateDocComment { paths, target_type, name, doc_comment, apply } => {
+        HackCommands::UpdateDocComment { paths, target_type, name, doc_comment, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::UpdateDocComment(UpdateDocCommentOp {
@@ -3967,7 +4008,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::RemoveDocComment { paths, target_type, name, apply } => {
+        HackCommands::RemoveDocComment { paths, target_type, name, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::RemoveDocComment(RemoveDocCommentOp {
@@ -3978,7 +4019,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        Commands::FindField { paths, field_name, summary } => {
+        HackCommands::FindField { paths, field_name, summary } => {
             use operations::{FieldLocation, FieldContext};
 
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
@@ -4070,6 +4111,8 @@ fn main() -> Result<()> {
             }
         }
 
+        }
+
         Commands::Arch(arch_cmd) => {
             handle_arch_command(arch_cmd)?;
         }
@@ -4084,6 +4127,116 @@ fn main() -> Result<()> {
             }
             handle_mcp_command()?;
         }
+
+        Commands::Migrate { path, apply } => {
+            handle_migrate_command(&path, apply)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_migrate_command(workspace: &Path, apply: bool) -> Result<()> {
+    use std::collections::BTreeMap;
+
+    let workspace = std::fs::canonicalize(workspace)
+        .with_context(|| format!("workspace not found: {}", workspace.display()))?;
+
+    let scan_exts = [
+        "rs", "ts", "tsx", "js", "jsx", "md", "toml", "yaml", "yml",
+    ];
+    let scan_named = ["CLAUDE.md", "README.md", "AGENTS.md"];
+
+    let mut changes: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    for entry in WalkDir::new(&workspace)
+        .into_iter()
+        .filter_entry(|e| {
+            let n = e.file_name().to_string_lossy();
+            !(n == "target"
+                || n == "node_modules"
+                || n == ".git"
+                || n == ".yah"
+                || n == ".hack")
+        })
+        .filter_map(|r| r.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let p = entry.path();
+        let ext_ok = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| scan_exts.contains(&e))
+            .unwrap_or(false);
+        let name_ok = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| scan_named.contains(&n))
+            .unwrap_or(false);
+        if !ext_ok && !name_ok {
+            continue;
+        }
+
+        // Constructed from parts so this tool stays migratable from a future
+        // legacy prefix without self-rewriting. Don't inline the literal.
+        let from = format!("@{}:", "hack");
+        let to = format!("@{}:", "yah");
+        let Ok(content) = std::fs::read_to_string(p) else {
+            continue;
+        };
+        let count = content.matches(from.as_str()).count();
+        if count == 0 {
+            continue;
+        }
+        changes.insert(p.to_path_buf(), count);
+        if apply {
+            let new = content.replace(from.as_str(), to.as_str());
+            std::fs::write(p, new)
+                .with_context(|| format!("failed to write {}", p.display()))?;
+        }
+    }
+
+    let total: usize = changes.values().sum();
+    let action = if apply { "rewrote" } else { "would rewrite" };
+    println!(
+        "{} `@{}:` → `@{}:` ({} occurrences across {} files)",
+        action,
+        "hack",
+        "yah",
+        total,
+        changes.len()
+    );
+    for (path, n) in &changes {
+        let rel = path.strip_prefix(&workspace).unwrap_or(path);
+        println!("  {:>4}  {}", n, rel.display());
+    }
+
+    let hack_dir = workspace.join(".hack");
+    let yah_dir = workspace.join(".yah");
+    if hack_dir.exists() {
+        if yah_dir.exists() {
+            eprintln!(
+                "\n⚠ both .hack/ and .yah/ exist at {} — refusing to merge automatically.\n  \
+                 Inspect both, move what you need into .yah/, then `rm -rf .hack/`.",
+                workspace.display()
+            );
+        } else if apply {
+            std::fs::rename(&hack_dir, &yah_dir).with_context(|| {
+                format!(
+                    "failed to rename {} → {}",
+                    hack_dir.display(),
+                    yah_dir.display()
+                )
+            })?;
+            println!("\nrenamed .hack/ → .yah/");
+        } else {
+            println!("\nwould rename .hack/ → .yah/");
+        }
+    }
+
+    if !apply {
+        println!("\n(dry-run) re-run with --apply to write changes");
     }
 
     Ok(())
@@ -4145,7 +4298,8 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                         .env("HACK_WORKSPACE", workspace.to_string_lossy().as_ref())
                         .env("HACK_PORT", http_port.to_string())
                         .env("HACK_UDP_PORT", udp.to_string())
-                        .env("RS_HACK_BIN", std::env::current_exe().unwrap_or_else(|_| "rs-hack".into()))
+                        .env("YAH_BIN", std::env::current_exe().unwrap_or_else(|_| "yah".into()))
+                        .env("RS_HACK_BIN", std::env::current_exe().unwrap_or_else(|_| "yah".into()))
                         .status();
 
                     match status {
@@ -4511,7 +4665,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
             if let Some(ref rid) = comment.relay {
                 eprintln!("Attached to relay: {}", rid);
             } else {
-                eprintln!("No relay attached (.hack/comments/_inbox)");
+                eprintln!("No relay attached (.yah/comments/_inbox)");
             }
             println!("{}", comment.id);
         }
@@ -4536,7 +4690,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
             } else {
                 println!("{}", res.relay_id);
                 eprintln!(
-                    "{}:{}  ← @hack:relay({}, {:?})",
+                    "{}:{}  ← @yah:relay({}, {:?})",
                     res.file.display(), res.line, res.relay_id, res.relay_title
                 );
                 eprintln!("summary frontmatter updated: {}", res.summary_file.display());
@@ -4980,7 +5134,7 @@ fn render_archived_markdown(a: &arch::archive::ArchivedTicket) -> String {
     let shard = t.id.split_once('-').map(|(p, _)| p).unwrap_or(t.id.as_str());
     let _ = writeln!(
         o,
-        "---\n_Reconstructed from `.hack/events/{}.jsonl`. Live board does not show archived tickets._",
+        "---\n_Reconstructed from `.yah/events/{}.jsonl`. Live board does not show archived tickets._",
         shard
     );
     o
@@ -4993,9 +5147,9 @@ fn fuzzy_suggest(needle: &str, board: &arch::ticket::TicketBoard) -> Vec<String>
     let needle_up = needle.to_uppercase();
     let mut candidates: Vec<String> =
         board.tickets.iter().map(|t| t.id.clone()).collect();
-    // Pull archived relay/ticket IDs from `.hack/events/*.jsonl` so a typo
+    // Pull archived relay/ticket IDs from `.yah/events/*.jsonl` so a typo
     // for an archived ID still gets a useful suggestion.
-    if let Ok(entries) = std::fs::read_dir(".hack/events") {
+    if let Ok(entries) = std::fs::read_dir(".yah/events") {
         for e in entries.flatten() {
             let p = e.path();
             if p.extension().and_then(|s| s.to_str()) == Some("jsonl") {
@@ -5055,7 +5209,7 @@ fn handle_prompt(name: Option<&str>) -> Result<()> {
     let prompts: &[(&str, &str, &str)] = &[
         ("refine", TPL_REFINE, "Turn a multi-phase plan into a relay + tickets"),
         ("handoff", TPL_HANDOFF, "Write a structured relay for the next agent"),
-        ("comment", TPL_COMMENT, "Log a progress summary to .hack/summaries/"),
+        ("comment", TPL_COMMENT, "Log a progress summary to .yah/summaries/"),
     ];
 
     match name {
@@ -5407,7 +5561,7 @@ struct ClaimArgs {
     json: bool,
 }
 
-/// Holds an exclusive lock on `.hack/id.lock` for the duration of an ID claim.
+/// Holds an exclusive lock on `.yah/id.lock` for the duration of an ID claim.
 /// Uses create_new so the first process wins atomically; later ones busy-wait
 /// up to ~5 seconds with exponential backoff.
 struct IdLock {
@@ -5416,7 +5570,7 @@ struct IdLock {
 
 impl IdLock {
     fn acquire(workspace: &Path) -> Result<Self> {
-        let hack_dir = workspace.join(".hack");
+        let hack_dir = workspace.join(".yah");
         std::fs::create_dir_all(&hack_dir)?;
         let path = hack_dir.join("id.lock");
         let start = std::time::Instant::now();
@@ -5478,7 +5632,7 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
     }
     // Only .rs files are scanned by the extractor today — writing an
     // annotation to a non-Rust file silently drops the ticket off the board.
-    // See @hack:ticket(R001-T2) in rs-hack-arch/src/extract.rs for the tracked
+    // See @yah:ticket(R001-T2) in rs-hack-arch/src/extract.rs for the tracked
     // fix (AnnotationTarget::File + per-language comment prefixes).
     match target.extension().and_then(|e| e.to_str()) {
         Some("rs") => {}
@@ -5495,7 +5649,7 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
     }
     let target = std::fs::canonicalize(&target).unwrap_or(target);
 
-    // Normalize kind. `epic` is shorthand for "relay with @hack:kind(epic)".
+    // Normalize kind. `epic` is shorthand for "relay with @yah:kind(epic)".
     let kind = args.kind.to_lowercase();
     let (prefix, pad, is_relay, force_kind) = match kind.as_str() {
         "relay" | "r" => ("R", 3, true, None),
@@ -5511,7 +5665,7 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
 
     // Non-relay kinds must live under a relay. Bare T01 / F02 / B01 IDs
     // collide with the compound ID numbering space when scanners filter by
-    // `T` prefix, and their per-id shards (`.hack/events/T01.jsonl`) get
+    // `T` prefix, and their per-id shards (`.yah/events/T01.jsonl`) get
     // scrambled when another orphan T01 lands in a sibling workspace.
     // Relays coordinate work; tasks/features/bugs are always *inside* one.
     if !is_relay && args.parent.is_none() {
@@ -5547,13 +5701,13 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
         Err(e) => eprintln!("warning: sibling enumeration failed: {}", e),
     }
 
-    // Event shards are append-only — `.hack/events/<shard>.jsonl` filenames
+    // Event shards are append-only — `.yah/events/<shard>.jsonl` filenames
     // are a permanent floor of every relay-id ever allocated locally. Seeding
     // these prevents reissuing an R-id whose bare relay annotation got
     // clobbered (the relay's children may also be gone, leaving nothing in
     // source to mark the slot as taken). Compound sub-tickets share their
     // parent's shard, so this set is exactly the set of bare R-ids.
-    let events_dir = workspace.join(".hack").join("events");
+    let events_dir = workspace.join(".yah").join("events");
     if let Ok(entries) = std::fs::read_dir(&events_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
@@ -5610,7 +5764,7 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
         format!("{}{:0pad$}", prefix, existing_max + 1, pad = pad)
     };
 
-    // Build the @hack: annotation lines.
+    // Build the @yah: annotation lines.
     // Epics: status is derived from children, so no default line is written
     // (leave `status` blank so the annotation omits it entirely — an explicit
     // user-provided --status still gets written for backwards compat).
@@ -5852,7 +6006,7 @@ fn handle_claim_existing(id: &str, path: &Path, assignee: &str) -> Result<()> {
         .with_context(|| format!("Failed to read {}", target_file.display()))?;
     let block = locate_ticket_block(&content, id).ok_or_else(|| {
         anyhow::anyhow!(
-            "Could not locate @hack:ticket/@hack:relay({}, ...) decl in {}",
+            "Could not locate @yah:ticket/@yah:relay({}, ...) decl in {}",
             id,
             target_file.display()
         )
@@ -5906,7 +6060,7 @@ fn bucket_to_status(bucket: &str) -> Option<&'static str> {
     }
 }
 
-/// Stringify a parsed TicketStatus back to the wire form used in @hack:status(...).
+/// Stringify a parsed TicketStatus back to the wire form used in @yah:status(...).
 fn ticket_status_str(s: &arch::ticket::TicketStatus) -> &'static str {
     use arch::ticket::TicketStatus as S;
     match s {
@@ -6018,7 +6172,7 @@ fn handle_move(args: MoveArgs) -> Result<()> {
 
     let block = locate_ticket_block(&content, &args.id).ok_or_else(|| {
         anyhow::anyhow!(
-            "Could not locate @hack:ticket/@hack:relay({}, ...) decl in {}",
+            "Could not locate @yah:ticket/@yah:relay({}, ...) decl in {}",
             args.id,
             target_file.display()
         )
@@ -6052,22 +6206,22 @@ fn handle_move(args: MoveArgs) -> Result<()> {
 
     let mut appended = Vec::<String>::new();
     for h in &args.handoff {
-        appended.push(format!("//! @hack:handoff({:?})", h));
+        appended.push(format!("//! @yah:handoff({:?})", h));
     }
     for n in &args.next {
-        appended.push(format!("//! @hack:next({:?})", n));
+        appended.push(format!("//! @yah:next({:?})", n));
     }
     for v in &args.verify {
-        appended.push(format!("//! @hack:verify({:?})", v));
+        appended.push(format!("//! @yah:verify({:?})", v));
     }
     for c in &args.cleanup {
-        appended.push(format!("//! @hack:cleanup({:?})", c));
+        appended.push(format!("//! @yah:cleanup({:?})", c));
     }
     for g in &args.gotcha {
-        appended.push(format!("//! @hack:gotcha({:?})", g));
+        appended.push(format!("//! @yah:gotcha({:?})", g));
     }
     for a in &args.assumes {
-        appended.push(format!("//! @hack:assumes({:?})", a));
+        appended.push(format!("//! @yah:assumes({:?})", a));
     }
     if !appended.is_empty() {
         new_content = append_lines_to_block(&new_content, &block, &appended);
@@ -6101,7 +6255,7 @@ fn handle_move(args: MoveArgs) -> Result<()> {
     Ok(())
 }
 
-/// Strip `@hack:` annotation lines from source and append an `archived`
+/// Strip `@yah:` annotation lines from source and append an `archived`
 /// event to the shard. Same effect as the kanban UI's archive button —
 /// available as a CLI verb so an agent finishing a review can archive
 /// without needing the server's port.
@@ -6122,7 +6276,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
             // "not found".
             if arch::archive::lookup(&workspace, id).is_some() {
                 anyhow::anyhow!(
-                    "Ticket '{}' is already archived (snapshot in .hack/events/). \
+                    "Ticket '{}' is already archived (snapshot in .yah/events/). \
                      Run `rs-hack board show {}` to see the last-known state.",
                     id, id
                 )
@@ -6167,12 +6321,12 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
 
     let block = locate_ticket_block(&content, id).ok_or_else(|| {
         anyhow::anyhow!(
-            "Could not locate @hack:ticket/@hack:relay({}, ...) decl in {}",
+            "Could not locate @yah:ticket/@yah:relay({}, ...) decl in {}",
             id, target_file.display()
         )
     })?;
 
-    // Strip every `//[!/] @hack:` line within the block (1-indexed inclusive).
+    // Strip every `//[!/] @yah:` line within the block (1-indexed inclusive).
     // Leaves `@arch:` lines and surrounding non-hack doc lines untouched —
     // matches stripHackAnnotations in hack-board/src/server.ts.
     let mut removed: Vec<String> = Vec::new();
@@ -6182,7 +6336,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
         if !(t.starts_with("//!") || t.starts_with("///")) {
             return false;
         }
-        t[3..].trim_start().starts_with("@hack:")
+        t[3..].trim_start().starts_with("@yah:")
     };
     for (i, line) in content.split('\n').enumerate() {
         let line_num = i + 1;
@@ -6194,7 +6348,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
     }
     if removed.is_empty() {
         anyhow::bail!(
-            "No @hack: annotations found at {}:{}",
+            "No @yah: annotations found at {}:{}",
             target_file.display(),
             block.decl_line
         );
@@ -6224,14 +6378,14 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
         "line": block.decl_line,
     });
     arch::archive::append_event(&workspace, shard, &event)
-        .with_context(|| format!("Failed to append archived event to .hack/events/{shard}.jsonl"))?;
+        .with_context(|| format!("Failed to append archived event to .yah/events/{shard}.jsonl"))?;
 
     let rel_file: PathBuf = target_file
         .strip_prefix(&workspace)
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|_| target_file.clone());
     eprintln!(
-        "{}:{}  archived ({} line(s) stripped, snapshot in .hack/events/{}.jsonl)",
+        "{}:{}  archived ({} line(s) stripped, snapshot in .yah/events/{}.jsonl)",
         rel_file.display(),
         block.decl_line,
         removed.len(),
@@ -6244,7 +6398,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
 
 #[derive(Debug, Clone)]
 struct TicketBlock {
-    /// 1-indexed: the `@hack:ticket(ID,...)` or `@hack:relay(ID,...)` line.
+    /// 1-indexed: the `@yah:ticket(ID,...)` or `@yah:relay(ID,...)` line.
     decl_line: usize,
     /// 1-indexed: first line of the contiguous @hack/@arch annotation run.
     start_line: usize,
@@ -6252,18 +6406,18 @@ struct TicketBlock {
     end_line: usize,
 }
 
-/// Find the contiguous run of `//! @hack:...` / `//! @arch:...` lines that
+/// Find the contiguous run of `//! @yah:...` / `//! @arch:...` lines that
 /// belongs to the ticket or relay with the given ID. Runs are separated by
 /// blank `//!` lines (as written by `insert_module_doc_block`), by a
-/// non-doc-comment line, or by another `@hack:ticket(...)` / `@hack:relay(...)`
+/// non-doc-comment line, or by another `@yah:ticket(...)` / `@yah:relay(...)`
 /// declaration.
 fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
     let lines: Vec<&str> = content.split('\n').collect();
 
-    let decl_ticket = format!("@hack:ticket({},", id);
-    let decl_relay = format!("@hack:relay({},", id);
-    let decl_ticket_sp = format!("@hack:ticket({} ,", id);
-    let decl_relay_sp = format!("@hack:relay({} ,", id);
+    let decl_ticket = format!("@yah:ticket({},", id);
+    let decl_relay = format!("@yah:relay({},", id);
+    let decl_ticket_sp = format!("@yah:ticket({} ,", id);
+    let decl_relay_sp = format!("@yah:relay({} ,", id);
 
     let is_this_decl = |line: &str| -> bool {
         line.contains(&decl_ticket)
@@ -6272,7 +6426,7 @@ fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
             || line.contains(&decl_relay_sp)
     };
     let is_any_decl = |line: &str| -> bool {
-        line.contains("@hack:ticket(") || line.contains("@hack:relay(")
+        line.contains("@yah:ticket(") || line.contains("@yah:relay(")
     };
 
     let is_doc = |i: usize| -> bool {
@@ -6283,10 +6437,10 @@ fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
         let t = lines[i].trim();
         t == "//!" || t == "///"
     };
-    let is_hack_or_arch = |i: usize| -> bool {
+    let is_yah_or_arch = |i: usize| -> bool {
         let t = lines[i].trim_start();
         (t.starts_with("//!") || t.starts_with("///"))
-            && (t.contains("@hack:") || t.contains("@arch:"))
+            && (t.contains("@yah:") || t.contains("@arch:"))
     };
 
     let decl_idx = (0..lines.len()).find(|&i| is_doc(i) && is_this_decl(lines[i]))?;
@@ -6298,10 +6452,10 @@ fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
         if !is_doc(prev) || is_blank_doc(prev) {
             break;
         }
-        if prev != decl_idx && is_hack_or_arch(prev) && is_any_decl(lines[prev]) {
+        if prev != decl_idx && is_yah_or_arch(prev) && is_any_decl(lines[prev]) {
             break;
         }
-        if !is_hack_or_arch(prev) {
+        if !is_yah_or_arch(prev) {
             // Non-annotation doc text — stop.
             break;
         }
@@ -6315,10 +6469,10 @@ fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
         if !is_doc(nxt) || is_blank_doc(nxt) {
             break;
         }
-        if is_hack_or_arch(nxt) && is_any_decl(lines[nxt]) {
+        if is_yah_or_arch(nxt) && is_any_decl(lines[nxt]) {
             break;
         }
-        if !is_hack_or_arch(nxt) {
+        if !is_yah_or_arch(nxt) {
             break;
         }
         end = nxt;
@@ -6331,7 +6485,7 @@ fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
     })
 }
 
-/// Rewrite `@hack:<key>(<value>)` inside `block` if present; otherwise insert
+/// Rewrite `@yah:<key>(<value>)` inside `block` if present; otherwise insert
 /// it immediately after the declaration line. When `replace` is false and the
 /// key already exists, the value is left alone.
 fn set_or_insert_annotation(
@@ -6342,7 +6496,7 @@ fn set_or_insert_annotation(
     replace: bool,
 ) -> String {
     let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
-    let needle = format!("@hack:{}(", key);
+    let needle = format!("@yah:{}(", key);
 
     for i in (block.start_line - 1)..block.end_line {
         let trimmed = lines[i].trim_start();
@@ -6360,7 +6514,7 @@ fn set_or_insert_annotation(
         };
         if after.trim_start().starts_with(&needle) {
             if replace {
-                lines[i] = format!("{}{} @hack:{}({})", indent, sigil, key, value);
+                lines[i] = format!("{}{} @yah:{}({})", indent, sigil, key, value);
             }
             return lines.join("\n");
         }
@@ -6370,7 +6524,7 @@ fn set_or_insert_annotation(
     // indentation / doc-comment sigil.
     let decl_idx = block.decl_line - 1;
     let prefix = extract_doc_prefix(&lines[decl_idx]);
-    let new_line = format!("{} @hack:{}({})", prefix, key, value);
+    let new_line = format!("{} @yah:{}({})", prefix, key, value);
     lines.insert(decl_idx + 1, new_line);
     lines.join("\n")
 }
@@ -6444,44 +6598,44 @@ fn build_annotation_block(
     let mut lines = Vec::<String>::new();
     let head = if is_relay { "relay" } else { "ticket" };
     lines.push(format!(
-        "//! @hack:{}({}, {:?})",
+        "//! @yah:{}({}, {:?})",
         head, id, title
     ));
     if let Some(k) = kind_override {
-        lines.push(format!("//! @hack:kind({})", k));
+        lines.push(format!("//! @yah:kind({})", k));
     }
     if let Some(s) = status {
-        lines.push(format!("//! @hack:status({})", s));
+        lines.push(format!("//! @yah:status({})", s));
     }
     if let Some(a) = assignee {
-        lines.push(format!("//! @hack:assignee({})", a));
+        lines.push(format!("//! @yah:assignee({})", a));
     }
     if let Some(p) = phase {
-        lines.push(format!("//! @hack:phase({})", p));
+        lines.push(format!("//! @yah:phase({})", p));
     }
     if let Some(p) = parent {
-        lines.push(format!("//! @hack:parent({})", p));
+        lines.push(format!("//! @yah:parent({})", p));
     }
     if let Some(s) = severity {
-        lines.push(format!("//! @hack:severity({})", s));
+        lines.push(format!("//! @yah:severity({})", s));
     }
     for h in handoff {
-        lines.push(format!("//! @hack:handoff({:?})", h));
+        lines.push(format!("//! @yah:handoff({:?})", h));
     }
     for n in next {
-        lines.push(format!("//! @hack:next({:?})", n));
+        lines.push(format!("//! @yah:next({:?})", n));
     }
     for v in verify {
-        lines.push(format!("//! @hack:verify({:?})", v));
+        lines.push(format!("//! @yah:verify({:?})", v));
     }
     for c in cleanup {
-        lines.push(format!("//! @hack:cleanup({:?})", c));
+        lines.push(format!("//! @yah:cleanup({:?})", c));
     }
     for g in gotcha {
-        lines.push(format!("//! @hack:gotcha({:?})", g));
+        lines.push(format!("//! @yah:gotcha({:?})", g));
     }
     for a in assumes {
-        lines.push(format!("//! @hack:assumes({:?})", a));
+        lines.push(format!("//! @yah:assumes({:?})", a));
     }
     for s in see {
         lines.push(format!("//! @arch:see({})", s));

@@ -284,14 +284,14 @@ impl ToolRegistry {
 
                 // ============================================================
                 // HACK-BOARD TOOLS (5) - source-embedded kanban / SDLC
-                // Tickets and relays live as @hack: doc-comment annotations in
+                // Tickets and relays live as @yah: doc-comment annotations in
                 // Rust source. Board state is branch-scoped; moving a ticket
                 // is a source edit and shows up in `git diff`. Bootstrap a
                 // project with `rs-hack board init`.
                 // ============================================================
                 Tool {
                     name: "board_status",
-                    description: "One-shot board snapshot for planning. Returns per-column counts, tickets actively held (with owners — off-limits for refactor per Rule05), the handoff queue with one-line next steps, epic child rollups (done/active/handoff/open), pending todos from .hack/todo.md, and a smell signal for `disappeared` tickets in the event log. USE BEFORE picking up work or planning a new relay — it's the fastest orientation on 'what's in flight'.",
+                    description: "One-shot board snapshot for planning. Returns per-column counts, tickets actively held (with owners — off-limits for refactor per Rule05), the handoff queue with one-line next steps, epic child rollups (done/active/handoff/open), pending todos from .yah/todo.md, and a smell signal for `disappeared` tickets in the event log. USE BEFORE picking up work or planning a new relay — it's the fastest orientation on 'what's in flight'.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -302,7 +302,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "board_tickets",
-                    description: "List tickets/relays, or synthesize a pickup prompt. Default mode dumps all @hack: items grouped by column. Use `prompt` to get a continuation prompt for a specific ticket — the output includes the embedded SDLC playbook (Rule01, Col01, Rule03, Rule04, Rule02) so a picking-up agent sees the rules before acting. Use `relay_doc` for a markdown doc of a relay. Filter with `status` / `assignee` / `epics_only`.",
+                    description: "List tickets/relays, or synthesize a pickup prompt. Default mode dumps all @yah: items grouped by column. Use `prompt` to get a continuation prompt for a specific ticket — the output includes the embedded SDLC playbook (Rule01, Col01, Rule03, Rule04, Rule02) so a picking-up agent sees the rules before acting. Use `relay_doc` for a markdown doc of a relay. Filter with `status` / `assignee` / `epics_only`.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -310,7 +310,7 @@ impl ToolRegistry {
                             "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format for list mode (default: markdown)"},
                             "status": {"type": "string", "enum": ["open", "claimed", "in-progress", "handoff", "review", "done"], "description": "Filter by column/status"},
                             "assignee": {"type": "string", "description": "Filter by assignee (e.g., 'agent:claude')"},
-                            "epics_only": {"type": "boolean", "description": "Only include epics (relays with @hack:kind(epic) or inferred children)"},
+                            "epics_only": {"type": "boolean", "description": "Only include epics (relays with @yah:kind(epic) or inferred children)"},
                             "prompt": {"type": "string", "description": "Synthesize a continuation prompt for this ticket ID (e.g., 'R001'). Includes embedded SDLC playbook."},
                             "relay_doc": {"type": "string", "description": "Synthesize a relay markdown doc for this ticket ID"}
                         }
@@ -329,7 +329,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "board_claim",
-                    description: "Atomically claim the next ticket / relay ID and write the @hack: annotation block. ALWAYS use this instead of picking an ID yourself — the command takes a file lock and scans source for the highest existing ID, so two agents running concurrently can't collide (SDLC Rule02). The annotation is written as a module-level doc-comment (`//! @hack:…`) at the top of `file`. Returns the claimed ID (e.g., 'R008', 'F03'). Set `json` for structured output with id/file/line.",
+                    description: "Atomically claim the next ticket / relay ID and write the @yah: annotation block. ALWAYS use this instead of picking an ID yourself — the command takes a file lock and scans source for the highest existing ID, so two agents running concurrently can't collide (SDLC Rule02). The annotation is written as a module-level doc-comment (`//! @yah:…`) at the top of `file`. Returns the claimed ID (e.g., 'R008', 'F03'). Set `json` for structured output with id/file/line.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -337,15 +337,15 @@ impl ToolRegistry {
                             "file": {"type": "string", "description": "Target source file where the annotation will be written"},
                             "title": {"type": "string", "description": "Short human-readable title"},
                             "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
-                            "assignee": {"type": "string", "description": "@hack:assignee(...) value (e.g., 'agent:claude')"},
+                            "assignee": {"type": "string", "description": "@yah:assignee(...) value (e.g., 'agent:claude')"},
                             "status": {"type": "string", "enum": ["open", "claimed", "in-progress", "handoff", "review", "done"], "description": "Initial status. Defaults to 'in-progress' for tickets, 'handoff' for relays."},
-                            "phase": {"type": "string", "description": "@hack:phase(...) — e.g., 'P1'"},
-                            "parent": {"type": "string", "description": "@hack:parent(RXXX) — parent relay ID (only set for epic children)"},
-                            "severity": {"type": "string", "description": "@hack:severity(...) — bug-specific"},
-                            "handoff_msg": {"type": "string", "description": "@hack:handoff(\"...\") — message describing what's done and what remains"},
-                            "next": {"type": "array", "items": {"type": "string"}, "description": "@hack:next(\"...\") — concrete next steps (repeatable)"},
-                            "verify": {"type": "array", "items": {"type": "string"}, "description": "@hack:verify(\"...\") — verification commands (repeatable)"},
-                            "cleanup": {"type": "array", "items": {"type": "string"}, "description": "@hack:cleanup(\"...\") — deferred cleanup items (repeatable)"},
+                            "phase": {"type": "string", "description": "@yah:phase(...) — e.g., 'P1'"},
+                            "parent": {"type": "string", "description": "@yah:parent(RXXX) — parent relay ID (only set for epic children)"},
+                            "severity": {"type": "string", "description": "@yah:severity(...) — bug-specific"},
+                            "handoff_msg": {"type": "string", "description": "@yah:handoff(\"...\") — message describing what's done and what remains"},
+                            "next": {"type": "array", "items": {"type": "string"}, "description": "@yah:next(\"...\") — concrete next steps (repeatable)"},
+                            "verify": {"type": "array", "items": {"type": "string"}, "description": "@yah:verify(\"...\") — verification commands (repeatable)"},
+                            "cleanup": {"type": "array", "items": {"type": "string"}, "description": "@yah:cleanup(\"...\") — deferred cleanup items (repeatable)"},
                             "see": {"type": "array", "items": {"type": "string"}, "description": "@arch:see(path) — architecture doc links (repeatable)"},
                             "json": {"type": "boolean", "description": "Emit {id, file, line} JSON instead of just the ID"}
                         },
@@ -354,7 +354,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "board_summary",
-                    description: "Write a freeform progress summary to the hack-board inbox (`.hack/summaries/*.md`). Use for ad-hoc notes that aren't a full handoff — what you just did, what's blocking, gotchas for the next agent. A summary with a `ticket` attaches to that ticket's card; otherwise it lands in the board Inbox. Use this instead of creating a stale ticket annotation just to record progress.",
+                    description: "Write a freeform progress summary to the hack-board inbox (`.yah/summaries/*.md`). Use for ad-hoc notes that aren't a full handoff — what you just did, what's blocking, gotchas for the next agent. A summary with a `ticket` attaches to that ticket's card; otherwise it lands in the board Inbox. Use this instead of creating a stale ticket annotation just to record progress.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -377,18 +377,29 @@ impl ToolRegistry {
     pub async fn call(&self, name: &str, arguments: Value) -> Result<String> {
         debug!("Executing tool: {} with args: {:?}", name, arguments);
 
-        // Map tool name to rs-hack command and build arguments
+        // Map tool name to yah command and build arguments
         let (command, args) = self.build_command(name, &arguments)?;
 
-        debug!("Running: rs-hack {} {}", command, args.join(" "));
+        // Resolve sibling `yah` binary — same dir as the running mcp host. Falls
+        // back to PATH lookup if current_exe isn't resolvable.
+        let yah_bin = std::env::current_exe()
+            .ok()
+            .and_then(|mut p| {
+                p.set_file_name(if cfg!(windows) { "yah.exe" } else { "yah" });
+                p.exists().then_some(p)
+            })
+            .map(|p| p.into_os_string())
+            .unwrap_or_else(|| std::ffi::OsString::from("yah"));
 
-        // Execute rs-hack command (command may be multi-word, e.g. "arch context")
+        debug!("Running: {} {} {}", yah_bin.to_string_lossy(), command, args.join(" "));
+
+        // Execute yah subcommand (`command` may be multi-word, e.g. "arch context")
         let cmd_parts: Vec<&str> = command.split_whitespace().collect();
-        let output = Command::new("rs-hack")
+        let output = Command::new(&yah_bin)
             .args(&cmd_parts)
             .args(&args)
             .output()
-            .map_err(|e| anyhow!("Failed to run rs-hack: {}. Is it installed?", e))?;
+            .map_err(|e| anyhow!("Failed to run yah: {}. Is it installed?", e))?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);

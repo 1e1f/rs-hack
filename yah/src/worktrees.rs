@@ -2,7 +2,7 @@
 //!
 //! See architecture/multi-worktree-sync.md. The registry lets a workspace
 //! enumerate other clones / worktrees / SSH peers that may also be allocating
-//! `@hack:` IDs, so `board claim` can union their existing IDs into its
+//! `@yah:` IDs, so `board claim` can union their existing IDs into its
 //! `max(id) + 1` scan and avoid same-machine and cross-machine collisions.
 //!
 //! Three sibling kinds:
@@ -11,9 +11,9 @@
 //!   Auto-discovered from `git worktree list --porcelain`; never written to
 //!   the registry file.
 //! - **`local`** — a separate clone of the same repo at a different path on
-//!   this machine. Listed in `.hack/worktrees.json`.
+//!   this machine. Listed in `.yah/worktrees.json`.
 //! - **`remote`** — another machine reachable via SSH. Listed in
-//!   `.hack/worktrees.json` with `{host, path}`. Queried via
+//!   `.yah/worktrees.json` with `{host, path}`. Queried via
 //!   `ssh <host> rs-hack board tickets -f json -p <path>`.
 //!
 //! The registry file is gitignored — every clone owns its own view.
@@ -48,7 +48,7 @@ impl Sibling {
     }
 }
 
-/// Contents of `.hack/worktrees.json`.
+/// Contents of `.yah/worktrees.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Registry {
     #[serde(default)]
@@ -57,7 +57,7 @@ pub struct Registry {
 
 impl Registry {
     pub fn path(workspace: &Path) -> PathBuf {
-        workspace.join(".hack").join("worktrees.json")
+        workspace.join(".yah").join("worktrees.json")
     }
 
     /// Load the registry. Returns an empty registry if the file doesn't exist.
@@ -73,7 +73,7 @@ impl Registry {
         Ok(reg)
     }
 
-    /// Save (pretty-printed). Creates `.hack/` if needed.
+    /// Save (pretty-printed). Creates `.yah/` if needed.
     pub fn save(&self, workspace: &Path) -> Result<()> {
         let p = Self::path(workspace);
         if let Some(parent) = p.parent() {
@@ -162,7 +162,7 @@ pub fn enumerate(workspace: &Path) -> Result<Vec<Sibling>> {
     Ok(out)
 }
 
-/// Query a sibling for the IDs of every `@hack:ticket` / `@hack:relay`
+/// Query a sibling for the IDs of every `@yah:ticket` / `@yah:relay`
 /// declaration in its source. Local/git siblings are scanned via subprocess
 /// (`rs-hack board tickets -f json -p <path>`); remote siblings via
 /// `ssh <host> rs-hack board tickets -f json -p <path>`.
@@ -173,7 +173,7 @@ pub fn scan_sibling_ids(sib: &Sibling) -> std::result::Result<Vec<String>, Strin
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.to_str().map(String::from))
-        .unwrap_or_else(|| "rs-hack".to_string());
+        .unwrap_or_else(|| "yah".to_string());
 
     let output = match sib {
         Sibling::Local { path } | Sibling::Git { path } => Command::new(&exe)
@@ -183,7 +183,7 @@ pub fn scan_sibling_ids(sib: &Sibling) -> std::result::Result<Vec<String>, Strin
             .map_err(|e| format!("spawn {}: {}", exe, e))?,
         Sibling::Remote { host, path } => Command::new("ssh")
             .arg(host)
-            .arg(format!("rs-hack board tickets -f json -p {}", shell_quote(path)))
+            .arg(format!("yah board tickets -f json -p {}", shell_quote(path)))
             .output()
             .map_err(|e| format!("spawn ssh {}: {}", host, e))?,
     };

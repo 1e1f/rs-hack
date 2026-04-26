@@ -2,7 +2,7 @@
 //! @arch:role(ticket)
 //! @arch:see(architecture/hack-board.md)
 //!
-//! Ticket and Relay aggregation from `@hack:` annotations.
+//! Ticket and Relay aggregation from `@yah:` annotations.
 //!
 //! Two nouns:
 //! - **Ticket**: a unit of work (kind: feature/bug/task is just a tag)
@@ -64,7 +64,7 @@ impl TicketStatus {
     }
 
     /// Annotation-form name (matches what `parse()` accepts and what
-    /// `@hack:status(...)` writes in source).
+    /// `@yah:status(...)` writes in source).
     pub fn as_annotation(&self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -107,7 +107,7 @@ pub struct TicketLocation {
 }
 
 /// One value of a scalar field, attributed to its source location.
-/// Surfaced inside `Ticket::conflicts` when the same `@hack:` ID is
+/// Surfaced inside `Ticket::conflicts` when the same `@yah:` ID is
 /// declared in multiple files with disagreeing scalar metadata
 /// (e.g. one file says `status(open)`, another `status(review)`).
 ///
@@ -156,7 +156,7 @@ pub struct Ticket {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
 
-    /// Handoff message(s). Multiple `@hack:handoff(...)` annotations stack —
+    /// Handoff message(s). Multiple `@yah:handoff(...)` annotations stack —
     /// each renders as its own bullet in the pickup prompt, making the
     /// completed-work section scannable. A single handoff renders as a
     /// paragraph for backward-compatible readability.
@@ -176,13 +176,13 @@ pub struct Ticket {
     pub verify: Vec<String>,
 
     /// Pre-existing breakage / traps the next agent needs to know up front.
-    /// From `@hack:gotcha(...)`. Rendered above the context block in
+    /// From `@yah:gotcha(...)`. Rendered above the context block in
     /// the pickup prompt.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub gotchas: Vec<String>,
 
     /// Unverified assumptions that were baked into the handoff. From
-    /// `@hack:assumes(...)`. Rendered as risks in the pickup prompt so
+    /// `@yah:assumes(...)`. Rendered as risks in the pickup prompt so
     /// the next agent knows to confirm or challenge them.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub assumes: Vec<String>,
@@ -204,8 +204,8 @@ pub struct Ticket {
     /// AST target
     pub target: AnnotationTarget,
 
-    /// Every source occurrence of this ticket's `@hack:ticket` /
-    /// `@hack:relay` header, sorted by `(file, line)`. Always populated
+    /// Every source occurrence of this ticket's `@yah:ticket` /
+    /// `@yah:relay` header, sorted by `(file, line)`. Always populated
     /// with at least one entry. Length > 1 means the same ID is
     /// declared in multiple files — that's a smell to resolve (Rule11):
     /// either dedupe to one home or renumber one of the occurrences.
@@ -222,8 +222,8 @@ pub struct Ticket {
     pub conflicts: std::collections::BTreeMap<String, Vec<FieldConflict>>,
 
     /// True when this relay acts as an epic — either explicitly declared with
-    /// `@hack:kind(epic)` or inferred from having child relays via
-    /// `@hack:parent(self.id)`. Set by [`TicketBoard::resolve_epics`].
+    /// `@yah:kind(epic)` or inferred from having child relays via
+    /// `@yah:parent(self.id)`. Set by [`TicketBoard::resolve_epics`].
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub is_epic: bool,
 
@@ -337,7 +337,7 @@ impl TicketBoard {
     /// Build a board from annotations.
     ///
     /// Grouping is ticket-scoped, not target-scoped: a single `//!` doc-block
-    /// can declare several stacked `@hack:ticket` / `@hack:relay` headers, and
+    /// can declare several stacked `@yah:ticket` / `@yah:relay` headers, and
     /// each one owns the non-defining annotations that follow it (until the
     /// next header). Before, all module-level annotations shared the same
     /// `AnnotationTarget::Module` id and collapsed into one ticket — stacked
@@ -401,15 +401,15 @@ impl TicketBoard {
     /// its derived status from its children's statuses.
     ///
     /// Two ways to qualify as an epic:
-    /// 1. Explicit `@hack:kind(epic)` on the relay
-    /// 2. At least one *bare-R-ID* relay declares `@hack:parent(self.id)`
+    /// 1. Explicit `@yah:kind(epic)` on the relay
+    /// 2. At least one *bare-R-ID* relay declares `@yah:parent(self.id)`
     ///
     /// Sub-tickets with compound IDs (`R007-T1`, `R007-T2`) don't make
     /// their parent an epic — they make it an ordinary relay-with-subtickets.
     /// Epics coordinate *between* relays, not within one.
     ///
     /// Also: infer `parent` from a compound ID prefix if the ticket didn't
-    /// declare `@hack:parent(...)` explicitly. `R007-T1` → parent `R007`.
+    /// declare `@yah:parent(...)` explicitly. `R007-T1` → parent `R007`.
     fn resolve_epics(&mut self) {
         use std::collections::HashMap;
 
@@ -1030,12 +1030,12 @@ impl Ticket {
         prompt.push_str(&format!(
             "   - **This ticket's tasks are met, awaiting human sign-off:** \
                 `rs-hack board move {} review` and ping the user. Do **not** self-archive — \
-                review is where a human exercises `@hack:verify(...)` and confirms.\n",
+                review is where a human exercises `@yah:verify(...)` and confirms.\n",
             self.id
         ));
         prompt.push_str(
             "   - **Already signed off in a previous pass:** archive via the card button \
-                (strips `@hack:` lines from source, appends `archived` to `.hack/events.jsonl`).\n",
+                (strips `@yah:` lines from source, appends `archived` to `.yah/events.jsonl`).\n",
         );
 
         prompt
@@ -1134,7 +1134,8 @@ fn looks_like_shell_command(s: &str) -> bool {
         return false;
     };
     const COMMANDS: &[&str] = &[
-        "cargo", "rs-hack", "rshack", "bun", "npm", "pnpm", "yarn", "deno",
+        "cargo", "yah", "yahh", "yahb", "yaha", "rs-hack", "rshack",
+        "bun", "npm", "pnpm", "yarn", "deno",
         "npx", "make", "cmake", "ninja", "bash", "sh", "zsh", "python",
         "python3", "pip", "uv", "pytest", "node", "rustup", "rustc", "cc",
         "clang", "gcc", "curl", "wget", "git", "gh", "docker", "podman",
@@ -1197,7 +1198,7 @@ fn strip_trailing_comment(s: &str) -> String {
     }
 }
 
-/// Scan prose (typically a `@hack:handoff(...)` body) for `path:line` code
+/// Scan prose (typically a `@yah:handoff(...)` body) for `path:line` code
 /// locations so the pickup prompt can surface them as a list. Matches segments
 /// like `src/foo.rs:42`, `crates/bar/src/baz.rs:12833`, `banana_graph_builder.rs:11256`.
 ///
@@ -1314,7 +1315,7 @@ fn is_hack_relevant(kind: &ArchKind) -> bool {
 #[derive(Default)]
 struct PartialTicket {
     file: PathBuf,
-    header_line: usize, // line of the first defining @hack:ticket/@hack:relay
+    header_line: usize, // line of the first defining @yah:ticket/@yah:relay
     target: Option<AnnotationTarget>,
     id: Option<String>,
     title: Option<String>,
@@ -1546,7 +1547,7 @@ fn build_item(anns: &[&ArchAnnotation]) -> Option<Ticket> {
     let line = canonical_line;
 
     // Infer kind from legacy aliases (bug/feature/task parsed as Ticket)
-    // or from ID prefix if no explicit @hack:kind
+    // or from ID prefix if no explicit @yah:kind
     if kind.is_none() && item_type == ItemType::Ticket {
         kind = match id.chars().next() {
             Some('B') | Some('b') => Some("bug".to_string()),
@@ -1592,10 +1593,10 @@ mod tests {
     #[test]
     fn test_ticket_extraction() {
         let source = r#"
-//! @hack:ticket(F01, "Implement voice allocation")
-//! @hack:status(in-progress)
-//! @hack:assignee(agent:claude)
-//! @hack:phase(P2)
+//! @yah:ticket(F01, "Implement voice allocation")
+//! @yah:status(in-progress)
+//! @yah:assignee(agent:claude)
+//! @yah:phase(P2)
 //! @arch:see(architecture/vivarium/voice_allocation.md)
 
 pub mod voice_alloc;
@@ -1616,19 +1617,19 @@ pub mod voice_alloc;
 
     #[test]
     fn test_stacked_tickets_in_one_module_block() {
-        // Regression: several @hack:ticket / @hack:relay headers in the same
+        // Regression: several @yah:ticket / @yah:relay headers in the same
         // //! block must produce distinct tickets — each one owns the
         // annotations that follow it, bounded by the next header.
         let source = r#"
-//! @hack:relay(R010, "Parent relay")
-//! @hack:status(handoff)
-//! @hack:handoff("R010 handoff text")
-//! @hack:ticket(R010-T1, "First sub-ticket")
-//! @hack:status(in-progress)
-//! @hack:next("T1 next step")
-//! @hack:ticket(R010-T2, "Second sub-ticket")
-//! @hack:status(open)
-//! @hack:next("T2 next step")
+//! @yah:relay(R010, "Parent relay")
+//! @yah:status(handoff)
+//! @yah:handoff("R010 handoff text")
+//! @yah:ticket(R010-T1, "First sub-ticket")
+//! @yah:status(in-progress)
+//! @yah:next("T1 next step")
+//! @yah:ticket(R010-T2, "Second sub-ticket")
+//! @yah:status(open)
+//! @yah:next("T2 next step")
 
 pub mod thing;
 "#;
@@ -1657,8 +1658,8 @@ pub mod thing;
         // `files` is always-on: even a single-file ticket lists its
         // location, so consumers can iterate uniformly without an
         // empty-vs-singular branch. The conflicts map stays empty.
-        let source = r#"//! @hack:ticket(F01, "single")
-//! @hack:status(open)
+        let source = r#"//! @yah:ticket(F01, "single")
+//! @yah:status(open)
 "#;
         let anns = extract_from_source(source, Path::new("src/lib.rs")).unwrap();
         let board = TicketBoard::from_annotations(&anns);
@@ -1677,17 +1678,17 @@ pub mod thing;
         //  - lex-first file's scalar wins (`status: review`)
         //  - both values appear in `conflicts.status`
         //  - vec fields union (no duplicates), order = winner-first
-        let src = r#"//! @hack:ticket(R013-T2, "P2: src view")
-//! @hack:status(review)
-//! @hack:assignee(agent:claude)
-//! @hack:next("ship the signature change")
-//! @hack:next("update callers")
+        let src = r#"//! @yah:ticket(R013-T2, "P2: src view")
+//! @yah:status(review)
+//! @yah:assignee(agent:claude)
+//! @yah:next("ship the signature change")
+//! @yah:next("update callers")
 "#;
-        let test = r#"//! @hack:ticket(R013-T2, "P2: tests view")
-//! @hack:status(open)
-//! @hack:assignee(agent:claude)
-//! @hack:next("update callers")
-//! @hack:next("add fixture for chip_args")
+        let test = r#"//! @yah:ticket(R013-T2, "P2: tests view")
+//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:next("update callers")
+//! @yah:next("add fixture for chip_args")
 "#;
         let mut anns = Vec::new();
         anns.extend(
@@ -1738,9 +1739,9 @@ pub mod thing;
     #[test]
     fn test_bug_extraction() {
         let source = r#"
-//! @hack:ticket(B01, "Panic on zero-length buffer")
-//! @hack:status(open)
-//! @hack:severity(high)
+//! @yah:ticket(B01, "Panic on zero-length buffer")
+//! @yah:status(open)
+//! @yah:severity(high)
 
 pub fn process_buffer() {}
 "#;
@@ -1756,10 +1757,10 @@ pub fn process_buffer() {}
 
     #[test]
     fn test_legacy_bug_alias() {
-        // @hack:bug(...) still works as an alias for @hack:ticket(...)
+        // @yah:bug(...) still works as an alias for @yah:ticket(...)
         let source = r#"
-//! @hack:bug(B02, "Old-style bug annotation")
-//! @hack:status(open)
+//! @yah:bug(B02, "Old-style bug annotation")
+//! @yah:status(open)
 
 pub fn buggy() {}
 "#;
@@ -1772,14 +1773,14 @@ pub fn buggy() {}
     #[test]
     fn test_relay_extraction_and_prompt() {
         let source = r#"
-//! @hack:relay(R001, "ProcessBlock Unification Phase 4")
-//! @hack:assignee(agent:claude)
-//! @hack:phase(P4)
-//! @hack:handoff("AudioProcessor -> ProcessBlock across ~80 files.")
-//! @hack:next("Simplify add_control_node_unified -> add_node_named")
-//! @hack:next("Inline/remove intermediary functions")
-//! @hack:cleanup("CvRbjFilter is dead code")
-//! @hack:verify("cargo test -p vivarium")
+//! @yah:relay(R001, "ProcessBlock Unification Phase 4")
+//! @yah:assignee(agent:claude)
+//! @yah:phase(P4)
+//! @yah:handoff("AudioProcessor -> ProcessBlock across ~80 files.")
+//! @yah:next("Simplify add_control_node_unified -> add_node_named")
+//! @yah:next("Inline/remove intermediary functions")
+//! @yah:cleanup("CvRbjFilter is dead code")
+//! @yah:verify("cargo test -p vivarium")
 //! @arch:see(architecture/vivarium/PROCESS_BLOCK_UNIFICATION.md)
 
 pub mod process_block;
@@ -1816,18 +1817,18 @@ pub mod process_block;
 
     #[test]
     fn test_epic_inferred_from_children() {
-        // R001 has no explicit kind=epic, but R002 declares @hack:parent(R001).
+        // R001 has no explicit kind=epic, but R002 declares @yah:parent(R001).
         // That parent-pointer alone should mark R001 as an epic.
         let source = r#"
-//! @hack:relay(R001, "Big epic")
-//! @hack:status(handoff)
+//! @yah:relay(R001, "Big epic")
+//! @yah:status(handoff)
 
 pub mod epic_root;
 
 mod child {
-    //! @hack:relay(R002, "child thread")
-    //! @hack:parent(R001)
-    //! @hack:status(in-progress)
+    //! @yah:relay(R002, "child thread")
+    //! @yah:parent(R001)
+    //! @yah:status(in-progress)
 }
 "#;
         let annotations = extract_from_source(source, Path::new("epic.rs")).unwrap();
@@ -1842,9 +1843,9 @@ mod child {
     #[test]
     fn test_epic_explicit_kind_no_children_is_active() {
         let source = r#"
-//! @hack:relay(R010, "Planning epic")
-//! @hack:kind(epic)
-//! @hack:status(open)
+//! @yah:relay(R010, "Planning epic")
+//! @yah:kind(epic)
+//! @yah:status(open)
 
 pub mod plan;
 "#;
@@ -1859,21 +1860,21 @@ pub mod plan;
     #[test]
     fn test_epic_closed_when_all_children_terminal() {
         let source = r#"
-//! @hack:relay(R020, "Parent")
-//! @hack:kind(epic)
+//! @yah:relay(R020, "Parent")
+//! @yah:kind(epic)
 
 pub mod parent;
 
 mod child_a {
-    //! @hack:relay(R021, "a")
-    //! @hack:parent(R020)
-    //! @hack:status(review)
+    //! @yah:relay(R021, "a")
+    //! @yah:parent(R020)
+    //! @yah:status(review)
 }
 
 mod child_b {
-    //! @hack:relay(R022, "b")
-    //! @hack:parent(R020)
-    //! @hack:status(done)
+    //! @yah:relay(R022, "b")
+    //! @yah:parent(R020)
+    //! @yah:status(done)
 }
 "#;
         let annotations = extract_from_source(source, Path::new("e.rs")).unwrap();
@@ -1886,20 +1887,20 @@ mod child_b {
     #[test]
     fn test_epic_active_when_any_child_live() {
         let source = r#"
-//! @hack:relay(R030, "Parent")
+//! @yah:relay(R030, "Parent")
 
 pub mod parent;
 
 mod a {
-    //! @hack:relay(R031, "a")
-    //! @hack:parent(R030)
-    //! @hack:status(review)
+    //! @yah:relay(R031, "a")
+    //! @yah:parent(R030)
+    //! @yah:status(review)
 }
 
 mod b {
-    //! @hack:relay(R032, "b")
-    //! @hack:parent(R030)
-    //! @hack:status(in-progress)
+    //! @yah:relay(R032, "b")
+    //! @yah:parent(R030)
+    //! @yah:status(in-progress)
 }
 "#;
         let annotations = extract_from_source(source, Path::new("e.rs")).unwrap();
@@ -1913,17 +1914,17 @@ mod b {
     fn test_compound_id_infers_parent_and_is_not_epic_child() {
         // R007 is a regular relay. R007-T1 is a sub-ticket inside that
         // relay. The sub-ticket should:
-        //   - infer parent = "R007" from its ID even without @hack:parent
+        //   - infer parent = "R007" from its ID even without @yah:parent
         //   - NOT promote R007 to epic status (only bare-R children do that)
         let source = r#"
-//! @hack:relay(R007, "replay coverage")
-//! @hack:status(handoff)
+//! @yah:relay(R007, "replay coverage")
+//! @yah:status(handoff)
 
 pub mod relay_root;
 
 mod child {
-    //! @hack:ticket(R007-T1, "cluster A")
-    //! @hack:status(open)
+    //! @yah:ticket(R007-T1, "cluster A")
+    //! @yah:status(open)
 }
 "#;
         let annotations = extract_from_source(source, Path::new("e.rs")).unwrap();
@@ -1945,27 +1946,27 @@ mod child {
         // R020-B1, R020-F2, R020-T3 should all resolve to parent R020 and
         // none should promote R020 to epic status.
         let source = r#"
-//! @hack:relay(R020, "mixed-kind sub-tickets")
-//! @hack:status(handoff)
+//! @yah:relay(R020, "mixed-kind sub-tickets")
+//! @yah:status(handoff)
 
 pub mod m;
 
 mod c1 {
-    //! @hack:ticket(R020-B1, "bug")
-    //! @hack:kind(bug)
-    //! @hack:status(open)
+    //! @yah:ticket(R020-B1, "bug")
+    //! @yah:kind(bug)
+    //! @yah:status(open)
 }
 
 mod c2 {
-    //! @hack:ticket(R020-F2, "feature")
-    //! @hack:kind(feature)
-    //! @hack:status(open)
+    //! @yah:ticket(R020-F2, "feature")
+    //! @yah:kind(feature)
+    //! @yah:status(open)
 }
 
 mod c3 {
-    //! @hack:ticket(R020-T3, "task")
-    //! @hack:kind(task)
-    //! @hack:status(open)
+    //! @yah:ticket(R020-T3, "task")
+    //! @yah:kind(task)
+    //! @yah:status(open)
 }
 "#;
         let annotations = extract_from_source(source, Path::new("mix.rs")).unwrap();
@@ -1996,12 +1997,12 @@ mod c3 {
     #[test]
     fn test_verify_heuristic_separates_commands_from_prose() {
         let source = r#"
-//! @hack:ticket(T01, "t")
-//! @hack:status(handoff)
-//! @hack:verify("cargo check -p foo")
-//! @hack:verify("cargo test --lib  # expected: 42/42")
-//! @hack:verify("cargo test -p vivarium-banana-nodes --lib is clean (no new errors)")
-//! @hack:verify("Manual: launch example and listen for modulation")
+//! @yah:ticket(T01, "t")
+//! @yah:status(handoff)
+//! @yah:verify("cargo check -p foo")
+//! @yah:verify("cargo test --lib  # expected: 42/42")
+//! @yah:verify("cargo test -p vivarium-banana-nodes --lib is clean (no new errors)")
+//! @yah:verify("Manual: launch example and listen for modulation")
 
 pub fn thing() {}
 "#;
@@ -2034,11 +2035,11 @@ pub fn thing() {}
 
     #[test]
     fn test_handoff_single_vs_multiple_rendering() {
-        // Single @hack:handoff(...) → paragraph.
+        // Single @yah:handoff(...) → paragraph.
         let single = r#"
-//! @hack:ticket(T02, "single")
-//! @hack:status(handoff)
-//! @hack:handoff("One long paragraph covering everything that was done in this session.")
+//! @yah:ticket(T02, "single")
+//! @yah:status(handoff)
+//! @yah:handoff("One long paragraph covering everything that was done in this session.")
 
 pub fn s() {}
 "#;
@@ -2051,13 +2052,13 @@ pub fn s() {}
         assert!(p.contains("\n\nOne long paragraph"));
         assert!(!p.contains("- One long paragraph"));
 
-        // Multiple @hack:handoff(...) → bullets.
+        // Multiple @yah:handoff(...) → bullets.
         let multi = r#"
-//! @hack:ticket(T03, "multi")
-//! @hack:status(handoff)
-//! @hack:handoff("Fixed resolver at ctx.rs:2263.")
-//! @hack:handoff("Added symbol table for note_v2 in koda_relay_node.rs:583.")
-//! @hack:handoff("Updated MIX_UNIFICATION.md §Phase 9b.")
+//! @yah:ticket(T03, "multi")
+//! @yah:status(handoff)
+//! @yah:handoff("Fixed resolver at ctx.rs:2263.")
+//! @yah:handoff("Added symbol table for note_v2 in koda_relay_node.rs:583.")
+//! @yah:handoff("Updated MIX_UNIFICATION.md §Phase 9b.")
 
 pub fn m() {}
 "#;
@@ -2077,14 +2078,14 @@ pub fn m() {}
     #[test]
     fn test_gotcha_and_assumes_extracted_and_rendered() {
         let source = r#"
-//! @hack:ticket(T42, "handle the thing")
-//! @hack:status(handoff)
-//! @hack:handoff("Scaffolded the thing in src/thing.rs:10. Left unsafe blocks TBD.")
-//! @hack:gotcha("banana_nodes --lib has pre-existing compile errors unrelated to this ticket")
-//! @hack:gotcha("cargo test -p vivarium-banana-nodes --lib fails for unrelated IRFunction churn — don't fix")
-//! @hack:assumes("Koda IR-lowering flattens @children arm tuples into IRValue::List")
-//! @hack:verify("cargo check -p vivarium-banana-nodes --lib")
-//! @hack:verify("cargo test -p banana --lib nodes::split::")
+//! @yah:ticket(T42, "handle the thing")
+//! @yah:status(handoff)
+//! @yah:handoff("Scaffolded the thing in src/thing.rs:10. Left unsafe blocks TBD.")
+//! @yah:gotcha("banana_nodes --lib has pre-existing compile errors unrelated to this ticket")
+//! @yah:gotcha("cargo test -p vivarium-banana-nodes --lib fails for unrelated IRFunction churn — don't fix")
+//! @yah:assumes("Koda IR-lowering flattens @children arm tuples into IRValue::List")
+//! @yah:verify("cargo check -p vivarium-banana-nodes --lib")
+//! @yah:verify("cargo test -p banana --lib nodes::split::")
 
 pub fn thing() {}
 "#;
@@ -2124,9 +2125,9 @@ pub fn thing() {}
     #[test]
     fn test_parent_relay() {
         let source = r#"
-//! @hack:relay(R005, "CV Port Bridge")
-//! @hack:parent(R001)
-//! @hack:assignee(agent:claude)
+//! @yah:relay(R005, "CV Port Bridge")
+//! @yah:parent(R001)
+//! @yah:assignee(agent:claude)
 
 pub mod cv_bridge;
 "#;
@@ -2142,10 +2143,10 @@ pub mod cv_bridge;
     #[test]
     fn test_ticket_with_parent_and_phase() {
         let source = r#"
-//! @hack:ticket(T01, "Add cv_to_hz to RbjBiquadNode")
-//! @hack:parent(R005)
-//! @hack:phase(P1)
-//! @hack:status(open)
+//! @yah:ticket(T01, "Add cv_to_hz to RbjBiquadNode")
+//! @yah:parent(R005)
+//! @yah:phase(P1)
+//! @yah:status(open)
 
 pub struct RbjBiquadNode;
 "#;
@@ -2162,8 +2163,8 @@ pub struct RbjBiquadNode;
     #[test]
     fn test_board_markdown() {
         let source = r#"
-//! @hack:ticket(T01, "Do the thing")
-//! @hack:status(done)
+//! @yah:ticket(T01, "Do the thing")
+//! @yah:status(done)
 
 pub mod a;
 "#;
@@ -2178,9 +2179,9 @@ pub mod a;
         let source = r#"
 //! @arch:layer(vivarium)
 //! @arch:role(synthesis)
-//! @hack:ticket(T03, "Add polyphony support")
-//! @hack:status(claimed)
-//! @hack:assignee(agent:claude)
+//! @yah:ticket(T03, "Add polyphony support")
+//! @yah:status(claimed)
+//! @yah:assignee(agent:claude)
 
 pub struct Synth;
 "#;
@@ -2206,12 +2207,12 @@ pub struct Synth;
     #[test]
     fn test_picker_picks_in_progress_child_not_next_fresh() {
         let source = r#"
-//! @hack:relay(R100, "container")
-//! @hack:status(handoff)
-//! @hack:ticket(R100-T1, "first — already in flight")
-//! @hack:status(in-progress)
-//! @hack:ticket(R100-T2, "second — open, ready")
-//! @hack:status(open)
+//! @yah:relay(R100, "container")
+//! @yah:status(handoff)
+//! @yah:ticket(R100-T1, "first — already in flight")
+//! @yah:status(in-progress)
+//! @yah:ticket(R100-T2, "second — open, ready")
+//! @yah:status(open)
 
 pub mod thing;
 "#;
@@ -2249,14 +2250,14 @@ pub mod thing;
     #[test]
     fn test_subticket_inherits_parent_gotchas_and_verify() {
         let source = r#"
-//! @hack:relay(R110, "parent with traps")
-//! @hack:status(handoff)
-//! @hack:gotcha("tuple-item lambda bodies need brackets; `&&` inside [ ] trips the parser")
-//! @hack:verify("cargo check -p vivarium-banana-nodes --lib")
-//! @hack:verify("cargo test -p banana --lib nodes::split::")
-//! @hack:ticket(R110-T1, "child work")
-//! @hack:status(handoff)
-//! @hack:next("do the thing")
+//! @yah:relay(R110, "parent with traps")
+//! @yah:status(handoff)
+//! @yah:gotcha("tuple-item lambda bodies need brackets; `&&` inside [ ] trips the parser")
+//! @yah:verify("cargo check -p vivarium-banana-nodes --lib")
+//! @yah:verify("cargo test -p banana --lib nodes::split::")
+//! @yah:ticket(R110-T1, "child work")
+//! @yah:status(handoff)
+//! @yah:next("do the thing")
 
 pub mod m;
 "#;
@@ -2297,12 +2298,12 @@ pub mod m;
     #[test]
     fn test_relay_with_children_hoists_subtickets_and_relabels_next() {
         let source = r#"
-//! @hack:relay(R120, "multi-phase work")
-//! @hack:status(handoff)
-//! @hack:next("FOLLOW-ON: file new ticket for the framework rule")
-//! @hack:next("FOLLOW-ON: retarget the design doc")
-//! @hack:ticket(R120-T1, "first chunk")
-//! @hack:status(open)
+//! @yah:relay(R120, "multi-phase work")
+//! @yah:status(handoff)
+//! @yah:next("FOLLOW-ON: file new ticket for the framework rule")
+//! @yah:next("FOLLOW-ON: retarget the design doc")
+//! @yah:ticket(R120-T1, "first chunk")
+//! @yah:status(open)
 
 pub mod m;
 "#;
@@ -2337,28 +2338,28 @@ pub mod m;
         // R200 is an epic by virtue of child relays R201 / R202.
         // R201 has two open sub-tickets + one in-progress; R202 has none.
         let source = r#"
-//! @hack:relay(R200, "big epic")
-//! @hack:kind(epic)
-//! @hack:status(handoff)
+//! @yah:relay(R200, "big epic")
+//! @yah:kind(epic)
+//! @yah:status(handoff)
 
 pub mod epic_root;
 
 mod r201 {
-    //! @hack:relay(R201, "first child relay")
-    //! @hack:parent(R200)
-    //! @hack:status(handoff)
-    //! @hack:ticket(R201-T1, "sub a")
-    //! @hack:status(in-progress)
-    //! @hack:ticket(R201-T2, "sub b")
-    //! @hack:status(open)
-    //! @hack:ticket(R201-T3, "sub c")
-    //! @hack:status(open)
+    //! @yah:relay(R201, "first child relay")
+    //! @yah:parent(R200)
+    //! @yah:status(handoff)
+    //! @yah:ticket(R201-T1, "sub a")
+    //! @yah:status(in-progress)
+    //! @yah:ticket(R201-T2, "sub b")
+    //! @yah:status(open)
+    //! @yah:ticket(R201-T3, "sub c")
+    //! @yah:status(open)
 }
 
 mod r202 {
-    //! @hack:relay(R202, "second child relay")
-    //! @hack:parent(R200)
-    //! @hack:status(open)
+    //! @yah:relay(R202, "second child relay")
+    //! @yah:parent(R200)
+    //! @yah:status(open)
 }
 "#;
         let anns = extract_from_source(source, Path::new("e.rs")).unwrap();
@@ -2410,8 +2411,8 @@ mod r202 {
     #[test]
     fn test_flat_ticket_unchanged() {
         let source = r#"
-//! @hack:ticket(T999, "lonely")
-//! @hack:status(open)
+//! @yah:ticket(T999, "lonely")
+//! @yah:status(open)
 
 pub fn t() {}
 "#;

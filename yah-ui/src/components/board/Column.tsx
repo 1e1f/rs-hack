@@ -1,38 +1,75 @@
 import { useDroppable } from "@dnd-kit/core";
 import { TicketCard } from "./TicketCard";
+import { EmptyColumn } from "./EmptyColumn";
+import { FillerSplash } from "./FillerSplash";
+import { Icon } from "../shared/Glyph";
 import type { ColumnKey, Ticket } from "../../types";
 
 interface ColumnProps {
   columnKey: ColumnKey;
   label: string;
+  eyebrow: string;
   tickets: Ticket[];
+  /* True while a card is being dragged but this column is not a valid drop
+     target. Dims the column to mirror the server's transition matrix. */
+  disallowed?: boolean;
 }
 
-export function Column({ columnKey, label, tickets }: ColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({ id: columnKey });
+/* Board column. Renders the illuminated drop-cap header + small-caps body +
+   count chip + italic eyebrow, plus the dnd-kit droppable region. Hover and
+   disallowed visuals are driven from Board state — the column itself doesn't
+   know transition rules. */
+export function Column({
+  columnKey,
+  label,
+  eyebrow,
+  tickets,
+  disallowed = false,
+}: ColumnProps) {
+  const { setNodeRef, isOver, active } = useDroppable({ id: columnKey });
+  const isDragHover = isOver && !!active && !disallowed;
+
+  const head = label.charAt(0);
+  const tail = label.slice(1).toLowerCase();
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex h-full w-[300px] shrink-0 flex-col rounded border border-border bg-surface transition-colors ${
-        isOver ? "border-blue/60 bg-elevated" : ""
-      }`}
+      className={`flex h-full w-[280px] shrink-0 flex-col rounded-md border transition-[background-color,border-color,opacity] duration-100 ${
+        isDragHover
+          ? "border-accent bg-[color-mix(in_oklab,var(--color-accent)_9%,var(--color-paper-2))]"
+          : "border-rule/50 bg-[color-mix(in_oklab,var(--color-paper-2)_35%,transparent)]"
+      } ${disallowed ? "opacity-45" : ""}`}
     >
-      <header className="flex h-9 items-center justify-between border-b border-border px-3">
-        <span className="text-[12px] font-medium uppercase tracking-wider text-text-dim">
-          {label}
-        </span>
-        <span className="rounded bg-border px-1.5 py-0.5 text-[10px] text-text-dim">
-          {tickets.length}
-        </span>
+      <header className="flex items-center gap-2 border-b border-rule/50 px-3 pt-2.5 pb-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2.5 text-ink">
+            <span className="illum-cap text-[22px] leading-none">{head}</span>
+            <span className="smallcaps text-[13px] font-medium tracking-[0.16em]">
+              {tail}
+            </span>
+            <span className="ml-0.5 rounded-full border border-rule px-[7px] py-[2px] font-mono text-[11px] leading-none text-ink-3">
+              {tickets.length}
+            </span>
+          </div>
+          <div className="font-display text-[12px] italic text-ink-3">
+            {eyebrow}
+          </div>
+        </div>
+        <button
+          className="rounded p-1 text-ink-3 hover:bg-vellum/40 hover:text-ink-2"
+          title="Filter"
+        >
+          <Icon name="filter" size={12} />
+        </button>
       </header>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2">
-        {tickets.length === 0 ? (
-          <div className="py-6 text-center text-[11px] text-text-muted">
-            (empty)
-          </div>
-        ) : (
-          tickets.map((t) => <TicketCard key={t.id} ticket={t} />)
+        {tickets.map((t) => (
+          <TicketCard key={t.id} ticket={t} columnEyebrow={eyebrow} />
+        ))}
+        {tickets.length === 0 && <EmptyColumn columnKey={columnKey} />}
+        {tickets.length > 0 && tickets.length <= 2 && (
+          <FillerSplash columnKey={columnKey} />
         )}
       </div>
     </div>

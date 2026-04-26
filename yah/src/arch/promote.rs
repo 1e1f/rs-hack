@@ -2,14 +2,14 @@
 //! @arch:role(ticket)
 //! @arch:see(architecture/hack-board.md)
 //!
-//! Promote a freeform summary into a structured `@hack:relay(...)` annotation
+//! Promote a freeform summary into a structured `@yah:relay(...)` annotation
 //! in source. This is the shared backend for both:
 //!
 //! - The CLI: `rs-hack board promote --summary <ID> --file <PATH>`
 //! - The MCP tool: `hack_promote`
 //! - The HTTP endpoint: `POST /api/promote/<id>` (shells out to the CLI)
 //!
-//! Allocation is serialized through `.hack/id.lock`, so concurrent promoters
+//! Allocation is serialized through `.yah/id.lock`, so concurrent promoters
 //! and `board claim` invocations cannot collide on the next R-number.
 
 use anyhow::{bail, Context, Result};
@@ -40,7 +40,7 @@ pub struct PromoteResult {
 /// 1. Acquire the workspace ID lock.
 /// 2. Read the summary by id.
 /// 3. Allocate the next bare R-number across the workspace.
-/// 4. Write a `@hack:relay(...)` annotation block to `target_file`.
+/// 4. Write a `@yah:relay(...)` annotation block to `target_file`.
 /// 5. Update the summary frontmatter: `promoted: true`, `relay_id`, `relay_title`.
 ///
 /// If `title_override` is `None`, the relay title is taken from the first
@@ -85,7 +85,7 @@ pub fn promote_summary(
     let summary = summaries
         .iter()
         .find(|s| s.id == summary_id)
-        .ok_or_else(|| anyhow::anyhow!("Summary '{}' not found in .hack/summaries/", summary_id))?;
+        .ok_or_else(|| anyhow::anyhow!("Summary '{}' not found in .yah/summaries/", summary_id))?;
     if summary.promoted {
         bail!("Summary '{}' is already promoted", summary_id);
     }
@@ -147,7 +147,7 @@ pub fn promote_summary(
     })
 }
 
-/// File lock held during ID allocation. Created at `.hack/id.lock`; released
+/// File lock held during ID allocation. Created at `.yah/id.lock`; released
 /// on drop. Mirrors the lock used by `rs-hack board claim` so the two
 /// allocators serialize against each other.
 pub struct IdLock {
@@ -156,7 +156,7 @@ pub struct IdLock {
 
 impl IdLock {
     pub fn acquire(workspace: &Path) -> Result<Self> {
-        let hack_dir = workspace.join(".hack");
+        let hack_dir = workspace.join(".yah");
         std::fs::create_dir_all(&hack_dir)?;
         let path = hack_dir.join("id.lock");
         let start = std::time::Instant::now();
@@ -248,7 +248,7 @@ fn first_paragraph(text: &str) -> String {
     out
 }
 
-/// Build a `//! @hack:relay(...)` annotation block.
+/// Build a `//! @yah:relay(...)` annotation block.
 fn build_relay_annotation_block(
     id: &str,
     title: &str,
@@ -257,15 +257,15 @@ fn build_relay_annotation_block(
     handoff: &[String],
 ) -> String {
     let mut lines = Vec::<String>::new();
-    lines.push(format!("//! @hack:relay({}, {:?})", id, title));
+    lines.push(format!("//! @yah:relay({}, {:?})", id, title));
     if let Some(s) = status {
-        lines.push(format!("//! @hack:status({})", s));
+        lines.push(format!("//! @yah:status({})", s));
     }
     if let Some(a) = assignee {
-        lines.push(format!("//! @hack:assignee({})", a));
+        lines.push(format!("//! @yah:assignee({})", a));
     }
     for h in handoff {
-        lines.push(format!("//! @hack:handoff({:?})", h));
+        lines.push(format!("//! @yah:handoff({:?})", h));
     }
     lines.join("\n")
 }
@@ -389,10 +389,10 @@ mod tests {
 
         let content = std::fs::read_to_string(ws.join("src/lib.rs")).unwrap();
         assert!(content.contains(&format!(
-            "@hack:relay({}, \"Refactor extract pipeline\")",
+            "@yah:relay({}, \"Refactor extract pipeline\")",
             res.relay_id
         )));
-        assert!(content.contains("@hack:status(handoff)"));
+        assert!(content.contains("@yah:status(handoff)"));
         assert!(content.contains("existing module doc"));
 
         // Summary frontmatter updated.
@@ -407,7 +407,7 @@ mod tests {
         let ws = tmp.path();
         write_target(
             ws,
-            "//! @hack:relay(R005, \"existing\")\n//! @hack:status(handoff)\n\npub fn x() {}\n",
+            "//! @yah:relay(R005, \"existing\")\n//! @yah:status(handoff)\n\npub fn x() {}\n",
         );
         let s = write_summary(ws, "Brand new work", None, None).unwrap();
         let res = promote_summary(ws, &s.id, Path::new("src/lib.rs"), None, None).unwrap();

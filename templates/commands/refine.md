@@ -6,9 +6,9 @@ You just described an implementation plan with phases. Refine them into hack-boa
 
 - **Relay** — a thread of work. One agent owns it. Carries the baton across context resets.
 - **Ticket** — an incremental work unit *inside* a relay. Usually session-sized — claim, work, archive. IDs are always compound: `R007-T1`, `R007-T2`. Every ticket has a parent relay; `board claim`/`board open` reject `--kind task|feature|bug` without `--parent`.
-- **Epic** — a relay declared with `@hack:kind(epic)`, or *inferred* when one or more other **bare-R relays** declare `@hack:parent(RXXX)` pointing at it. Coordination-of-relays, not coordination-of-tickets — sub-tickets never promote their parent relay to epic.
-- **Phase** — ordering tag. "These items ship together." `@hack:phase(P1)` — parsed by `rs-hack-arch` and surfaced as `phase:` on tickets in `rs-hack board tickets` / inflight / status output. Useful for grouping at refinement time even though the board UI doesn't (yet) sort columns by phase.
-- **Parent** — hierarchy pointer. `@hack:parent(R007)` belongs to R007. For compound IDs the parent is inferred from the prefix.
+- **Epic** — a relay declared with `@yah:kind(epic)`, or *inferred* when one or more other **bare-R relays** declare `@yah:parent(RXXX)` pointing at it. Coordination-of-relays, not coordination-of-tickets — sub-tickets never promote their parent relay to epic.
+- **Phase** — ordering tag. "These items ship together." `@yah:phase(P1)` — parsed by `rs-hack-arch` and surfaced as `phase:` on tickets in `rs-hack board tickets` / inflight / status output. Useful for grouping at refinement time even though the board UI doesn't (yet) sort columns by phase.
+- **Parent** — hierarchy pointer. `@yah:parent(R007)` belongs to R007. For compound IDs the parent is inferred from the prefix.
 
 ## Process
 
@@ -57,7 +57,7 @@ rs-hack board open --kind relay --file src/cv_bridge.rs --title "CV Port Bridge"
 
 ### Step 3: Create tickets under the relay
 
-Each concrete sub-step becomes a **ticket inside** the relay. Use `rs-hack board open --parent $RELAY`; the kind (feature/bug/task) becomes a `@hack:kind(...)` tag. The ID is allocated as a compound sub-ticket.
+Each concrete sub-step becomes a **ticket inside** the relay. Use `rs-hack board open --parent $RELAY`; the kind (feature/bug/task) becomes a `@yah:kind(...)` tag. The ID is allocated as a compound sub-ticket.
 
 ```bash
 TID=$(rs-hack board open \
@@ -69,7 +69,7 @@ TID=$(rs-hack board open \
 echo "$TID"   # e.g. R012-T1 (first sub-ticket under R012)
 ```
 
-Sub-tickets under `$RELAY` get IDs like `R012-T1`, `R012-T2`, … regardless of `--kind`. The `-T` segment is always `T`; the feature/bug/task distinction survives as the `@hack:kind(...)` tag (and as the badge letter on the card).
+Sub-tickets under `$RELAY` get IDs like `R012-T1`, `R012-T2`, … regardless of `--kind`. The `-T` segment is always `T`; the feature/bug/task distinction survives as the `@yah:kind(...)` tag (and as the badge letter on the card).
 
 There is no "standalone" ticket form — `--parent` is required for `--kind task|feature|bug`. For a genuinely one-off piece of work, `board open --kind relay` first and claim the relay's own work under it (use `board open --kind task --parent $RELAY` for the first sub-ticket). Keeps the ID space clean and keeps every ticket's event shard rolled up under a relay.
 

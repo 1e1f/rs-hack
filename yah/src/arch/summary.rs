@@ -1,11 +1,9 @@
 //! @arch:layer(arch)
 //! @arch:role(ticket)
-//! @hack:ticket(R001-T3, "Remove @anthropic-ai/sdk dep from hack-board package.json if unused")
-//! @hack:status(open)
 //!
 //! Agent summary capture and storage.
 //! Summaries are freeform markdown blobs that agents produce naturally.
-//! They live as sidecar files in `.hack/summaries/` and can be promoted
+//! They live as sidecar files in `.yah/summaries/` and can be promoted
 //! to structured relay tickets by the board or another agent.
 
 use serde::{Deserialize, Serialize};
@@ -74,16 +72,16 @@ impl SummaryFrontmatter {
     }
 }
 
-/// Write a summary to `.hack/summaries/`.
+/// Write a summary to `.yah/summaries/`.
 pub fn write_summary(
     workspace: &Path,
     text: &str,
     ticket: Option<&str>,
     author: Option<&str>,
 ) -> Result<Summary> {
-    let summaries_dir = workspace.join(".hack").join("summaries");
+    let summaries_dir = workspace.join(".yah").join("summaries");
     std::fs::create_dir_all(&summaries_dir)
-        .context("Failed to create .hack/summaries/")?;
+        .context("Failed to create .yah/summaries/")?;
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -131,9 +129,9 @@ pub fn write_summary(
     })
 }
 
-/// Read all summaries from `.hack/summaries/`.
+/// Read all summaries from `.yah/summaries/`.
 pub fn read_summaries(workspace: &Path) -> Result<Vec<Summary>> {
-    let summaries_dir = workspace.join(".hack").join("summaries");
+    let summaries_dir = workspace.join(".yah").join("summaries");
     if !summaries_dir.exists() {
         return Ok(Vec::new());
     }

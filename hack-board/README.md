@@ -18,7 +18,7 @@ rs-hack board serve          # auto-picks an HTTP/UDP port pair from a hash of t
 > **Source code is the only source of truth for board state.**
 
 Tickets, relays, epics, handoff notes, dependency graphs — all of it lives
-as `@hack:…` annotations inside the `.rs` file most naturally tied to the
+as `@yah:…` annotations inside the `.rs` file most naturally tied to the
 work. The hack-board server re-scans source on every file change (or on a
 UDP nudge from `rs-hack`) and derives the board view from what it finds.
 
@@ -41,9 +41,9 @@ Two structural kinds plus a derived third:
 
 | Kind | Annotation | What it is |
 |---|---|---|
-| **Ticket** | `@hack:ticket(R007-T1, "…")` (sub-ticket) or `@hack:ticket(T03, "…")` (standalone) | An incremental work unit. Usually lives inside a relay; the compound-ID form makes the parent explicit. Kind (feature/bug/task) is a `@hack:kind(...)` tag + badge letter. |
-| **Relay** | `@hack:relay(R001, "…")` | A thread of work owned by a single agent at a time. Carries the baton across context resets. Sub-tickets live inside it. |
-| **Epic** | `@hack:kind(epic)` on a relay, or *inferred* when **bare-R relays** declare `@hack:parent(R…)` | Coordination-of-relays, not coordination-of-tickets. Compound sub-tickets never promote their parent to epic. Status is computed from children. |
+| **Ticket** | `@yah:ticket(R007-T1, "…")` (sub-ticket) or `@yah:ticket(T03, "…")` (standalone) | An incremental work unit. Usually lives inside a relay; the compound-ID form makes the parent explicit. Kind (feature/bug/task) is a `@yah:kind(...)` tag + badge letter. |
+| **Relay** | `@yah:relay(R001, "…")` | A thread of work owned by a single agent at a time. Carries the baton across context resets. Sub-tickets live inside it. |
+| **Epic** | `@yah:kind(epic)` on a relay, or *inferred* when **bare-R relays** declare `@yah:parent(R…)` | Coordination-of-relays, not coordination-of-tickets. Compound sub-tickets never promote their parent to epic. Status is computed from children. |
 
 ID shapes and when to use each:
 
@@ -59,7 +59,7 @@ atomically. Two agents running in parallel will not collide.
 
 The board has five columns:
 
-| Column | `@hack:status(...)` value(s) | Meaning |
+| Column | `@yah:status(...)` value(s) | Meaning |
 |---|---|---|
 | **Epics** | (derived) | Coordination points. Epic status is `active` / `closed` computed from children. |
 | **Open** | `open` | Unclaimed. Also hosts `.hack/todo.md` entries (pre-ticket inbox). |
@@ -68,10 +68,10 @@ The board has five columns:
 | **Review** | `review` \| `done` | Work is complete; awaiting sign-off. Terminal-on-board. |
 
 There is no `Done` column. "Done" is a short-lived staging value inside
-`Review`; the terminal action is **archive**, which removes the `@hack:`
+`Review`; the terminal action is **archive**, which removes the `@yah:`
 annotation lines from source and logs to `.hack/events.jsonl`.
 
-**Moving cards.** Either edit `@hack:status(...)` in source directly, or
+**Moving cards.** Either edit `@yah:status(...)` in source directly, or
 drag the card to a new column — the server rewrites the status line for
 you under the enforced transition matrix:
 
@@ -91,7 +91,7 @@ their status is derived.
   For `review`/`done` it's a review-mode prompt (verify commands + an
   approve-or-send-back decision tree, synthesized in the server).
 - **archive** — first click arms and surfaces any declared
-  `@hack:verify(...)` commands; second click commits.
+  `@yah:verify(...)` commands; second click commits.
 
 Cards collapse by default; click `▸` to expand handoff text, next steps,
 verify commands, and summaries.
@@ -101,13 +101,13 @@ verify commands, and summaries.
 An epic is a relay that coordinates *other relays* rather than doing work
 itself. Two ways to become an epic:
 
-1. **Explicit:** `@hack:kind(epic)` on the relay (authoritative — survives
+1. **Explicit:** `@yah:kind(epic)` on the relay (authoritative — survives
    having zero children).
-2. **Inferred:** one or more **bare-R** relays declare `@hack:parent(R…)`
+2. **Inferred:** one or more **bare-R** relays declare `@yah:parent(R…)`
    pointing at this relay. Compound sub-tickets (`R007-T1`) never count —
    they make the parent a plain relay-with-subtickets, not an epic.
 
-An epic's own `@hack:status(...)` is ignored. The board computes:
+An epic's own `@yah:status(...)` is ignored. The board computes:
 
 - **active** — any child relay is not in `review`/`done` and still exists
   in source
@@ -172,7 +172,7 @@ either ratify each one or replace it with something explicit.
 ### Rule01 — "First action on pickup = set `in-progress`"
 
 When an agent claims a ticket from Open or Handoff, the *first* source
-edit is flipping `@hack:status(in-progress)` on that ticket. This is the
+edit is flipping `@yah:status(in-progress)` on that ticket. This is the
 claim signal; no other modifications come before it.
 
 ### Rule02 — "Never pick IDs yourself"
@@ -184,8 +184,8 @@ will collide with another concurrent agent.
 ### Rule03 — "Same-relay handoff is the default"
 
 When an agent finishes a phase, the default handoff *updates the existing
-relay in place* (same R-number, overwriting `@hack:handoff(...)`,
-`@hack:next(...)`, etc.). New R-numbers only for *parallel* or
+relay in place* (same R-number, overwriting `@yah:handoff(...)`,
+`@yah:next(...)`, etc.). New R-numbers only for *parallel* or
 *independent* tracks.
 
 ### Rule04 — "Archive, don't settle in Review"
@@ -193,7 +193,7 @@ relay in place* (same R-number, overwriting `@hack:handoff(...)`,
 `status: done` is a short-lived staging state. Tickets don't rest there
 — the terminal action is `POST /api/archive/:id`, which removes the
 annotation from source and logs to `.hack/events.jsonl`. If a ticket
-declared `@hack:verify(…)`, the archive confirm step surfaces those
+declared `@yah:verify(…)`, the archive confirm step surfaces those
 commands before writing.
 
 ### Rule05 — "Do not modify items in `in-progress`"
@@ -205,7 +205,7 @@ an active owner whose context would be corrupted.
 ### Rule06 — "Epics coordinate, don't carry work"
 
 An epic is a parent coordination point. Work happens on its children.
-An epic's own `@hack:status(...)` is ignored; its state is derived.
+An epic's own `@yah:status(...)` is ignored; its state is derived.
 
 ### Rule07 — "Source edits are the state machine"
 
@@ -222,13 +222,13 @@ API that doesn't ultimately result in a file write.
 
 1. Agent reads `rs-hack board tickets --prompt <ID>` (or clicks **Fork**
    on a relay/handoff card → copies the prompt to clipboard).
-2. Agent edits the ticket's `@hack:status(in-progress)` line. First edit
+2. Agent edits the ticket's `@yah:status(in-progress)` line. First edit
    in the session, always.
 3. Agent does the work.
 4. When done, agent either:
    - Updates the relay in place with new handoff + next steps (same-relay
-     handoff, Rule03) and sets `@hack:status(handoff)`, or
-   - Sets `@hack:status(review)` and pings the user for sign-off.
+     handoff, Rule03) and sets `@yah:status(handoff)`, or
+   - Sets `@yah:status(review)` and pings the user for sign-off.
 
 ### Creating new work
 
@@ -252,7 +252,7 @@ rs-hack board claim --kind task --file src/foo.rs --title "…" --parent $EPIC -
 1. Server reads the source file at `ticket.file`.
 2. Walks outward from `ticket.line` across the contiguous `//!` /
    `///` doc-comment block.
-3. Removes just the `@hack:…` lines within that block — preserves
+3. Removes just the `@yah:…` lines within that block — preserves
    `@arch:see`, plain doc text, and the item being documented.
 4. Appends an `archived` event to `.hack/events.jsonl` with the full
    ticket snapshot + the raw lines that were removed.
@@ -270,7 +270,7 @@ with `blockingChildren` list). Archive children first.
 ```
 <workspace>/
 ├── src/**/*.rs                    # Source — the authoritative board state.
-│                                  # All @hack: annotations live here.
+│                                  # All @yah: annotations live here.
 ├── architecture/**/*.md           # Referenced by @arch:see(...) annotations.
 ├── .hack/
 │   ├── todo.md                    # Pre-ticket inbox (structured markdown).
@@ -287,20 +287,20 @@ with `blockingChildren` list). Archive children first.
 ### Annotation reference
 
 ```rust
-//! @hack:ticket(F01, "title")       // or @hack:relay(R001, "…")
-//! @hack:kind(feature|bug|task|epic) // override kind (epic on relay only)
-//! @hack:status(open|claimed|in-progress|handoff|review|done)
-//! @hack:assignee(agent:claude)
-//! @hack:phase(P1)
-//! @hack:parent(R001)                // points at a relay
-//! @hack:severity(low|medium|high|critical)
-//! @hack:handoff("one-line summary of what was just done")
-//! @hack:next("next concrete step")  // repeatable
-//! @hack:verify("cargo test -p foo") // repeatable; prompt renders as fenced bash + combined smoke test
-//! @hack:gotcha("pre-existing breakage next agent needs to know")   // repeatable; rendered ABOVE context in prompt
-//! @hack:assumes("untested claim baked into the handoff")           // repeatable; rendered as risks
-//! @hack:cleanup("deferred debt")    // repeatable
-//! @hack:depends_on(T02)             // repeatable
+//! @yah:ticket(F01, "title")       // or @yah:relay(R001, "…")
+//! @yah:kind(feature|bug|task|epic) // override kind (epic on relay only)
+//! @yah:status(open|claimed|in-progress|handoff|review|done)
+//! @yah:assignee(agent:claude)
+//! @yah:phase(P1)
+//! @yah:parent(R001)                // points at a relay
+//! @yah:severity(low|medium|high|critical)
+//! @yah:handoff("one-line summary of what was just done")
+//! @yah:next("next concrete step")  // repeatable
+//! @yah:verify("cargo test -p foo") // repeatable; prompt renders as fenced bash + combined smoke test
+//! @yah:gotcha("pre-existing breakage next agent needs to know")   // repeatable; rendered ABOVE context in prompt
+//! @yah:assumes("untested claim baked into the handoff")           // repeatable; rendered as risks
+//! @yah:cleanup("deferred debt")    // repeatable
+//! @yah:depends_on(T02)             // repeatable
 //! @arch:see(architecture/doc.md)    // repeatable
 ```
 
@@ -355,7 +355,7 @@ port is HTTP + 1). Override with `HACK_PORT` / `HACK_UDP_PORT`.
 | `GET` | `/api/relay-doc/:id` | Markdown doc for relay |
 | `GET` | `/api/todo-prompt/:id` | Synthesized prompt for a todo (mode-aware) |
 | `POST` | `/api/archive/:id` | Archive a ticket (409 if epic with live children) |
-| `POST` | `/api/status/:id` | Drag-to-move — rewrites `@hack:status(...)` in source, 409 on disallowed transition |
+| `POST` | `/api/status/:id` | Drag-to-move — rewrites `@yah:status(...)` in source, 409 on disallowed transition |
 | `POST` | `/api/nudge` | Force re-scan |
 | `POST` | `/api/todos` | Create a todo |
 | `POST` | `/api/todos/:id/promote` | Mark as promoted (optional `{relay_id}` link) |
@@ -412,23 +412,23 @@ which a formal spec should either ratify or replace:
    a lint that catches agents picking IDs manually.
 2. **Review sign-off is a human gesture.** Nothing distinguishes "AI said
    it's done" from "human reviewed and accepted." Do we want a
-   `@hack:reviewed_by(human:name)` annotation? A separate `signed-off`
+   `@yah:reviewed_by(human:name)` annotation? A separate `signed-off`
    status between `review` and archive?
 3. **Cascade archive.** Currently epics must be archived one-child-at-a-time.
    When do we introduce `?cascade=true`?
 4. **Concurrency scope.** The lock prevents ID collision. It does *not*
-   prevent two agents from both editing the same ticket's `@hack:status`
+   prevent two agents from both editing the same ticket's `@yah:status`
    line. Is that a problem worth solving, or does source control catch it?
 5. **Relay "versions".** Rule03 says same R-number across iterations. Do we
    ever want `R001.2` / `R001.3` for auditability, or is the event log
    enough?
 6. **Todo → ticket linkage.** `todo_promoted` records a free-form
    `relay_id`. Should the target relay carry a back-reference annotation
-   (`@hack:from_todo(T-abc)`)?
-7. **Parent tracking on `depends_on`.** We parse `@hack:depends_on(...)`
+   (`@yah:from_todo(T-abc)`)?
+7. **Parent tracking on `depends_on`.** We parse `@yah:depends_on(...)`
    and display pills, but nothing blocks archiving a ticket whose
    dependency hasn't been archived. Is a block warranted?
-8. **Test/verify enforcement.** The archive UI surfaces `@hack:verify(…)`
+8. **Test/verify enforcement.** The archive UI surfaces `@yah:verify(…)`
    commands but doesn't run them. A future step could shell them out and
    refuse archive on non-zero exit.
 9. **Multi-agent presence.** The board doesn't show which agents are

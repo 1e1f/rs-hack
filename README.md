@@ -53,7 +53,7 @@ top-level one. Two subcommands extend it with source-embedded metadata:
   by the `rs-hack-arch` crate.
 - **`rs-hack board …`** — [hack-board](hack-board/README.md): a
   source-embedded kanban for AI agents. Tickets, relays, and epics live
-  as `@hack:…` annotations in source. Includes a live web UI
+  as `@yah:…` annotations in source. Includes a live web UI
   (`rs-hack board serve`), atomic ID allocation (`rs-hack board claim`),
   and an SDLC ruleset (`rs-hack board rules`). See
   [hack-board/README.md](hack-board/README.md) for the full model.
@@ -261,7 +261,7 @@ rs-hack add --name Rectangle --field "color: String" --paths src --apply
 ## hack-board — source-embedded kanban
 
 rs-hack also ships a lightweight kanban board for coordinating work across
-agents. Tickets and relays live as `@hack:` doc-comment annotations in Rust
+agents. Tickets and relays live as `@yah:` doc-comment annotations in Rust
 source — no separate issue tracker, no sync problem. See
 [hack-board/README.md](hack-board/README.md) for the full model.
 

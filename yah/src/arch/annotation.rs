@@ -123,53 +123,53 @@ pub enum ArchKind {
     /// Unknown annotation (preserved for extensibility)
     Unknown { key: String, value: String },
 
-    // ── @hack: work-item annotations ──────────────────────────────
+    // ── @yah: work-item annotations ──────────────────────────────
     // Two nouns: Ticket (unit of work) and Relay (thread of work).
     // Everything else is a tag on one of these.
 
-    /// @hack:ticket(ID, "title") - a unit of work
+    /// @yah:ticket(ID, "title") - a unit of work
     Ticket { id: String, title: String },
 
-    /// @hack:relay(ID, "title") - a thread of work / coordination point
+    /// @yah:relay(ID, "title") - a thread of work / coordination point
     Relay { id: String, title: String },
 
-    /// @hack:kind(feature|bug|task) - what kind of ticket
+    /// @yah:kind(feature|bug|task) - what kind of ticket
     Kind(String),
 
-    /// @hack:status(open|claimed|in-progress|handoff|review|done)
+    /// @yah:status(open|claimed|in-progress|handoff|review|done)
     Status(String),
 
-    /// @hack:assignee(agent:claude, user:leif, etc.)
+    /// @yah:assignee(agent:claude, user:leif, etc.)
     Assignee(String),
 
-    /// @hack:phase(P1) - ordering tag within a relay
+    /// @yah:phase(P1) - ordering tag within a relay
     Phase(String),
 
-    /// @hack:parent(R001) - relay-to-relay hierarchy (epic = relay with children)
+    /// @yah:parent(R001) - relay-to-relay hierarchy (epic = relay with children)
     Parent(String),
 
-    /// @hack:severity(low|medium|high|critical)
+    /// @yah:severity(low|medium|high|critical)
     HackSeverity(String),
 
-    /// @hack:handoff("summary of work done and what remains")
+    /// @yah:handoff("summary of work done and what remains")
     Handoff(String),
 
-    /// @hack:next("description of what the next agent should do")
+    /// @yah:next("description of what the next agent should do")
     Next(String),
 
-    /// @hack:cleanup("dead code or deferred work item")
+    /// @yah:cleanup("dead code or deferred work item")
     Cleanup(String),
 
-    /// @hack:verify("how to know this relay is complete")
+    /// @yah:verify("how to know this relay is complete")
     Verify(String),
 
-    /// @hack:gotcha("pre-existing breakage / trap the next agent needs to know up front")
+    /// @yah:gotcha("pre-existing breakage / trap the next agent needs to know up front")
     ///
     /// Rendered at the **top** of the pickup prompt, before the context block,
     /// so the next agent doesn't stub their toe on a known issue. Repeatable.
     Gotcha(String),
 
-    /// @hack:assumes("claim I didn't fully verify — next agent should confirm or challenge")
+    /// @yah:assumes("claim I didn't fully verify — next agent should confirm or challenge")
     ///
     /// Flags an unverified assumption that was baked into the handoff. Rendered
     /// in its own section in the pickup prompt so the next agent can treat it
@@ -338,7 +338,7 @@ impl ArchKind {
             "note" => Self::Note(value.to_string()),
             "see" => Self::See(value.to_string()),
 
-            // ── @hack: work-item annotations ──────────────────────
+            // ── @yah: work-item annotations ──────────────────────
             // All work items map to Ticket. "feature", "bug", "task" are legacy
             // aliases that also set the kind implicitly.
             "ticket" | "feature" | "bug" | "task" => {
@@ -375,7 +375,7 @@ impl ArchKind {
     }
 }
 
-/// Parse "ID, title" or "ID, \"title\"" format used by @hack:ticket and @hack:relay.
+/// Parse "ID, title" or "ID, \"title\"" format used by @yah:ticket and @yah:relay.
 fn parse_id_title(value: &str) -> (String, String) {
     if let Some(comma_pos) = value.find(',') {
         let id = value[..comma_pos].trim().to_string();

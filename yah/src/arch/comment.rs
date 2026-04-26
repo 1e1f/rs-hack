@@ -10,8 +10,8 @@
 //! when you want to record "why we're doing it this way" without conflating
 //! it with "here's what I just did".
 //!
-//! Storage: `.hack/comments/{relay}/{timestamp}-{author}.md` (relay-scoped)
-//! or `.hack/comments/_inbox/{timestamp}-{author}.md` (no relay).
+//! Storage: `.yah/comments/{relay}/{timestamp}-{author}.md` (relay-scoped)
+//! or `.yah/comments/_inbox/{timestamp}-{author}.md` (no relay).
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ pub fn write_comment(
     relay: Option<&str>,
     author: Option<&str>,
 ) -> Result<Comment> {
-    let comments_dir = workspace.join(".hack").join("comments");
+    let comments_dir = workspace.join(".yah").join("comments");
     let bucket = relay.unwrap_or("_inbox");
     let dir = comments_dir.join(bucket);
     std::fs::create_dir_all(&dir)
@@ -81,7 +81,7 @@ pub fn write_comment(
 }
 
 pub fn read_comments(workspace: &Path) -> Result<Vec<Comment>> {
-    let comments_dir = workspace.join(".hack").join("comments");
+    let comments_dir = workspace.join(".yah").join("comments");
     if !comments_dir.exists() {
         return Ok(Vec::new());
     }
@@ -184,13 +184,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let c = write_comment(
             tmp.path(),
-            "Why we picked the shard layout: avoids merge conflicts on `.hack/events.jsonl`.",
+            "Why we picked the shard layout: avoids merge conflicts on `.yah/events.jsonl`.",
             Some("R002"),
             Some("agent:claude"),
         )
         .unwrap();
         assert_eq!(c.relay.as_deref(), Some("R002"));
-        assert!(c.file.starts_with(tmp.path().join(".hack/comments/R002")));
+        assert!(c.file.starts_with(tmp.path().join(".yah/comments/R002")));
 
         let all = read_comments(tmp.path()).unwrap();
         assert_eq!(all.len(), 1);
@@ -206,7 +206,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let c = write_comment(tmp.path(), "Pre-relay design thought.", None, None).unwrap();
         assert!(c.relay.is_none());
-        assert!(c.file.starts_with(tmp.path().join(".hack/comments/_inbox")));
+        assert!(c.file.starts_with(tmp.path().join(".yah/comments/_inbox")));
 
         let all = read_comments(tmp.path()).unwrap();
         assert_eq!(all.len(), 1);

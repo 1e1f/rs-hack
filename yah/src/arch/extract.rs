@@ -1,15 +1,15 @@
 //! @arch:layer(arch)
 //! @arch:role(extract)
 //! @arch:role(parser)
-//! @hack:ticket(R001-T2, "Scan non-Rust files for @hack: annotations (md, ts, toml, yaml)")
-//! @hack:assignee(agent:claude)
-//! @hack:status(review)
-//! @hack:handoff("P1+P2+P3 landed. AnnotationTarget::File { path, anchor } variant added; line_extract walks ts/tsx/js/jsx/md/toml/yaml with per-language comment-prefix tables (TS: //, //!, ///, /**, /*, *; MD: empty prefix with code-fence skipping; TOML/YAML: #). Block grouping mirrors Rust's per-doc-block: contiguous comment-prefixed (or non-blank for MD) lines share an anchor. Wired into extract_from_workspace via extension dispatch. Tests: 10 new integration tests in rs-hack-arch/tests/non_rust_extract.rs (TS module block, // and /** */, MD with/without code fences, TOML/YAML, blank-line block break, File target id format, @arch on MD). Smoke verified: rs-hack board status / show R002-T1 surfaces with source ./hack-board/src/server.ts:1. P3 archive endpoint: hack-board/src/server.ts::stripHackAnnotations now dispatches via annotationStripRulesFor(filePath) — covers .rs/.ts/.tsx/.js/.jsx/.md/.toml/.yaml/.yml. Validated all rules with an inline bun smoke test (15/15 pass). Drive-by: dogfood test_hack_tickets_from_workspace was asserting on archived R001 — rewrote to bind to lex-first live ticket so it survives ID turnover.")
-//! @hack:cleanup("setHackStatus (drag-and-drop column move) at hack-board/src/server.ts:889 still uses Rust-only //! / /// regexes — TS/MD tickets will silently no-op when dragged between columns. Same per-extension dispatch pattern as stripHackAnnotations applies; refactor both to share annotationStripRulesFor.")
-//! @hack:cleanup("compute_workspace_hash now hashes non-Rust files too, so cached-graph invalidation should be correct — but no test covers that.")
-//! @hack:verify("cargo test -p rs-hack-arch")
-//! @hack:verify("rs-hack board show R002-T1 — surfaces with source ./hack-board/src/server.ts:1")
-//! @hack:verify("Smoke archive: bun run hack-board/src/server.ts in a test workspace, drag a .ts ticket to Review, click archive — should strip @hack: lines from the .ts file and append an `archived` event to .hack/events/<shard>.jsonl")
+//! @yah:ticket(R001-T2, "Scan non-Rust files for @yah: annotations (md, ts, toml, yaml)")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:handoff("P1+P2+P3 landed. AnnotationTarget::File { path, anchor } variant added; line_extract walks ts/tsx/js/jsx/md/toml/yaml with per-language comment-prefix tables (TS: //, //!, ///, /**, /*, *; MD: empty prefix with code-fence skipping; TOML/YAML: #). Block grouping mirrors Rust's per-doc-block: contiguous comment-prefixed (or non-blank for MD) lines share an anchor. Wired into extract_from_workspace via extension dispatch. Tests: 10 new integration tests in rs-hack-arch/tests/non_rust_extract.rs (TS module block, // and /** */, MD with/without code fences, TOML/YAML, blank-line block break, File target id format, @arch on MD). Smoke verified: rs-hack board status / show R002-T1 surfaces with source ./hack-board/src/server.ts:1. P3 archive endpoint: hack-board/src/server.ts::stripHackAnnotations now dispatches via annotationStripRulesFor(filePath) — covers .rs/.ts/.tsx/.js/.jsx/.md/.toml/.yaml/.yml. Validated all rules with an inline bun smoke test (15/15 pass). Drive-by: dogfood test_hack_tickets_from_workspace was asserting on archived R001 — rewrote to bind to lex-first live ticket so it survives ID turnover.")
+//! @yah:cleanup("setHackStatus (drag-and-drop column move) at hack-board/src/server.ts:889 still uses Rust-only //! / /// regexes — TS/MD tickets will silently no-op when dragged between columns. Same per-extension dispatch pattern as stripHackAnnotations applies; refactor both to share annotationStripRulesFor.")
+//! @yah:cleanup("compute_workspace_hash now hashes non-Rust files too, so cached-graph invalidation should be correct — but no test covers that.")
+//! @yah:verify("cargo test -p rs-hack-arch")
+//! @yah:verify("rs-hack board show R002-T1 — surfaces with source ./hack-board/src/server.ts:1")
+//! @yah:verify("Smoke archive: bun run hack-board/src/server.ts in a test workspace, drag a .ts ticket to Review, click archive — should strip @yah: lines from the .ts file and append an `archived` event to .yah/events/<shard>.jsonl")
 //! @arch:see(architecture/ts-annotation-scanning.md)
 //!
 //! Annotation extraction from Rust source files.
@@ -86,14 +86,14 @@ const TS_PREFIXES: &[&str] = &["//!", "///", "/**", "//", "/*", "*"];
 const TOML_PREFIXES: &[&str] = &["#"];
 const MD_PREFIXES: &[&str] = &[""];
 
-/// Extract `@hack:` / `@arch:` annotations from a non-Rust file using a
+/// Extract `@yah:` / `@arch:` annotations from a non-Rust file using a
 /// per-language comment-prefix table. Block-grouping rule: contiguous
 /// comment lines (or, for empty-prefix formats like Markdown, contiguous
 /// non-blank lines) share an `anchor` so multi-line headers like
 ///
 /// ```text
-/// //! @hack:ticket(R002-T1, "...")
-/// //! @hack:status(review)
+/// //! @yah:ticket(R002-T1, "...")
+/// //! @yah:status(review)
 /// ```
 ///
 /// roll up into one ticket. A non-comment / blank line / fence boundary
@@ -133,7 +133,7 @@ pub fn line_extract(
                 let trimmed = after_prefix.trim_start();
                 let annotation_rest = trimmed
                     .strip_prefix("@arch:")
-                    .or_else(|| trimmed.strip_prefix("@hack:"));
+                    .or_else(|| trimmed.strip_prefix("@yah:"));
                 if let Some(rest) = annotation_rest {
                     let anchor = *block_anchor.get_or_insert(line_num);
                     if let Some(kind) = parse_single_annotation(rest.trim()) {
@@ -255,7 +255,7 @@ fn extract_from_inner_attrs(
             let trimmed = line.trim();
             let annotation_rest = trimmed
                 .strip_prefix("@arch:")
-                .or_else(|| trimmed.strip_prefix("@hack:"));
+                .or_else(|| trimmed.strip_prefix("@yah:"));
             if let Some(rest) = annotation_rest {
                 if let Some(kind) = parse_single_annotation(rest.trim()) {
                     annotations.push(ArchAnnotation {
@@ -380,7 +380,7 @@ fn extract_from_attrs(
             let trimmed = line.trim();
             let annotation_rest = trimmed
                 .strip_prefix("@arch:")
-                .or_else(|| trimmed.strip_prefix("@hack:"));
+                .or_else(|| trimmed.strip_prefix("@yah:"));
             if let Some(rest) = annotation_rest {
                 if let Some(kind) = parse_single_annotation(rest.trim()) {
                     annotations.push(ArchAnnotation {

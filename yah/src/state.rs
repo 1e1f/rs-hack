@@ -31,23 +31,24 @@ pub fn generate_run_id() -> String {
 /// Get the state directory path
 ///
 /// Priority order:
-/// 1. Environment variable RS_HACK_STATE_DIR (highest priority)
-/// 2. --local-state flag (uses ./.rs-hack)
+/// 1. Environment variable YAH_STATE_DIR (or legacy RS_HACK_STATE_DIR)
+/// 2. --local-state flag (uses ./.yah)
 /// 3. Global default (uses system data directory)
 pub fn get_state_dir(local: bool) -> Result<PathBuf> {
-    // Priority 1: Check environment variable
-    if let Ok(custom_dir) = std::env::var("RS_HACK_STATE_DIR") {
+    // Priority 1: Check environment variable (canonical YAH_STATE_DIR; fall back to legacy)
+    if let Ok(custom_dir) = std::env::var("YAH_STATE_DIR")
+        .or_else(|_| std::env::var("RS_HACK_STATE_DIR"))
+    {
         return Ok(PathBuf::from(custom_dir));
     }
 
     // Priority 2: Local state flag
     if local {
-        // Use project-local .rs-hack directory
         let current_dir = std::env::current_dir()?;
-        Ok(current_dir.join(".rs-hack"))
+        Ok(current_dir.join(".yah"))
     } else {
         // Priority 3: Use user's home directory (default)
-        let proj_dirs = ProjectDirs::from("com", "rs-hack", "rs-hack")
+        let proj_dirs = ProjectDirs::from("com", "yah", "yah")
             .context("Could not determine project directories")?;
         Ok(proj_dirs.data_dir().to_path_buf())
     }

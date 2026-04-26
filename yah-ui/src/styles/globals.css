@@ -236,3 +236,28 @@ kbd {
 
 /* dnd-kit drag state */
 .dragging { opacity: 0.55; transform: rotate(0.6deg); }
+
+/* ─── arch graph (mermaid HTML node labels)
+   Two-line label per node: shortName in mono, role in italic serif.
+   Mermaid renders these inside its own foreignObject; the outer rect
+   gets layer-hue stroke via `classDef` in GraphPane.tsx. */
+.arch-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  line-height: 1.15;
+}
+.arch-node-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.arch-node-role {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 10px;
+  color: var(--color-ink-3);
+}

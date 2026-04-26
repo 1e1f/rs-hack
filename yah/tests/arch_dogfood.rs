@@ -423,7 +423,7 @@ fn test_hack_tickets_from_workspace() {
 
     assert!(
         !board.tickets.is_empty(),
-        "Should find at least one @hack: ticket in the workspace"
+        "Should find at least one @yah: ticket in the workspace"
     );
 
     // Pick the lex-first live ticket and exercise prompt generation

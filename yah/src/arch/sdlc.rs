@@ -69,7 +69,7 @@ pub const RULES: &[SdlcRule] = &[
         title: "First action on pickup is the claim",
         rule: "Your first action on picking up a ticket is `rs-hack board claim <ID>` \
                (Open → Active) or `rs-hack board move <ID> active` (Handoff → Active). \
-               Either one flips `@hack:status(in-progress)` and sets assignee atomically. \
+               Either one flips `@yah:status(in-progress)` and sets assignee atomically. \
                No other code changes come before the claim is recorded.",
         why: "The status flip is the claim signal — until it lands in source, another agent \
               can't see the ticket is taken. The Prompt button copies a continuation prompt \
@@ -83,12 +83,12 @@ pub const RULES: &[SdlcRule] = &[
         rule: "Allocate every relay, epic, and ticket via `rs-hack board open` or \
                `rs-hack board claim` — never hand-write an annotation with an ID you \
                chose by reading the board and picking `max+1`.",
-        why: "The allocator holds `.hack/id.lock` during scan+write. Two agents running in \
+        why: "The allocator holds `.yah/id.lock` during scan+write. Two agents running in \
               parallel will otherwise pick the same number and silently clobber one ticket \
               at merge time.",
         apply: "Relay IDs (`R008`) and compound sub-tickets (`R007-T1`) alike. If you find \
                 yourself typing any ID into a source file, stop — use `open` or `claim` and \
-                paste the stdout ID. (Legacy bare tickets with `@hack:parent(...)` are gone; \
+                paste the stdout ID. (Legacy bare tickets with `@yah:parent(...)` are gone; \
                 a ticket under a relay is always compound.)",
         contexts: &[Context::NewWork],
     },
@@ -108,8 +108,8 @@ pub const RULES: &[SdlcRule] = &[
         id: "Rule04",
         title: "Archive, don't settle in Review",
         rule: "`status(done)` is short-lived staging. The terminal action is archive — the \
-               archive button (or `POST /api/archive/:id`) — which strips `@hack:…` lines \
-               from source and appends to `.hack/events.jsonl`.",
+               archive button (or `POST /api/archive/:id`) — which strips `@yah:…` lines \
+               from source and appends to `.yah/events.jsonl`.",
         why: "Tickets parked in Review pollute the board and lose signal. Archive removes \
               them cleanly and preserves an audit trail in the event log.",
         apply: "Once signed off, archive. Don't treat `status(done)` as a resting Done column.",
@@ -130,12 +130,12 @@ pub const RULES: &[SdlcRule] = &[
         id: "Rule06",
         title: "Epics coordinate, they don't carry work",
         rule: "An epic is a parent coordination point; work happens on its children. Its \
-               own `@hack:status(...)` is ignored — state is derived from children.",
+               own `@yah:status(...)` is ignored — state is derived from children.",
         why: "Treating an epic as a workable ticket lets agents pick it up when they \
               should be picking up a child. Derived status keeps the board truthful.",
         apply: "If you land on an epic, claim one of its child relays (or a sub-ticket of \
-                one) instead. An epic is any relay with `@hack:kind(epic)` explicitly, or \
-                any relay that has other bare-R relays pointing at it via `@hack:parent(...)` — \
+                one) instead. An epic is any relay with `@yah:kind(epic)` explicitly, or \
+                any relay that has other bare-R relays pointing at it via `@yah:parent(...)` — \
                 compound sub-tickets like `R007-T1` don't promote their parent.",
         contexts: &[Context::NewWork, Context::Pickup],
     },
@@ -144,13 +144,13 @@ pub const RULES: &[SdlcRule] = &[
         title: "Source is truth; the three verbs are the interface",
         rule: "The only way to change board state is to write source. In practice that \
                means `rs-hack board open` / `claim` / `move`, or the archive / add-todo \
-               card actions — each of which edits source (or `.hack/`) for you. Anything \
+               card actions — each of which edits source (or `.yah/`) for you. Anything \
                that sidesteps a source edit desyncs on the next scan.",
         why: "Source is the single source of truth. The board watcher rescans after every \
               write; without a write there's nothing to scan.",
         apply: "Changing status, phase, parent, assignee, handoff, next, verify, gotcha, \
                 assumes, cleanup — reach for `board move` (or `open`/`claim` for creation). \
-                Hand-editing the `@hack:…` line directly still works and is fine for one-off \
+                Hand-editing the `@yah:…` line directly still works and is fine for one-off \
                 corrections, but the verbs are what keep the transition matrix honest.",
         contexts: &[Context::Pickup, Context::Finishing, Context::Refactor],
     },
@@ -178,10 +178,10 @@ pub const RULES: &[SdlcRule] = &[
                sub-tickets but doesn't belong on any one of them: `@arch:see(...)` \
                pointers to architecture docs, cross-ticket ordering beyond simple \
                phases, shared assumptions/gotchas/constraints you've discovered, and \
-               narrative `@hack:next(...)` guidance (strategy, caveats, pointers) for \
-               the next picker. It does **not** carry discrete work. If a `@hack:next` \
+               narrative `@yah:next(...)` guidance (strategy, caveats, pointers) for \
+               the next picker. It does **not** carry discrete work. If a `@yah:next` \
                line names a concrete file to edit, test to add, bug to fix, or doc to \
-               update, it's a ticket — open one per Rule08 and use `@hack:next` to say how \
+               update, it's a ticket — open one per Rule08 and use `@yah:next` to say how \
                the tickets relate ('start T1, then T2 blocks on T3', 'watch out for Z \
                in all of these').",
         why: "Agent contexts are ephemeral; the relay is what survives between sessions. \
@@ -194,7 +194,7 @@ pub const RULES: &[SdlcRule] = &[
         apply: "Writing a handoff — put on the relay anything that matters *across* \
                 tickets (doc refs, ordering, shared gotchas, strategy) and open a \
                 ticket for anything that's itself a concrete work unit. Before adding \
-                a `@hack:next` line, ask: 'is this a concrete chunk of work?' If yes \
+                a `@yah:next` line, ask: 'is this a concrete chunk of work?' If yes \
                 → `rs-hack board open --kind task --parent R<n>`. If it's context the \
                 next picker needs to read first → keep it on the relay.",
         contexts: &[Context::Finishing, Context::NewWork],
@@ -243,7 +243,7 @@ pub const RULES: &[SdlcRule] = &[
     SdlcRule {
         id: "Rule12",
         title: "Annotations live at module or top-level item scope",
-        rule: "Place `@hack:` annotations at module level (`//!` at file top, or inside \
+        rule: "Place `@yah:` annotations at module level (`//!` at file top, or inside \
                `mod foo { //! … }`) or on `///` attached to a top-level item — `struct`, \
                `enum`, `fn`, `impl`, `mod`. The scanner does **not** read `///` on enum \
                variants, struct fields, methods inside `impl` blocks, consts, statics, \
@@ -252,7 +252,7 @@ pub const RULES: &[SdlcRule] = &[
               Items; inner members aren't traversed. An annotation placed on an enum \
               variant or an impl method looks fine in source but is invisible to the \
               board — no card appears and the ticket silently doesn't exist.",
-        apply: "Writing a new ticket or relay, or adding `@hack:next` / `@hack:handoff` \
+        apply: "Writing a new ticket or relay, or adding `@yah:next` / `@yah:handoff` \
                 lines during finishing. If a card you expected to see isn't on the \
                 board, check whether its annotation is on an inner member — that's the \
                 likely cause. File-level (`//!`) is always safe.",
@@ -269,7 +269,7 @@ pub const RULES: &[SdlcRule] = &[
         why: "Two common mistakes: (1) moving a finished ticket back to Active when \
               there's more to do — that hides completed work; (2) self-archiving when the \
               tasks are met but no human has verified — that bypasses the one gate where \
-              `@hack:verify(...)` gets exercised. Handoff passes a still-alive baton; \
+              `@yah:verify(...)` gets exercised. Handoff passes a still-alive baton; \
               Review is the final checkpoint before archive.",
         apply: "More work to follow → `rs-hack board move R<n> handoff` with updated \
                 handoff/next (same R-number per Rule03). Tasks met, nothing left to do → \

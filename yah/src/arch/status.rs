@@ -3,8 +3,8 @@
 //!
 //! Board status summary — the "what's in flight" view for planning agents.
 //!
-//! Aggregates [`TicketBoard`] plus light reads of `.hack/todo.md` and
-//! `.hack/events.jsonl` into a single snapshot an agent can consume in one
+//! Aggregates [`TicketBoard`] plus light reads of `.yah/todo.md` and
+//! `.yah/events.jsonl` into a single snapshot an agent can consume in one
 //! command. Deliberately different shape from `board tickets` (per-ticket
 //! dump): counts, ownership, epic progress, smell signals.
 
@@ -28,11 +28,11 @@ pub struct BoardStatus {
     /// Epics with live child progress.
     pub epics: Vec<EpicSummary>,
 
-    /// Pre-ticket inbox from `.hack/todo.md`.
+    /// Pre-ticket inbox from `.yah/todo.md`.
     pub todos: Vec<TodoSummary>,
 
     /// Smell: tickets that disappeared from source without an archive event.
-    /// Up to 5 most-recent IDs; full log in `.hack/events.jsonl`.
+    /// Up to 5 most-recent IDs; full log in `.yah/events.jsonl`.
     pub disappeared: Vec<String>,
 
     /// Total count of `disappeared` events in the log, even if later restored.
@@ -90,7 +90,7 @@ pub struct TodoSummary {
 
 impl BoardStatus {
     /// Compute a status snapshot from the board and a workspace root. Reads
-    /// `.hack/todo.md` and `.hack/events.jsonl` best-effort — missing files
+    /// `.yah/todo.md` and `.yah/events.jsonl` best-effort — missing files
     /// yield empty sections, not errors.
     pub fn compute(board: &TicketBoard, workspace: &Path) -> Self {
         let mut counts = ColumnCounts::default();
@@ -226,7 +226,7 @@ impl BoardStatus {
         if self.disappeared_total > 0 {
             out.push_str("## Smell — disappeared tickets\n\n");
             out.push_str(&format!(
-                "{} total `disappeared` events in `.hack/events.jsonl`. Most recent IDs: {}\n\n",
+                "{} total `disappeared` events in `.yah/events.jsonl`. Most recent IDs: {}\n\n",
                 self.disappeared_total,
                 if self.disappeared.is_empty() {
                     "(none)".to_string()
@@ -285,7 +285,7 @@ fn summarize_epic(board: &TicketBoard, epic: &Ticket) -> EpicSummary {
 }
 
 fn read_todos(workspace: &Path) -> Vec<TodoSummary> {
-    let path = workspace.join(".hack").join("todo.md");
+    let path = workspace.join(".yah").join("todo.md");
     let content = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
@@ -347,8 +347,8 @@ fn preview_text(s: &str, max: usize) -> String {
 
 /// Returns (up-to-5 most recent disappeared IDs, total count).
 ///
-/// Reads the per-relay event shards at `.hack/events/*.jsonl` when they
-/// exist. Falls back to the legacy single-file `.hack/events.jsonl` for
+/// Reads the per-relay event shards at `.yah/events/*.jsonl` when they
+/// exist. Falls back to the legacy single-file `.yah/events.jsonl` for
 /// workspaces that haven't been migrated yet — the board server's first
 /// run rewrites the legacy file into shards, but this function should
 /// work either way so `rs-hack board status` doesn't break during
@@ -356,7 +356,7 @@ fn preview_text(s: &str, max: usize) -> String {
 fn scan_disappeared(workspace: &Path) -> (Vec<String>, usize) {
     let mut lines: Vec<String> = Vec::new();
 
-    let shard_dir = workspace.join(".hack").join("events");
+    let shard_dir = workspace.join(".yah").join("events");
     if shard_dir.is_dir() {
         if let Ok(entries) = std::fs::read_dir(&shard_dir) {
             for entry in entries.flatten() {
@@ -370,7 +370,7 @@ fn scan_disappeared(workspace: &Path) -> (Vec<String>, usize) {
             }
         }
     } else {
-        let legacy = workspace.join(".hack").join("events.jsonl");
+        let legacy = workspace.join(".yah").join("events.jsonl");
         if let Ok(content) = std::fs::read_to_string(&legacy) {
             lines.extend(content.lines().map(|l| l.to_string()));
         }
@@ -449,7 +449,7 @@ see: reference architecture/x.md
     fn scan_disappeared_legacy_single_file() {
         let tmp = std::env::temp_dir().join("rs-hack-status-test-disappeared-legacy");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join(".hack")).unwrap();
+        std::fs::create_dir_all(tmp.join(".yah")).unwrap();
         let log = "\
 {\"t\":1,\"type\":\"created\",\"id\":\"X1\"}
 {\"t\":2,\"type\":\"disappeared\",\"id\":\"A\"}
@@ -457,7 +457,7 @@ see: reference architecture/x.md
 {\"t\":4,\"type\":\"disappeared\",\"id\":\"B\"}
 {\"t\":5,\"type\":\"disappeared\",\"id\":\"C\"}
 ";
-        std::fs::write(tmp.join(".hack").join("events.jsonl"), log).unwrap();
+        std::fs::write(tmp.join(".yah").join("events.jsonl"), log).unwrap();
         let (ids, n) = scan_disappeared(&tmp);
         assert_eq!(n, 3);
         assert_eq!(ids, vec!["C", "B", "A"]);
@@ -469,15 +469,15 @@ see: reference architecture/x.md
         // union them, sort by timestamp, and return the most recent.
         let tmp = std::env::temp_dir().join("rs-hack-status-test-disappeared-shards");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join(".hack").join("events")).unwrap();
+        std::fs::create_dir_all(tmp.join(".yah").join("events")).unwrap();
         std::fs::write(
-            tmp.join(".hack").join("events").join("R001.jsonl"),
+            tmp.join(".yah").join("events").join("R001.jsonl"),
             "{\"t\":2,\"type\":\"disappeared\",\"id\":\"A\"}\n\
              {\"t\":4,\"type\":\"disappeared\",\"id\":\"B\"}\n",
         )
         .unwrap();
         std::fs::write(
-            tmp.join(".hack").join("events").join("R002.jsonl"),
+            tmp.join(".yah").join("events").join("R002.jsonl"),
             "{\"t\":5,\"type\":\"disappeared\",\"id\":\"C\"}\n\
              {\"t\":1,\"type\":\"scan\",\"id\":\"R002\",\"hash\":\"abc\"}\n",
         )
@@ -494,14 +494,14 @@ see: reference architecture/x.md
         // migrated state wins.
         let tmp = std::env::temp_dir().join("rs-hack-status-test-disappeared-both");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join(".hack").join("events")).unwrap();
+        std::fs::create_dir_all(tmp.join(".yah").join("events")).unwrap();
         std::fs::write(
-            tmp.join(".hack").join("events.jsonl"),
+            tmp.join(".yah").join("events.jsonl"),
             "{\"t\":1,\"type\":\"disappeared\",\"id\":\"LEGACY\"}\n",
         )
         .unwrap();
         std::fs::write(
-            tmp.join(".hack").join("events").join("R001.jsonl"),
+            tmp.join(".yah").join("events").join("R001.jsonl"),
             "{\"t\":2,\"type\":\"disappeared\",\"id\":\"SHARD\"}\n",
         )
         .unwrap();

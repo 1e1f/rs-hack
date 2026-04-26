@@ -90,6 +90,7 @@ export function ArchView() {
           subgraph={mockArchSubgraph}
           depth={depth}
           enabledKinds={enabledKinds}
+          onNodeClick={(id) => setRootId(id)}
         />
       </div>
     </div>

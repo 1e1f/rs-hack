@@ -1,9 +1,9 @@
 //! @arch:layer(arch)
 //! @arch:role(bridge)
-//! @hack:ticket(R001-T1, "Promote: board writes relay annotation back to source via rs-hack MCP")
-//! @hack:assignee(agent:claude)
-//! @hack:phase(P2)
-//! @hack:status(review)
+//! @yah:ticket(R001-T1, "Promote: board writes relay annotation back to source via rs-hack MCP")
+//! @yah:assignee(agent:claude)
+//! @yah:phase(P2)
+//! @yah:status(review)
 //!
 //! MCP (Model Context Protocol) integration for rs-hack-arch.
 //! Exposes architecture queries as tools for Claude and other AI assistants.
@@ -140,7 +140,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "hack_tickets".into(),
-            description: "Scan workspace for @hack:ticket and @hack:relay annotations. Returns a kanban board (Epics/Open/Active/Handoff/Review) of all work items with status, assignee, phase, parent, severity, and handoff messages. Compound sub-ticket IDs (e.g. R007-T1) are recognized and their parent is inferred from the prefix. Use format=json for web UI consumption.".into(),
+            description: "Scan workspace for @yah:ticket and @yah:relay annotations. Returns a kanban board (Epics/Open/Active/Handoff/Review) of all work items with status, assignee, phase, parent, severity, and handoff messages. Compound sub-ticket IDs (e.g. R007-T1) are recognized and their parent is inferred from the prefix. Use format=json for web UI consumption.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -192,13 +192,13 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "hack_promote".into(),
-            description: "Promote an inbox summary to a real `@hack:relay(...)` annotation in source. Allocates the next R-number under a workspace-wide file lock, writes the annotation block to `target_file` (must be a .rs file), and updates the summary frontmatter (`promoted: true`, `relay_id`, `relay_title`). The relay lands in the Handoff column with the summary's first paragraph as `@hack:handoff(...)`. Use this after `hack_summary` to graduate freeform notes into trackable work.".into(),
+            description: "Promote an inbox summary to a real `@yah:relay(...)` annotation in source. Allocates the next R-number under a workspace-wide file lock, writes the annotation block to `target_file` (must be a .rs file), and updates the summary frontmatter (`promoted: true`, `relay_id`, `relay_title`). The relay lands in the Handoff column with the summary's first paragraph as `@yah:handoff(...)`. Use this after `hack_summary` to graduate freeform notes into trackable work.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "summary_id": {
                         "type": "string",
-                        "description": "ID of the summary to promote (filename stem under .hack/summaries/, e.g. 'summary-1776192331')"
+                        "description": "ID of the summary to promote (filename stem under .yah/summaries/, e.g. 'summary-1776192331')"
                     },
                     "target_file": {
                         "type": "string",
@@ -210,7 +210,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "assignee": {
                         "type": "string",
-                        "description": "Optional @hack:assignee(...) value, e.g. 'agent:claude'"
+                        "description": "Optional @yah:assignee(...) value, e.g. 'agent:claude'"
                     },
                     "path": {
                         "type": "string",

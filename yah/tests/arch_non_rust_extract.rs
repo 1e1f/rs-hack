@@ -1,5 +1,5 @@
 //! Coverage for `line_extract` — the per-language scanner that picks up
-//! `@hack:` / `@arch:` annotations from non-Rust files (TS, MD, TOML, YAML).
+//! `@yah:` / `@arch:` annotations from non-Rust files (TS, MD, TOML, YAML).
 //! Each test writes a fixture into a temp dir, runs the workspace
 //! extractor, and asserts the resulting tickets / annotation targets.
 
@@ -23,9 +23,9 @@ fn ts_file_module_block_extracts_ticket() {
     let dir = temp_workspace("ts_module_block");
     fs::write(
         dir.join("server.ts"),
-        r#"//! @hack:ticket(T01, "ts ticket")
-//! @hack:status(open)
-//! @hack:assignee(agent:claude)
+        r#"//! @yah:ticket(T01, "ts ticket")
+//! @yah:status(open)
+//! @yah:assignee(agent:claude)
 
 export function main() {}
 "#,
@@ -47,8 +47,8 @@ fn ts_double_slash_comment_extracts() {
     let dir = temp_workspace("ts_double_slash");
     fs::write(
         dir.join("api.ts"),
-        r#"// @hack:ticket(T02, "double slash works")
-// @hack:status(open)
+        r#"// @yah:ticket(T02, "double slash works")
+// @yah:status(open)
 
 const x = 1;
 "#,
@@ -65,8 +65,8 @@ fn ts_jsdoc_star_continuation_extracts() {
     fs::write(
         dir.join("util.ts"),
         r#"/**
- * @hack:ticket(T03, "jsdoc body")
- * @hack:status(open)
+ * @yah:ticket(T03, "jsdoc body")
+ * @yah:status(open)
  */
 export const x = 1;
 "#,
@@ -84,8 +84,8 @@ fn md_plain_lines_extract_outside_fence() {
         dir.join("notes.md"),
         r#"# Plan
 
-@hack:ticket(T04, "md ticket")
-@hack:status(open)
+@yah:ticket(T04, "md ticket")
+@yah:status(open)
 
 Some prose follows.
 "#,
@@ -105,10 +105,10 @@ fn md_fenced_code_block_is_ignored() {
         r#"# Doc
 
 Outside fence:
-@hack:ticket(T05, "real ticket")
+@yah:ticket(T05, "real ticket")
 
 ```
-@hack:ticket(T99, "should NOT extract — inside fence")
+@yah:ticket(T99, "should NOT extract — inside fence")
 ```
 
 After fence.
@@ -131,8 +131,8 @@ fn toml_hash_prefix_extracts() {
     let dir = temp_workspace("toml_basic");
     fs::write(
         dir.join("Config.toml"),
-        r#"# @hack:ticket(T06, "toml ticket")
-# @hack:status(open)
+        r#"# @yah:ticket(T06, "toml ticket")
+# @yah:status(open)
 
 [package]
 name = "example"
@@ -149,8 +149,8 @@ fn yaml_hash_prefix_extracts() {
     let dir = temp_workspace("yaml_basic");
     fs::write(
         dir.join("ci.yml"),
-        r#"# @hack:ticket(T07, "yaml ticket")
-# @hack:status(open)
+        r#"# @yah:ticket(T07, "yaml ticket")
+# @yah:status(open)
 name: ci
 "#,
     )
@@ -167,9 +167,9 @@ fn md_blank_line_breaks_block_so_anchors_differ() {
     let dir = temp_workspace("md_two_blocks");
     fs::write(
         dir.join("blocks.md"),
-        r#"@hack:ticket(T08, "first")
+        r#"@yah:ticket(T08, "first")
 
-@hack:ticket(T09, "second")
+@yah:ticket(T09, "second")
 "#,
     )
     .unwrap();

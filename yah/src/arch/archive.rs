@@ -1,9 +1,9 @@
 //! @arch:layer(arch)
 //! @arch:role(ticket)
 //!
-//! Reconstruct archived/disappeared tickets from `.hack/events/<shard>.jsonl`.
+//! Reconstruct archived/disappeared tickets from `.yah/events/<shard>.jsonl`.
 //!
-//! When a ticket is archived its `@hack:` lines are stripped from source, so
+//! When a ticket is archived its `@yah:` lines are stripped from source, so
 //! `TicketBoard::get` returns None even though the work history is preserved
 //! in the per-relay event shard. This module replays a shard for a single id
 //! and returns the last-known full snapshot plus a disposition tag.
@@ -38,11 +38,11 @@ pub fn shard_for(id: &str) -> &str {
 }
 
 /// Append a single JSONL event line to the per-relay shard. Creates
-/// `.hack/events/` if missing. The caller chooses the shard name —
+/// `.yah/events/` if missing. The caller chooses the shard name —
 /// usually `shard_for(ticket_id)`, but a ticket with an explicit
 /// `parent` should use the parent's shard.
 pub fn append_event(workspace: &Path, shard: &str, event: &Value) -> std::io::Result<()> {
-    let dir = workspace.join(".hack").join("events");
+    let dir = workspace.join(".yah").join("events");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{shard}.jsonl"));
     let mut f = std::fs::OpenOptions::new()
@@ -54,12 +54,12 @@ pub fn append_event(workspace: &Path, shard: &str, event: &Value) -> std::io::Re
     f.write_all(line.as_bytes())
 }
 
-/// Replay `.hack/events/<shard>.jsonl` to reconstruct the last-known state
+/// Replay `.yah/events/<shard>.jsonl` to reconstruct the last-known state
 /// of `id`. Returns None when the shard is missing or has no events for
 /// this id.
 pub fn lookup(workspace: &Path, id: &str) -> Option<ArchivedTicket> {
     let path = workspace
-        .join(".hack")
+        .join(".yah")
         .join("events")
         .join(format!("{}.jsonl", shard_for(id)));
     let raw = std::fs::read_to_string(&path).ok()?;
@@ -149,7 +149,7 @@ mod tests {
     use super::*;
 
     fn write_shard(dir: &Path, name: &str, lines: &[&str]) {
-        let events = dir.join(".hack").join("events");
+        let events = dir.join(".yah").join("events");
         std::fs::create_dir_all(&events).unwrap();
         std::fs::write(events.join(format!("{name}.jsonl")), lines.join("\n")).unwrap();
     }

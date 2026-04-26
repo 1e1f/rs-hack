@@ -1,13 +1,13 @@
 <!-- rs-hack:hack-board:start -->
 ## hack-board — source-embedded tickets
 
-Work items for this repo live as `@hack:` doc-comment annotations in Rust
+Work items for this repo live as `@yah:` doc-comment annotations in Rust
 source. There is **no separate issue tracker**. Launch the kanban UI with
 `rs-hack board serve` (it auto-picks a port from the workspace path).
 
 ### Lifecycle
 
-| Column | `@hack:status(...)` | Meaning |
+| Column | `@yah:status(...)` | Meaning |
 |---|---|---|
 | **Epics** | (derived) | Relays that coordinate child relays — see below |
 | **Open** | `open` | Unclaimed — also holds `.hack/todo.md` entries (pre-ticket inbox) |
@@ -15,7 +15,7 @@ source. There is **no separate issue tracker**. Launch the kanban UI with
 | **Handoff** | `handoff` | Ready for next agent — use `/handoff` |
 | **Review** | `review` or `done` | Awaiting sign-off |
 
-Tickets move between columns by editing their `@hack:status(...)` line in
+Tickets move between columns by editing their `@yah:status(...)` line in
 source *or* by drag-and-drop on the UI (the server rewrites the status
 line for you under the same transition matrix). Allowed transitions:
 
@@ -39,7 +39,7 @@ queue, smell), run `rs-hack board status`.
 
 High-leverage rules to remember without looking:
 
-- **Rule01** — first edit on pickup is `@hack:status(in-progress)` on the ticket
+- **Rule01** — first edit on pickup is `@yah:status(in-progress)` on the ticket
 - **Rule03** — finishing a phase updates the *existing* relay in place (same R-number);
   new R-numbers only for parallel/independent tracks
 - **Col01** — three end-states: more work → **Handoff** (same relay, Rule03);
@@ -51,8 +51,8 @@ High-leverage rules to remember without looking:
 ### Epics
 
 An epic is a coordination point, not a unit of work. Declare one with
-`@hack:kind(epic)` on a relay; the board also *infers* epic-ness from any
-relay that has **bare-R child relays** pointing at it via `@hack:parent(...)`.
+`@yah:kind(epic)` on a relay; the board also *infers* epic-ness from any
+relay that has **bare-R child relays** pointing at it via `@yah:parent(...)`.
 Compound sub-tickets (`R007-T1`) never promote their parent to an epic —
 a relay with only sub-tickets is still a plain relay-with-subtickets.
 
@@ -63,7 +63,7 @@ Epics get a computed status:
 
 Epics live in their own leftmost column on the board. They never appear in
 Open / Active / Handoff / Review, so they can't be mistaken for claimable
-work. Their own `@hack:status(...)` is ignored once they qualify as an epic.
+work. Their own `@yah:status(...)` is ignored once they qualify as an epic.
 
 Archiving an epic while it still has live children returns a 409 — archive
 the children first.
@@ -71,13 +71,13 @@ the children first.
 ### First action on pickup
 
 When an agent claims a ticket, the **first edit** is setting
-`@hack:status(in-progress)` on that ticket and saving. That is the claim
+`@yah:status(in-progress)` on that ticket and saving. That is the claim
 signal. Don't start modifying other code until the status line is updated.
 
 ### Archiving (not "done")
 
 Tickets don't stay on the board after they ship. Click the `archive` button
-on the ticket card — that strips the `@hack:…` annotation lines from source
+on the ticket card — that strips the `@yah:…` annotation lines from source
 and appends an audit record to `.hack/events.jsonl`. Treat `status(done)` as
 a short-lived staging state, not a resting place.
 
@@ -92,7 +92,7 @@ from the last-known snapshot.
 ### Slash commands
 
 - `/comment` — log a progress summary to `.hack/summaries/`
-- `/handoff` — write a structured relay for the next agent (`@hack:relay(...)`)
+- `/handoff` — write a structured relay for the next agent (`@yah:relay(...)`)
 - `/refine` — turn a multi-phase plan into a relay + tickets
 
 If the slash commands aren't available in your harness (or `.claude/commands/`
@@ -116,7 +116,7 @@ rs-hack board claim --kind relay \
 Stdout is the claimed ID. Two shapes:
 
 - **Bare relay** (`--kind relay` without `--parent`) → `R008`
-- **Compound sub-ticket** (`--kind task|feature|bug` with `--parent R007`) → `R007-T1`, `R007-T2`, … — always `-T` regardless of kind; the feature/bug/task distinction survives as the `@hack:kind(...)` tag.
+- **Compound sub-ticket** (`--kind task|feature|bug` with `--parent R007`) → `R007-T1`, `R007-T2`, … — always `-T` regardless of kind; the feature/bug/task distinction survives as the `@yah:kind(...)` tag.
 
 `--parent` is required for `--kind task|feature|bug`. Orphan bare IDs (`T01`, `F01`, `B01`) are rejected: they collide with compound sub-ticket numbering and scramble per-id event shards across workspaces. For one-off work, `board open --kind relay …` first and attach the task under it.
 
@@ -131,7 +131,7 @@ The relay is the baton; sub-tickets are the incremental checkpoints.
 Each ticket card has two small buttons in the top-right:
 
 - **prompt** (or **review** when the card is in the Review column) — copies a continuation prompt to the clipboard. Paste into Claude Code / whatever harness; eventually this becomes a direct agent-launch. For review-column cards the prompt is review-mode (verify + approve-or-send-back); for open/handoff it's a pickup prompt (`board tickets --prompt <ID>` output).
-- **archive** — click once to arm (surfaces `@hack:verify(...)` commands if any), click again to commit. Strips the `@hack:` lines from source and logs an `archived` event.
+- **archive** — click once to arm (surfaces `@yah:verify(...)` commands if any), click again to commit. Strips the `@yah:` lines from source and logs an `archived` event.
 
 Cards collapse by default to keep columns scannable; `▸` in the header expands to show handoff text, next steps, verify commands, and summaries.
 
@@ -153,16 +153,16 @@ about `fn foo` lives on `fn foo`). When in doubt, file-level is safest.
 
 ### Key annotations
 
-- `@hack:ticket(ID, "title")` / `@hack:relay(ID, "title")` — define the item
-- `@hack:kind(feature|bug|task|epic)` — override kind (epic declares a relay as a coordination point)
-- `@hack:status(open|claimed|in-progress|handoff|review|done)` — column (ignored for epics)
-- `@hack:assignee(agent:name)` — who's working on it
-- `@hack:phase(P1)` / `@hack:parent(R001)` — ordering / hierarchy
-- `@hack:handoff("…")` — message for the next agent
-- `@hack:next("…")` — concrete next step (repeatable)
-- `@hack:verify("…")` — how to confirm done (repeatable; rendered in the pickup prompt as fenced bash + a combined `&&` smoke test)
-- `@hack:gotcha("…")` — pre-existing breakage / traps the next agent needs to know (repeatable; rendered *above* context in the prompt so they're the first thing read)
-- `@hack:assumes("…")` — unverified claim baked into the handoff (repeatable; rendered in the prompt as risks for the next agent to confirm or challenge)
-- `@hack:cleanup("…")` — deferred tech debt (repeatable)
+- `@yah:ticket(ID, "title")` / `@yah:relay(ID, "title")` — define the item
+- `@yah:kind(feature|bug|task|epic)` — override kind (epic declares a relay as a coordination point)
+- `@yah:status(open|claimed|in-progress|handoff|review|done)` — column (ignored for epics)
+- `@yah:assignee(agent:name)` — who's working on it
+- `@yah:phase(P1)` / `@yah:parent(R001)` — ordering / hierarchy
+- `@yah:handoff("…")` — message for the next agent
+- `@yah:next("…")` — concrete next step (repeatable)
+- `@yah:verify("…")` — how to confirm done (repeatable; rendered in the pickup prompt as fenced bash + a combined `&&` smoke test)
+- `@yah:gotcha("…")` — pre-existing breakage / traps the next agent needs to know (repeatable; rendered *above* context in the prompt so they're the first thing read)
+- `@yah:assumes("…")` — unverified claim baked into the handoff (repeatable; rendered in the prompt as risks for the next agent to confirm or challenge)
+- `@yah:cleanup("…")` — deferred tech debt (repeatable)
 - `@arch:see(path/to/doc.md)` — link to architecture docs
 <!-- rs-hack:hack-board:end -->

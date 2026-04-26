@@ -1,7 +1,7 @@
 /**
  * hack-board UI
  *
- * Kanban board that displays @hack: tickets from Rust source.
+ * Kanban board that displays @yah: tickets from Rust source.
  * Connects to SSE for live updates.
  */
 
@@ -213,7 +213,7 @@ function ArchiveButton({ ticket }: { ticket: Ticket }) {
   const btn = (
     <button
       disabled={state === "loading" || state === "archived"}
-      title="Archive this ticket — strips @hack: lines from source. Snapshot stays in .hack/events/ for unarchive."
+      title="Archive this ticket — strips @yah: lines from source. Snapshot stays in .hack/events/ for unarchive."
       onClick={async (e) => {
         e.stopPropagation();
         if (state === "loading" || state === "archived") return;
@@ -2650,7 +2650,7 @@ function Board() {
           <select
             value={filterRelay}
             onChange={(e) => setFilterRelay(e.target.value)}
-            title="Filter to a relay (shows relay + tickets with @hack:parent(RXXX))"
+            title="Filter to a relay (shows relay + tickets with @yah:parent(RXXX))"
             style={{
               background: filterRelay ? "#cba6f7" : "#11111b",
               color: filterRelay ? "#11111b" : "#cdd6f4",

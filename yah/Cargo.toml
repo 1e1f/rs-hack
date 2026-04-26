@@ -19,6 +19,18 @@ path = "src/lib.rs"
 name = "yah"
 path = "src/main.rs"
 
+[[bin]]
+name = "yahh"
+path = "src/bin/yahh.rs"
+
+[[bin]]
+name = "yahb"
+path = "src/bin/yahb.rs"
+
+[[bin]]
+name = "yaha"
+path = "src/bin/yaha.rs"
+
 [dependencies]
 # AST parsing
 syn = { version = "2.0", features = [

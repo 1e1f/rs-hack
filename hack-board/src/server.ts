@@ -1,11 +1,11 @@
-//! @hack:ticket(R002-T1, "P2: per-relay event shards + content-hash scan diff")
-//! @hack:status(review)
-//! @hack:assignee(agent:claude)
-//! @hack:parent(R002)
-//! @hack:handoff("P2 implemented end-to-end. .hack/events.jsonl replaced by per-relay shards .hack/events/<id>.jsonl. New 'scan' event type keyed on FNV-1a 64 hash of canonical ticket JSON (line field excluded). Legacy log auto-migrates on first serve; preserves original timestamps and dedupes consecutive same-hash scans. Disappeared detection rewritten to walk shard tails. diffTicket / diffAndLog / snapshot / replaySnapshot all removed. rs-hack-arch/src/status.rs::scan_disappeared now reads the sharded layout (with legacy fallback) and sorts by timestamp across shards. Smoke tests: fresh workspace creates shards on first scan; legacy-workspace migration bucket-writes correctly with preserved timestamps; re-scan emits zero new events when nothing changed; orphan todos land in _todos.jsonl. Dogfooded against this repo: 18 legacy events migrated into R001/R002 shards.")
-//! @hack:verify("cargo test -p rs-hack-arch status — passes, new sharded + legacy + prefers-shards tests")
-//! @hack:verify("Smoke: HACK_WORKSPACE=<new> bun run hack-board/src/server.ts; check .hack/events/ contains per-relay files and that second run emits no new events")
-//! @hack:verify("Legacy .hack/events.jsonl was migrated to .hack/events.jsonl.legacy; this repo's real workspace did so successfully")
+//! @yah:ticket(R002-T1, "P2: per-relay event shards + content-hash scan diff")
+//! @yah:status(review)
+//! @yah:assignee(agent:claude)
+//! @yah:parent(R002)
+//! @yah:handoff("P2 implemented end-to-end. .hack/events.jsonl replaced by per-relay shards .hack/events/<id>.jsonl. New 'scan' event type keyed on FNV-1a 64 hash of canonical ticket JSON (line field excluded). Legacy log auto-migrates on first serve; preserves original timestamps and dedupes consecutive same-hash scans. Disappeared detection rewritten to walk shard tails. diffTicket / diffAndLog / snapshot / replaySnapshot all removed. rs-hack-arch/src/status.rs::scan_disappeared now reads the sharded layout (with legacy fallback) and sorts by timestamp across shards. Smoke tests: fresh workspace creates shards on first scan; legacy-workspace migration bucket-writes correctly with preserved timestamps; re-scan emits zero new events when nothing changed; orphan todos land in _todos.jsonl. Dogfooded against this repo: 18 legacy events migrated into R001/R002 shards.")
+//! @yah:verify("cargo test -p rs-hack-arch status — passes, new sharded + legacy + prefers-shards tests")
+//! @yah:verify("Smoke: HACK_WORKSPACE=<new> bun run hack-board/src/server.ts; check .hack/events/ contains per-relay files and that second run emits no new events")
+//! @yah:verify("Legacy .hack/events.jsonl was migrated to .hack/events.jsonl.legacy; this repo's real workspace did so successfully")
 //! @arch:see(architecture/multi-worktree-sync.md)
 
 /**
@@ -323,7 +323,7 @@ function applyChanges(
 // Given a ticket, which shard file does it belong to?
 //
 // - Compound sub-ticket (`R007-T1`, `R007-B2`, `R007-F3`) → bare relay shard (`R007.jsonl`)
-// - Ticket with `@hack:parent(Rxxx)` or `@hack:parent(Rxxx-Ly)` → the bare relay
+// - Ticket with `@yah:parent(Rxxx)` or `@yah:parent(Rxxx-Ly)` → the bare relay
 // - Bare relay (`R001`) → own shard
 // - Standalone (bare F/B/T with no parent) → own shard
 
@@ -768,9 +768,9 @@ const TRANSITIONS: Record<string, string[]> = {
 };
 
 /**
- * Rewrite the `@hack:status(...)` line inside the contiguous doc-comment
+ * Rewrite the `@yah:status(...)` line inside the contiguous doc-comment
  * block surrounding `lineNum`. If no status line exists, insert one
- * immediately after the `@hack:ticket/relay(...)` declaration (so the
+ * immediately after the `@yah:ticket/relay(...)` declaration (so the
  * order inside the block stays natural).
  */
 /**
@@ -804,7 +804,7 @@ function synthesizeReviewPrompt(t: Ticket, recentSummaries: Summary[]): string {
   }
 
   if (t.next_steps && t.next_steps.length > 0) {
-    lines.push("## Stated remaining work (from @hack:next)");
+    lines.push("## Stated remaining work (from @yah:next)");
     lines.push("");
     for (const n of t.next_steps) lines.push(`- ${n}`);
     lines.push("");
@@ -829,7 +829,7 @@ function synthesizeReviewPrompt(t: Ticket, recentSummaries: Summary[]): string {
     lines.push("## Verification commands");
     lines.push("");
     lines.push(
-      "⚠ No `@hack:verify(...)` was declared on this ticket. Decide how to confirm the work yourself (run tests, read diff, reproduce scenario)."
+      "⚠ No `@yah:verify(...)` was declared on this ticket. Decide how to confirm the work yourself (run tests, read diff, reproduce scenario)."
     );
     lines.push("");
   }
@@ -870,13 +870,13 @@ function synthesizeReviewPrompt(t: Ticket, recentSummaries: Summary[]): string {
   lines.push("   ```");
   lines.push("");
   lines.push(
-    "   That strips the `@hack:` annotations from source and writes an `archived` event to `.hack/events/`. The snapshot stays in the shard, so the ticket can still be inspected via `rs-hack board show " +
+    "   That strips the `@yah:` annotations from source and writes an `archived` event to `.hack/events/`. The snapshot stays in the shard, so the ticket can still be inspected via `rs-hack board show " +
       t.id +
       "` and unarchived if needed. No server / port lookup required."
   );
   lines.push("");
   lines.push(
-    "   **Reject** → edit the source file to set `@hack:status(handoff)`, rewrite `@hack:handoff(\"...\")` with a concrete description of what still needs fixing, and replace any stale `@hack:next(\"...\")` items. The next agent picks up from there."
+    "   **Reject** → edit the source file to set `@yah:status(handoff)`, rewrite `@yah:handoff(\"...\")` with a concrete description of what still needs fixing, and replace any stale `@yah:next(\"...\")` items. The next agent picks up from there."
   );
   lines.push("");
   lines.push(
@@ -903,21 +903,21 @@ function setHackStatus(
   let end = idx;
   while (end < lines.length - 1 && isDoc(lines[end + 1])) end++;
 
-  const statusRe = /^(\s*\/\/[!/])\s*@hack:status\([^)]*\)\s*$/;
+  const statusRe = /^(\s*\/\/[!/])\s*@yah:status\([^)]*\)\s*$/;
   for (let i = start; i <= end; i++) {
     const m = lines[i].match(statusRe);
     if (m) {
-      lines[i] = `${m[1]} @hack:status(${newStatus})`;
+      lines[i] = `${m[1]} @yah:status(${newStatus})`;
       return { newContent: lines.join("\n"), changed: true };
     }
   }
 
-  // Not present — insert after the defining @hack:ticket(...) or @hack:relay(...) line.
-  const declRe = /^(\s*\/\/[!/])\s*@hack:(ticket|relay)\(/;
+  // Not present — insert after the defining @yah:ticket(...) or @yah:relay(...) line.
+  const declRe = /^(\s*\/\/[!/])\s*@yah:(ticket|relay)\(/;
   for (let i = start; i <= end; i++) {
     const m = lines[i].match(declRe);
     if (m) {
-      lines.splice(i + 1, 0, `${m[1]} @hack:status(${newStatus})`);
+      lines.splice(i + 1, 0, `${m[1]} @yah:status(${newStatus})`);
       return { newContent: lines.join("\n"), changed: true };
     }
   }
@@ -926,7 +926,7 @@ function setHackStatus(
 
 /**
  * Per-extension rules for finding the contiguous "annotation block"
- * around a ticket's defining line, and for spotting the `@hack:` lines
+ * around a ticket's defining line, and for spotting the `@yah:` lines
  * inside it. Mirrors the extractor's prefix table in
  * `rs-hack-arch/src/extract.rs::line_extract`.
  */
@@ -940,7 +940,7 @@ function annotationStripRulesFor(filePath: string): AnnotationStripRules | null 
     case ".rs":
       return {
         isBlockLine: (l) => /^\s*\/\/[!/]/.test(l),
-        isHackLine: (l) => /^\s*\/\/[!/]\s*@hack:/.test(l),
+        isHackLine: (l) => /^\s*\/\/[!/]\s*@yah:/.test(l),
       };
     case ".ts":
     case ".tsx":
@@ -950,20 +950,20 @@ function annotationStripRulesFor(filePath: string): AnnotationStripRules | null 
       return {
         isBlockLine: (l) => /^\s*(\/\/|\/\*|\*)/.test(l),
         isHackLine: (l) =>
-          /^\s*(\/\/[!/]?\s*@hack:|\*\s*@hack:|\/\*\*?\s*@hack:)/.test(l),
+          /^\s*(\/\/[!/]?\s*@yah:|\*\s*@yah:|\/\*\*?\s*@yah:)/.test(l),
       };
     case ".md":
       // No prefix; block bounded by blank lines.
       return {
         isBlockLine: (l) => l.trim() !== "",
-        isHackLine: (l) => /^\s*@hack:/.test(l),
+        isHackLine: (l) => /^\s*@yah:/.test(l),
       };
     case ".toml":
     case ".yaml":
     case ".yml":
       return {
         isBlockLine: (l) => /^\s*#/.test(l),
-        isHackLine: (l) => /^\s*#\s*@hack:/.test(l),
+        isHackLine: (l) => /^\s*#\s*@yah:/.test(l),
       };
     default:
       return null;
@@ -971,9 +971,9 @@ function annotationStripRulesFor(filePath: string): AnnotationStripRules | null 
 }
 
 /**
- * Remove `@hack:` annotation lines belonging to the ticket defined at
+ * Remove `@yah:` annotation lines belonging to the ticket defined at
  * `lineNum`. Walks up/down across the contiguous annotation block (per
- * the per-extension rules above) and strips only `@hack:` lines —
+ * the per-extension rules above) and strips only `@yah:` lines —
  * `@arch:` and surrounding doc text are preserved.
  *
  * Returns `removed: []` for unsupported extensions or when the line is
@@ -1538,7 +1538,7 @@ const server = Bun.serve({
           [
             `### Implement`,
             ``,
-            `Each doc below describes planned work that should be built. **If no relay exists** for a doc, create one (see \`/handoff\` → new-relay flow) with \`@hack:status(in-progress)\`. **If a relay already exists**, continue it (same R-number).`,
+            `Each doc below describes planned work that should be built. **If no relay exists** for a doc, create one (see \`/handoff\` → new-relay flow) with \`@yah:status(in-progress)\`. **If a relay already exists**, continue it (same R-number).`,
             ``,
             ...byMode.implement.map((p) => `- \`${p}\``),
           ].join("\n")
@@ -1549,7 +1549,7 @@ const server = Bun.serve({
           [
             `### Refine`,
             ``,
-            `Each doc below is a plan that should become a relay + phased tickets. Run \`/refine\`: pick an R-number, create tickets with \`@hack:phase(Pn)\`, then claim P1 by setting \`@hack:status(in-progress)\`.`,
+            `Each doc below is a plan that should become a relay + phased tickets. Run \`/refine\`: pick an R-number, create tickets with \`@yah:phase(Pn)\`, then claim P1 by setting \`@yah:status(in-progress)\`.`,
             ``,
             ...byMode.refine.map((p) => `- \`${p}\``),
           ].join("\n")
@@ -1593,28 +1593,28 @@ const server = Bun.serve({
         ``,
         `## hack-board usage`,
         ``,
-        `Tickets and relays live as \`@hack:\` annotations inside Rust source. The board at hack-board scans source with \`rs-hack board tickets\` and renders columns from each ticket's \`@hack:status(...)\`.`,
+        `Tickets and relays live as \`@yah:\` annotations inside Rust source. The board at hack-board scans source with \`rs-hack board tickets\` and renders columns from each ticket's \`@yah:status(...)\`.`,
         ``,
         `**Key annotations:**`,
-        `- \`@hack:ticket(ID, "title")\` / \`@hack:relay(ID, "title")\` — define a work item`,
-        `- \`@hack:status(open|claimed|in-progress|handoff|review|done)\` — column`,
-        `- \`@hack:assignee(agent:name)\` — who's working on it`,
-        `- \`@hack:handoff("...")\` — message for the next agent`,
-        `- \`@hack:next("...")\` — a next step (repeatable)`,
-        `- \`@hack:verify("...")\` — verification step (repeatable)`,
+        `- \`@yah:ticket(ID, "title")\` / \`@yah:relay(ID, "title")\` — define a work item`,
+        `- \`@yah:status(open|claimed|in-progress|handoff|review|done)\` — column`,
+        `- \`@yah:assignee(agent:name)\` — who's working on it`,
+        `- \`@yah:handoff("...")\` — message for the next agent`,
+        `- \`@yah:next("...")\` — a next step (repeatable)`,
+        `- \`@yah:verify("...")\` — verification step (repeatable)`,
         `- \`@arch:see(path/to/doc.md)\` — reference doc`,
         ``,
         `**To promote this todo into in-source work:**`,
         `1. Decide scope. If it's multiple tickets / phases, run \`/refine\` to generate a relay + tickets + architecture doc.`,
-        `2. Otherwise pick a source file that's the natural home for the work and add \`@hack:ticket(${todo.id.replace("T-", "T")}, "...")\` annotations at the top of the relevant mod/fn/struct.`,
-        `3. Set \`@hack:status(in-progress)\` as your first action (this is the claim signal).`,
+        `2. Otherwise pick a source file that's the natural home for the work and add \`@yah:ticket(${todo.id.replace("T-", "T")}, "...")\` annotations at the top of the relevant mod/fn/struct.`,
+        `3. Set \`@yah:status(in-progress)\` as your first action (this is the claim signal).`,
         `4. **Archive this todo** so it drops off the Open column:`,
         `   - Simple: delete the \`## ${todo.id}\` block from \`.hack/todo.md\``,
         `   - Better (records the link to your relay in the audit log):`,
         `     \`curl -sX POST http://localhost:${PORT}/api/todos/${encodeURIComponent(todo.id)}/promote -H 'content-type: application/json' -d '{"relay_id":"RXXX"}'\``,
         ``,
-        `**To move ticket columns later:** edit the \`@hack:status(...)\` line in source and save.`,
-        `**When done:** click the \`archive\` button on the ticket card — it strips the \`@hack:\` lines from source and logs to \`.hack/events.jsonl\`.`,
+        `**To move ticket columns later:** edit the \`@yah:status(...)\` line in source and save.`,
+        `**When done:** click the \`archive\` button on the ticket card — it strips the \`@yah:\` lines from source and logs to \`.hack/events.jsonl\`.`,
         ``,
         `The board auto-refreshes on file changes.`,
       ].join("\n");
@@ -1707,7 +1707,7 @@ const server = Bun.serve({
     //
     // Body: { target_file: string, title?: string, assignee?: string }
     // `target_file` is required and must be a workspace-relative path to a
-    // `.rs` file — that's where the @hack:relay annotation gets written.
+    // `.rs` file — that's where the @yah:relay annotation gets written.
     //
     // Allocation, file write, and frontmatter update all happen inside
     // `rs-hack board promote`, which holds the workspace ID lock so it
@@ -1891,7 +1891,7 @@ const server = Bun.serve({
           {
             error: `Cannot archive '${id}' — ticket is ${ticket.status}. Move to review or handoff first.`,
             status: ticket.status,
-            hint: "Drag the card to Review (or set @hack:status(review) in source), then archive from there.",
+            hint: "Drag the card to Review (or set @yah:status(review) in source), then archive from there.",
           },
           { status: 409 }
         );
@@ -1930,7 +1930,7 @@ const server = Bun.serve({
         if (removed.length === 0) {
           return Response.json(
             {
-              error: `No @hack: annotations found at ${ticket.file}:${ticket.line}`,
+              error: `No @yah: annotations found at ${ticket.file}:${ticket.line}`,
             },
             { status: 500 }
           );
@@ -1966,7 +1966,7 @@ const server = Bun.serve({
       }
     }
 
-    // API: drag-to-move — rewrite @hack:status(...) to a target bucket.
+    // API: drag-to-move — rewrite @yah:status(...) to a target bucket.
     // Enforces the allowed-transitions matrix; returns 409 otherwise.
     if (
       url.pathname.startsWith("/api/status/") &&
@@ -2028,7 +2028,7 @@ const server = Bun.serve({
         if (!changed) {
           return Response.json(
             {
-              error: `Could not locate @hack: doc block at ${ticket.file}:${ticket.line}`,
+              error: `Could not locate @yah: doc block at ${ticket.file}:${ticket.line}`,
             },
             { status: 500 }
           );

@@ -4,7 +4,7 @@ Write your current work summary to `.hack/summaries/` so it shows up on the hack
 
 ## What to do
 
-1. **Figure out what ticket you're working on**: Check the current file for `@hack:ticket(...)` or `@hack:relay(...)` annotations. If you find one, use its ID — including the compound form for sub-tickets (e.g. `R007-T1`). If you're not sure, skip it — orphan summaries go to the board inbox.
+1. **Figure out what ticket you're working on**: Check the current file for `@yah:ticket(...)` or `@yah:relay(...)` annotations. If you find one, use its ID — including the compound form for sub-tickets (e.g. `R007-T1`). If you're not sure, skip it — orphan summaries go to the board inbox.
 
 2. **Write the summary**: Use the `hack_summary` MCP tool (or `rs-hack board summary` CLI). Include:
    - What you did in this session

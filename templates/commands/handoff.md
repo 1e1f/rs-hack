@@ -4,13 +4,13 @@ You are completing a chunk of work and handing off to the next agent (which may 
 
 ## Two flows — decide first
 
-**Continuing the same line of work (most common):** You're moving an existing relay forward. Update the *existing* `@hack:relay(RXXX, ...)` block — **reuse the same R-number**. Use `rs-hack board move RXXX handoff --handoff '…' --next '…'` to rewrite the status and append your payload in place. This is the default when you picked up a relay, did a phase of work, and now need the next agent (or a fresh you) to keep going. A relay in the `handoff` column is a baton waiting to be picked up; a human should never hand the same active relay to two agents at once.
+**Continuing the same line of work (most common):** You're moving an existing relay forward. Update the *existing* `@yah:relay(RXXX, ...)` block — **reuse the same R-number**. Use `rs-hack board move RXXX handoff --handoff '…' --next '…'` to rewrite the status and append your payload in place. This is the default when you picked up a relay, did a phase of work, and now need the next agent (or a fresh you) to keep going. A relay in the `handoff` column is a baton waiting to be picked up; a human should never hand the same active relay to two agents at once.
 
 **Spawning a parallel or independent track:** A *new* line of effort that should run alongside (not continue) the original. Use `rs-hack board claim --kind relay` — it allocates the next R-number atomically under the ID lock so two parallel agents can't collide, and writes the annotation straight into the **Active** column with you as assignee. Then `rs-hack board move RYYY handoff --handoff '…' --next '…'` when you're ready to pass the baton. Pass `--parent RXXX` if it's a child relay of an epic.
 
 **Adding a ticket under the current relay (not a new relay):** If you're mid-relay and the next concrete step is a self-contained chunk, claim a *sub-ticket* instead of a new relay: `rs-hack board claim --kind task --parent R012` → prints `R012-T3` (or whatever the next sub-number is). Sub-tickets archive eagerly; the relay persists.
 
-**Declaring an epic:** If what you're creating is a *coordination point* that will own multiple child relays rather than a thread of work itself, pass `--kind epic` to `rs-hack board claim`. The tool emits `@hack:relay(...)` plus `@hack:kind(epic)`. Epics live in their own column on the board, their status is computed from their children (`active` / `closed`), and they can't be archived while children are still live. Example:
+**Declaring an epic:** If what you're creating is a *coordination point* that will own multiple child relays rather than a thread of work itself, pass `--kind epic` to `rs-hack board claim`. The tool emits `@yah:relay(...)` plus `@yah:kind(epic)`. Epics live in their own column on the board, their status is computed from their children (`active` / `closed`), and they can't be archived while children are still live. Example:
 
 ```bash
 EPIC=$(rs-hack board claim --kind epic --file src/lib.rs --title "ProcessBlock unification")
@@ -37,7 +37,7 @@ rs-hack board move RXXX handoff \
   --verify "cargo test -p my-crate"
 ```
 
-`move` keeps the same R-number and rewrites the existing annotation block in source — the old `@hack:status(...)` line is replaced, and the new `@hack:handoff(...)`, `@hack:next(...)`, etc. lines are appended to the existing block. Enforces the allowed-transitions matrix (open → active → handoff → review → handoff), so you can't accidentally skip a column.
+`move` keeps the same R-number and rewrites the existing annotation block in source — the old `@yah:status(...)` line is replaced, and the new `@yah:handoff(...)`, `@yah:next(...)`, etc. lines are appended to the existing block. Enforces the allowed-transitions matrix (open → active → handoff → review → handoff), so you can't accidentally skip a column.
 
 3. **Run `rs-hack board tickets`** to confirm the relay is in the `handoff` column.
 
@@ -70,7 +70,7 @@ Confirm the new relay appears on the board. `--parent` is only set when the new 
 ## Field guidelines
 
 - **handoff**: what was completed in this context — files, APIs, what compiles, what tests pass.
-- **next**: each `@hack:next(...)` is one actionable item.
+- **next**: each `@yah:next(...)` is one actionable item.
 - **gotcha**: pre-existing breakage or traps the next agent needs to know *up front*. These render above the context block in the pickup prompt. Use them for things like "`cargo test -p foo --lib` has unrelated compile errors — don't try to fix, that's another dev's WIP." Repeatable.
 - **assumes**: claims you baked into the handoff but didn't actually verify. These render as a risks section in the pickup prompt. Use when you believe something works but haven't tested it end-to-end — the next agent can confirm or challenge rather than take it on faith. Repeatable.
 - **cleanup**: non-blocking tech debt discovered along the way.
