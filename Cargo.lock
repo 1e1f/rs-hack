@@ -1445,3 +1445,28 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "yah-kg-rust"
+version = "0.5.4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "yah-kg",
+ "yah-kg-store",
+]
+
+[[package]]
+name = "yah-kg-store"
+version = "0.5.4"
+dependencies = [
+ "petgraph",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "walkdir",
+ "yah-kg",
+ "yah-kg-rust",
+]

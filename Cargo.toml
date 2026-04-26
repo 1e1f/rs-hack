@@ -2,6 +2,8 @@
 members = [
     "yah",
     "yah-kg",
+    "yah-kg-store",
+    "yah-kg-rust",
 ]
 resolver = "2"
 
@@ -20,6 +22,8 @@ cli = { description = "Clap-based CLI frontend", allowed_dependencies = ["core"]
 mcp = { description = "MCP server - JSON-RPC bridge to CLI", allowed_dependencies = ["core"] }
 arch = { description = "Architecture knowledge graph from source annotations", allowed_dependencies = ["core"] }
 kg = { description = "Multi-language structural knowledge graph contract (yah daemon)", allowed_dependencies = [] }
+kg_store = { description = "In-memory petgraph-backed store + walker behind the kg contract", allowed_dependencies = ["kg"] }
+kg_lang = { description = "Per-language indexer implementations (Rust, TS, JSON/YAML, Koda)", allowed_dependencies = ["kg"] }
 
 [workspace.metadata.arch.roles]
 parser = "Parses Rust source into syn AST"
