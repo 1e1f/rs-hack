@@ -4,6 +4,7 @@ members = [
     "rshack",
     "rs-hack-mcp",
     "rs-hack-arch",
+    "yah-kg",
 ]
 resolver = "2"
 
@@ -21,6 +22,7 @@ core = { description = "AST parsing, node types, and edit operations", allowed_d
 cli = { description = "Clap-based CLI frontend", allowed_dependencies = ["core"] }
 mcp = { description = "MCP server - JSON-RPC bridge to CLI", allowed_dependencies = ["core"] }
 arch = { description = "Architecture knowledge graph from source annotations", allowed_dependencies = ["core"] }
+kg = { description = "Multi-language structural knowledge graph contract (yah daemon)", allowed_dependencies = [] }
 
 [workspace.metadata.arch.roles]
 parser = "Parses Rust source into syn AST"
