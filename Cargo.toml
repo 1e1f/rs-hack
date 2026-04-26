@@ -1,19 +1,16 @@
 [workspace]
 members = [
-    "rs-hack",
-    "rshack",
-    "rs-hack-mcp",
-    "rs-hack-arch",
+    "yah",
     "yah-kg",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.4"
+version = "0.6.0"
 edition = "2021"
 authors = ["Leif Shackelford <structuresound@gmail.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/1e1f/rs-hack"
+repository = "https://github.com/1e1f/yah"
 
 [workspace.metadata.arch]
 

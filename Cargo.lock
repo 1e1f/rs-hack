@@ -730,85 +730,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
-name = "rs-hack"
-version = "0.5.4"
-dependencies = [
- "anyhow",
- "blake3",
- "chrono",
- "clap",
- "directories",
- "glob",
- "prettyplease",
- "proc-macro2",
- "quote",
- "rs-hack-arch",
- "serde",
- "serde_json",
- "serde_yaml",
- "similar",
- "strsim",
- "syn",
- "tempfile",
- "walkdir",
-]
-
-[[package]]
-name = "rs-hack-arch"
-version = "0.5.4"
-dependencies = [
- "anyhow",
- "blake3",
- "cargo_metadata",
- "glob",
- "petgraph",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn",
- "tempfile",
- "thiserror 1.0.69",
- "toml",
- "walkdir",
-]
-
-[[package]]
-name = "rs-hack-mcp"
-version = "0.5.4"
-dependencies = [
- "anyhow",
- "bytes",
- "futures",
- "serde",
- "serde_json",
- "tokio",
- "tokio-test",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "rshack"
-version = "0.5.4"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "directories",
- "glob",
- "proc-macro2",
- "quote",
- "rs-hack",
- "serde",
- "serde_json",
- "serde_yaml",
- "syn",
- "walkdir",
-]
-
-[[package]]
 name = "rustix"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1482,8 +1403,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
+name = "yah"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "bytes",
+ "cargo_metadata",
+ "chrono",
+ "clap",
+ "directories",
+ "futures",
+ "glob",
+ "petgraph",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "similar",
+ "strsim",
+ "syn",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
 name = "yah-kg"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "blake3",
  "serde",

@@ -1,0 +1,238 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────
+   yah — design tokens
+   Light = "scriptorium" (warm parchment)
+   Dark  = "vellum-by-candlelight" (gold-ivory ink, near-black)
+
+   Tokens are Tailwind v4 @theme custom properties: each
+   --color-*, --font-* generates utilities (bg-paper, text-ink,
+   border-rule, font-display, …). Components consume utilities;
+   no hardcoded colors below this file.
+
+   Density / ornament / accent toggles from the design return
+   are intentionally not ported — choices are baked (comfortable
+   density, subtle ornament, oxblood accent).
+   ───────────────────────────────────────────────────────── */
+
+@theme {
+  /* parchment surfaces */
+  --color-paper:    #f1e7d0;
+  --color-paper-2:  #ebdfc4;
+  --color-paper-3:  #e2d3b1;
+  --color-vellum:   #fbf4e2;
+  --color-vellum-2: #f6ecd2;
+
+  /* ink (text + borders) */
+  --color-ink:    #261c12;
+  --color-ink-2:  #4a3a25;
+  --color-ink-3:  #7a6647;
+  --color-ink-4:  #a0896a;
+  --color-rule:   #c5b186;
+
+  /* heraldic accents */
+  --color-oxblood:    #7a1f1f;
+  --color-oxblood-2:  #5a1212;
+  --color-brass:      #b08438;
+  --color-brass-2:    #d6a045;
+  --color-forest:     #3a5d3a;
+  --color-midnight:   #2c3e6c;
+  --color-plum:       #5a2a52;
+
+  /* primary accent (oxblood — baked, no toggle) */
+  --color-accent:   #7a1f1f;
+  --color-accent-2: #5a1212;
+
+  /* status hues — relay/ticket lifecycle */
+  --color-st-open:    #6b5e3a;
+  --color-st-active:  #2c3e6c;
+  --color-st-handoff: #8a4a1e;
+  --color-st-review:  #3a5d3a;
+
+  /* kind hues — bug/feature/task/epic */
+  --color-st-bug:     #7a1f1f;
+  --color-st-feature: #5a2a52;
+  --color-st-task:    #5a4a2e;
+  --color-st-epic:    #8a4a1e;
+
+  /* type families */
+  --font-display: "EB Garamond", "Iowan Old Style", "Hoefler Text", Georgia, serif;
+  --font-ui:      "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+/* ─── dark theme overrides
+   Plain CSS-variable swap on [data-theme="dark"]. Same names,
+   different hues — every utility generated from @theme remaps
+   automatically. */
+[data-theme="dark"] {
+  --color-paper:    #14110d;
+  --color-paper-2:  #1a1611;
+  --color-paper-3:  #221b14;
+  --color-vellum:   #1f1a13;
+  --color-vellum-2: #28201a;
+
+  --color-ink:    #ecdcb4;
+  --color-ink-2:  #c8b387;
+  --color-ink-3:  #8e7a55;
+  --color-ink-4:  #6a5a3e;
+  --color-rule:   #4a3e2a;
+
+  --color-oxblood:    #b03a3a;
+  --color-oxblood-2:  #d05050;
+  --color-brass:      #d6a045;
+  --color-brass-2:    #f0bf60;
+  --color-forest:     #6e9a6e;
+  --color-midnight:   #7a92c8;
+  --color-plum:       #b07ca4;
+
+  --color-accent:   #b03a3a;
+  --color-accent-2: #d05050;
+
+  --color-st-open:    #b8a779;
+  --color-st-active:  #7a92c8;
+  --color-st-handoff: #d29260;
+  --color-st-review:  #8eb88e;
+  --color-st-bug:     #d05858;
+  --color-st-feature: #c188b6;
+  --color-st-task:    #c4ac7a;
+  --color-st-epic:    #d29260;
+}
+
+/* ─── reset + base */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01" on, "cv11" on;
+
+  /* parchment grain — layered radial gradients, no filter flicker */
+  background-image:
+    radial-gradient(1200px 400px at 10% -5%, color-mix(in oklab, var(--color-paper-2) 70%, transparent) 0%, transparent 60%),
+    radial-gradient(900px 380px at 100% 110%, color-mix(in oklab, var(--color-paper-3) 55%, transparent) 0%, transparent 55%),
+    radial-gradient(600px 240px at 60% 50%, color-mix(in oklab, var(--color-paper-2) 35%, transparent) 0%, transparent 70%);
+}
+
+[data-theme="dark"] body {
+  background-image:
+    radial-gradient(1100px 400px at 10% 0%, color-mix(in oklab, #2a1a16 60%, transparent) 0%, transparent 60%),
+    radial-gradient(900px 380px at 100% 100%, color-mix(in oklab, #18120a 80%, transparent) 0%, transparent 55%);
+}
+
+#root { display: flex; flex-direction: column; }
+
+::selection { background: color-mix(in oklab, var(--color-accent) 35%, transparent); color: var(--color-ink); }
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+input, textarea, select { font: inherit; color: inherit; }
+
+/* ─── scrollbars */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-ink-4) 60%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--color-ink-3) 70%, transparent);
+  background-clip: padding-box;
+}
+
+/* ─── keyboard cue (used in TabStrip / menus) */
+kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in oklab, var(--color-ink-3) 22%, transparent);
+  background: color-mix(in oklab, var(--color-vellum) 60%, transparent);
+  color: var(--color-ink-3);
+}
+
+/* ─── typography helpers
+   These are CSS-only because they rely on font-variant-caps /
+   font-feature-settings, which Tailwind v4 doesn't expose as
+   first-class utilities. Components apply them via className. */
+.serif     { font-family: var(--font-display); }
+.mono      { font-family: var(--font-mono); }
+.smallcaps { font-variant-caps: all-small-caps; letter-spacing: 0.08em; }
+
+.eyebrow {
+  font-family: var(--font-display);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.18em;
+  color: var(--color-ink-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* illuminated drop-cap — accent-colored serif initial used on
+   SectionHeader and column headers. */
+.illum-cap {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.45em;
+  color: var(--color-accent);
+  line-height: 0.9;
+  margin-right: 1px;
+  font-feature-settings: "smcp" off;
+}
+
+/* ─── motion
+   "candle": pulse opacity+scale on indicator dots (active rig,
+   streaming session). "candle-rail": opacity-only on the 4-px
+   relay rail; scaling a thin rail reads as a glitch.
+   "shimmer": skeleton placeholders. */
+@keyframes candle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.92); }
+}
+.candle { animation: candle 1.8s ease-in-out infinite; }
+
+@keyframes candle-rail {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+.candle-rail { animation: candle-rail 1.8s ease-in-out infinite; }
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--color-vellum) 80%, transparent) 0%,
+    color-mix(in oklab, var(--color-vellum-2) 100%, transparent) 50%,
+    color-mix(in oklab, var(--color-vellum) 80%, transparent) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* ─── hover lift for clickable cards */
+.lift { transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease; }
+.lift:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgba(70, 45, 20, 0.12),
+    0 18px 40px -16px rgba(70, 45, 20, 0.28);
+}
+[data-theme="dark"] .lift:hover {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    0 18px 40px -16px rgba(0, 0, 0, 0.8);
+}
+
+/* dnd-kit drag state */
+.dragging { opacity: 0.55; transform: rotate(0.6deg); }
