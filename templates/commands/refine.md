@@ -5,9 +5,9 @@ You just described an implementation plan with phases. Refine them into hack-boa
 ## Model
 
 - **Relay** — a thread of work. One agent owns it. Carries the baton across context resets.
-- **Ticket** — an incremental work unit *inside* a relay. Usually session-sized — claim, work, archive. IDs look like `R007-T1`, `R007-T2` when scoped under a relay, or bare (`T03`, `F02`, `B01`) for one-off standalone work with no parent.
+- **Ticket** — an incremental work unit *inside* a relay. Usually session-sized — claim, work, archive. IDs are always compound: `R007-T1`, `R007-T2`. Every ticket has a parent relay; `board claim`/`board open` reject `--kind task|feature|bug` without `--parent`.
 - **Epic** — a relay declared with `@hack:kind(epic)`, or *inferred* when one or more other **bare-R relays** declare `@hack:parent(RXXX)` pointing at it. Coordination-of-relays, not coordination-of-tickets — sub-tickets never promote their parent relay to epic.
-- **Phase** — ordering tag. "These items ship together." `@hack:phase(P1)`
+- **Phase** — ordering tag. "These items ship together." `@hack:phase(P1)` — parsed by `rs-hack-arch` and surfaced as `phase:` on tickets in `rs-hack board tickets` / inflight / status output. Useful for grouping at refinement time even though the board UI doesn't (yet) sort columns by phase.
 - **Parent** — hierarchy pointer. `@hack:parent(R007)` belongs to R007. For compound IDs the parent is inferred from the prefix.
 
 ## Process
@@ -18,9 +18,12 @@ Before you plan anything, run:
 
 ```bash
 rs-hack board inflight
+ls .hack/events/                     # what relay shards exist?
+# If a candidate relay looks adjacent, peek its history:
+tail -n 20 .hack/events/R0XX.jsonl
 ```
 
-This prints every Open / Active / Handoff relay and ticket with its one-line purpose and arch-doc ref. Five agents refining in parallel will independently plan the same problem unless they look first — R10. Read the list and decide:
+`board inflight` prints every Open / Active / Handoff relay and ticket with its one-line purpose and arch-doc ref. The shard listing catches an extra failure mode: a relay whose own ticket is in `review` (so it's no longer "in flight") may still own sub-tickets you'd be duplicating. Five agents refining in parallel will independently plan the same problem unless they look first — R10. Read both and decide:
 
 - **This problem is already a live relay** → don't refine. Claim it (`rs-hack board claim <ID>` if it's Open, or `rs-hack board move <ID> active` if it's Handoff) and continue its plan rather than starting over.
 - **It partially overlaps an existing relay** → open your next steps as sub-tickets under that relay (`rs-hack board open --kind task --parent R<n>`, per R8) instead of a new relay.
@@ -68,18 +71,19 @@ echo "$TID"   # e.g. R012-T1 (first sub-ticket under R012)
 
 Sub-tickets under `$RELAY` get IDs like `R012-T1`, `R012-T2`, … regardless of `--kind`. The `-T` segment is always `T`; the feature/bug/task distinction survives as the `@hack:kind(...)` tag (and as the badge letter on the card).
 
-Standalone one-off tickets (`--kind task` with no `--parent`) still get bare IDs: `T03`, `F02`, `B01`. Use only when the work is self-contained and has no coordinating relay.
+There is no "standalone" ticket form — `--parent` is required for `--kind task|feature|bug`. For a genuinely one-off piece of work, `board open --kind relay` first and claim the relay's own work under it (use `board open --kind task --parent $RELAY` for the first sub-ticket). Keeps the ID space clean and keeps every ticket's event shard rolled up under a relay.
 
 Use `--json` for `{id, file, line}` if you're chaining commands.
 
 ### Step 4: Post a summary
 
+```bash
+rs-hack board summary \
+  --text "Created CV Port Bridge plan: R012 with 8 tickets across 3 phases." \
+  --author agent:claude
 ```
-hack_summary(
-  text: "Created CV Port Bridge plan: R012 with 8 tickets across 3 phases.",
-  author: "agent:claude"
-)
-```
+
+(Or via MCP: the tool name is `board_summary`, not `hack_summary`.)
 
 ### Step 5: Confirm
 

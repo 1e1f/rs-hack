@@ -291,7 +291,7 @@ impl ToolRegistry {
                 // ============================================================
                 Tool {
                     name: "board_status",
-                    description: "One-shot board snapshot for planning. Returns per-column counts, tickets actively held (with owners — off-limits for refactor per R5), the handoff queue with one-line next steps, epic child rollups (done/active/handoff/open), pending todos from .hack/todo.md, and a smell signal for `disappeared` tickets in the event log. USE BEFORE picking up work or planning a new relay — it's the fastest orientation on 'what's in flight'.",
+                    description: "One-shot board snapshot for planning. Returns per-column counts, tickets actively held (with owners — off-limits for refactor per Rule05), the handoff queue with one-line next steps, epic child rollups (done/active/handoff/open), pending todos from .hack/todo.md, and a smell signal for `disappeared` tickets in the event log. USE BEFORE picking up work or planning a new relay — it's the fastest orientation on 'what's in flight'.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -302,7 +302,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "board_tickets",
-                    description: "List tickets/relays, or synthesize a pickup prompt. Default mode dumps all @hack: items grouped by column. Use `prompt` to get a continuation prompt for a specific ticket — the output includes the embedded SDLC playbook (R1, C1, R3, R4, R2) so a picking-up agent sees the rules before acting. Use `relay_doc` for a markdown doc of a relay. Filter with `status` / `assignee` / `epics_only`.",
+                    description: "List tickets/relays, or synthesize a pickup prompt. Default mode dumps all @hack: items grouped by column. Use `prompt` to get a continuation prompt for a specific ticket — the output includes the embedded SDLC playbook (Rule01, Col01, Rule03, Rule04, Rule02) so a picking-up agent sees the rules before acting. Use `relay_doc` for a markdown doc of a relay. Filter with `status` / `assignee` / `epics_only`.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -318,7 +318,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "board_rules",
-                    description: "Print the canonical hack-board SDLC ruleset (R1–R7 + C1 column rule). The same rules are embedded in every pickup prompt from `board_tickets` with `prompt`. USE THIS to orient on how work flows through the board when picking up a ticket or finishing a phase. Narrow by situation with `context` to get only the rules relevant right now.",
+                    description: "Print the canonical hack-board SDLC ruleset (Rule01–Rule12 + Col01 column rule). The same rules are embedded in every pickup prompt from `board_tickets` with `prompt`. USE THIS to orient on how work flows through the board when picking up a ticket or finishing a phase. Narrow by situation with `context` to get only the rules relevant right now.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -329,7 +329,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "board_claim",
-                    description: "Atomically claim the next ticket / relay ID and write the @hack: annotation block. ALWAYS use this instead of picking an ID yourself — the command takes a file lock and scans source for the highest existing ID, so two agents running concurrently can't collide (SDLC rule R2). The annotation is written as a module-level doc-comment (`//! @hack:…`) at the top of `file`. Returns the claimed ID (e.g., 'R008', 'F03'). Set `json` for structured output with id/file/line.",
+                    description: "Atomically claim the next ticket / relay ID and write the @hack: annotation block. ALWAYS use this instead of picking an ID yourself — the command takes a file lock and scans source for the highest existing ID, so two agents running concurrently can't collide (SDLC Rule02). The annotation is written as a module-level doc-comment (`//! @hack:…`) at the top of `file`. Returns the claimed ID (e.g., 'R008', 'F03'). Set `json` for structured output with id/file/line.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {

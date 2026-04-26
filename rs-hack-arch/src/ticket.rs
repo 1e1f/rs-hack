@@ -1,10 +1,5 @@
 //! @arch:layer(arch)
 //! @arch:role(ticket)
-//! @hack:relay(R001, "hack-board: two-noun model")
-//! @hack:assignee(agent:claude)
-//! @hack:phase(P1)
-//! @hack:handoff("Refactored to two-noun model: Ticket + Relay. Feature/Bug/Task collapsed into Ticket with kind tag. Story/Epic replaced by Relay parent chain.")
-//! @hack:verify("cargo test -p rs-hack-arch")
 //! @arch:see(architecture/hack-board.md)
 //!
 //! Ticket and Relay aggregation from `@hack:` annotations.
@@ -17,11 +12,12 @@
 //! - **kind**: feature, bug, task (on tickets)
 //! - **phase**: P1, P2 (ordering within a relay)
 //! - **parent**: relay-to-relay hierarchy (epic = relay with child relays)
+//!
 
 use crate::annotation::{AnnotationTarget, ArchAnnotation, ArchKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Whether this is a Ticket or a Relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +62,63 @@ impl TicketStatus {
             Self::Done => "Done",
         }
     }
+
+    /// Annotation-form name (matches what `parse()` accepts and what
+    /// `@hack:status(...)` writes in source).
+    pub fn as_annotation(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Claimed => "claimed",
+            Self::InProgress => "in-progress",
+            Self::Handoff => "handoff",
+            Self::Review => "review",
+            Self::Done => "done",
+        }
+    }
+
+    /// True when the status is "still in flight" — not yet in Review/Done.
+    /// Matches the set of statuses the Rule08 sub-ticket cycle iterates over
+    /// (Open → Claimed → InProgress → Handoff).
+    pub fn is_live(&self) -> bool {
+        matches!(
+            self,
+            Self::Open | Self::Claimed | Self::InProgress | Self::Handoff
+        )
+    }
+}
+
+impl std::fmt::Display for TicketStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_annotation())
+    }
+}
+
+/// One source location of a ticket's defining annotation. The first
+/// entry of `Ticket::files` is the canonical (lex-first) location.
+///
+/// The field is named `path` (not `file`) to disambiguate from the
+/// top-level `Ticket::file` alias — consumers reading nested JSON see
+/// `files[i].path` and `files[i].line`, which reads cleanly as a
+/// `path:line` pair.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TicketLocation {
+    pub path: PathBuf,
+    pub line: usize,
+}
+
+/// One value of a scalar field, attributed to its source location.
+/// Surfaced inside `Ticket::conflicts` when the same `@hack:` ID is
+/// declared in multiple files with disagreeing scalar metadata
+/// (e.g. one file says `status(open)`, another `status(review)`).
+///
+/// The Ticket's top-level scalar holds the lex-first value
+/// deterministically; `conflicts` lists every observed value with its
+/// `(path, line)` so the disagreement is loud rather than silent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldConflict {
+    pub value: String,
+    pub path: PathBuf,
+    pub line: usize,
 }
 
 /// A work item (Ticket or Relay) on the hack-board.
@@ -140,14 +193,33 @@ pub struct Ticket {
     /// Links to architecture docs
     pub see_also: Vec<String>,
 
-    /// Source file
+    /// Convenience alias for `files[0].path` — the lex-first source
+    /// location. Kept for back-compat with consumers that read a single
+    /// path; new code should iterate `files`.
     pub file: PathBuf,
 
-    /// Line number
+    /// Convenience alias for `files[0].line`.
     pub line: usize,
 
     /// AST target
     pub target: AnnotationTarget,
+
+    /// Every source occurrence of this ticket's `@hack:ticket` /
+    /// `@hack:relay` header, sorted by `(file, line)`. Always populated
+    /// with at least one entry. Length > 1 means the same ID is
+    /// declared in multiple files — that's a smell to resolve (Rule11):
+    /// either dedupe to one home or renumber one of the occurrences.
+    pub files: Vec<TicketLocation>,
+
+    /// Per-field disagreements when the same ID appears in multiple
+    /// files. Keys are field names (`status`, `assignee`, `phase`,
+    /// `title`, `kind`, `severity`, `parent`); values list every
+    /// observed value with its source location. The Ticket's top-level
+    /// scalar holds the lex-first value (deterministic winner);
+    /// `conflicts` exposes the disagreement so the board / pickup
+    /// prompt can flag it for resolution. Empty for the common case.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub conflicts: std::collections::BTreeMap<String, Vec<FieldConflict>>,
 
     /// True when this relay acts as an epic — either explicitly declared with
     /// `@hack:kind(epic)` or inferred from having child relays via
@@ -184,6 +256,75 @@ impl Ticket {
             }
         }
     }
+}
+
+/// How many live sub-tickets hang off a child — counted by their status
+/// bucket so the container prompt can render "2 open + 1 in-flight + 0
+/// handoff" per child relay. Drives the epic two-level walk; for a plain
+/// relay-with-subtickets the counts are unused.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChildLiveCounts {
+    pub open: usize,
+    /// `Claimed` + `InProgress` — work someone is already on.
+    pub in_flight: usize,
+    pub handoff: usize,
+}
+
+impl ChildLiveCounts {
+    pub fn total(&self) -> usize {
+        self.open + self.in_flight + self.handoff
+    }
+
+    fn bump(&mut self, status: &TicketStatus) {
+        match status {
+            TicketStatus::Open => self.open += 1,
+            TicketStatus::Claimed | TicketStatus::InProgress => self.in_flight += 1,
+            TicketStatus::Handoff => self.handoff += 1,
+            TicketStatus::Review | TicketStatus::Done => {}
+        }
+    }
+
+    /// Render as a compact inline string, e.g. `2 open · 1 in-flight`.
+    /// Empty buckets are dropped. Returns `""` when totally idle (no live
+    /// sub-tickets) so the caller can elide the suffix.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if self.open > 0 {
+            parts.push(format!("{} open", self.open));
+        }
+        if self.in_flight > 0 {
+            parts.push(format!("{} in-flight", self.in_flight));
+        }
+        if self.handoff > 0 {
+            parts.push(format!("{} handoff", self.handoff));
+        }
+        parts.join(" · ")
+    }
+}
+
+/// Hierarchy context for building a pickup prompt. Lets the prompt see
+/// its place in the tree: parent (for sub-ticket inheritance), live
+/// children (for a relay-with-subtickets or an epic), and grandchild
+/// counts (for epics, which need a two-level walk).
+///
+/// Empty `PromptContext::default()` reproduces the legacy flat-prompt
+/// behavior: no parent, no children, no grandchildren.
+#[derive(Default, Debug)]
+pub struct PromptContext<'a> {
+    /// Children still in flight — sub-tickets for a relay, child relays
+    /// for an epic. Sorted by ID. Used to render the "work one at a
+    /// time" section and pick the next-live starter.
+    pub live_children: Vec<&'a Ticket>,
+
+    /// Per-child live-subticket counts. Only populated when the ticket
+    /// itself is an epic (its `live_children` are child relays, and
+    /// each of those can own its own sub-tickets). Keyed by child ID.
+    pub child_live_counts: HashMap<String, ChildLiveCounts>,
+
+    /// Parent relay, if any. When present, the prompt inherits the
+    /// parent's gotchas + verify smoke so a sub-ticket pickup doesn't
+    /// relearn traps the relay already paid to discover.
+    pub parent: Option<&'a Ticket>,
 }
 
 /// The board — a collection of tickets and relays.
@@ -235,7 +376,16 @@ impl TicketBoard {
         }
 
         let mut tickets = Vec::new();
-        for (_id, anns) in by_ticket {
+        for (_id, mut anns) in by_ticket {
+            // Sort by (file, line) so build_item's "first wins" is
+            // deterministic when the same ID appears in multiple files.
+            // Without this, HashMap iteration order made `file` flip
+            // between scans and the events log waffled.
+            anns.sort_by(|a, b| {
+                a.file
+                    .cmp(&b.file)
+                    .then_with(|| a.line.cmp(&b.line))
+            });
             if let Some(ticket) = build_item(&anns) {
                 tickets.push(ticket);
             }
@@ -335,6 +485,56 @@ impl TicketBoard {
         self.tickets.iter().filter(|t| t.parent.as_deref() == Some(relay_id)).collect()
     }
 
+    /// Build the hierarchy context used by `Ticket::to_prompt_with_ctx`.
+    /// Walks the board once to gather: live children of `id`, grandchild
+    /// counts (for epics — each child relay's own live sub-tickets), and
+    /// the parent if `id` is itself a sub-ticket / child relay.
+    ///
+    /// Returns an empty `PromptContext` if the id isn't on the board —
+    /// the caller is expected to have already resolved the ticket.
+    pub fn build_prompt_context(&self, id: &str) -> PromptContext<'_> {
+        let Some(ticket) = self.get(id) else {
+            return PromptContext::default();
+        };
+
+        let mut live_children: Vec<&Ticket> = self
+            .tickets
+            .iter()
+            .filter(|t| t.parent.as_deref() == Some(ticket.id.as_str()))
+            .filter(|t| t.status.is_live())
+            .collect();
+        live_children.sort_by(|a, b| a.id.cmp(&b.id));
+
+        // Epic grandchild counts: for each live child relay, count how many
+        // of its own sub-tickets are still in flight. Only meaningful when
+        // the current ticket is an epic — but cheap to compute either way,
+        // so we always populate (the prompt builder ignores the map for
+        // non-epic containers).
+        let mut child_live_counts: HashMap<String, ChildLiveCounts> = HashMap::new();
+        if ticket.is_epic {
+            for child in &live_children {
+                let mut counts = ChildLiveCounts::default();
+                for grand in &self.tickets {
+                    if grand.parent.as_deref() == Some(child.id.as_str()) {
+                        counts.bump(&grand.status);
+                    }
+                }
+                child_live_counts.insert(child.id.clone(), counts);
+            }
+        }
+
+        let parent = ticket
+            .parent
+            .as_deref()
+            .and_then(|pid| self.get(pid));
+
+        PromptContext {
+            live_children,
+            child_live_counts,
+            parent,
+        }
+    }
+
     pub fn to_markdown(&self) -> String {
         let columns = [
             TicketStatus::Open,
@@ -417,19 +617,52 @@ impl TicketBoard {
 impl Ticket {
     /// Generate a continuation prompt for the next agent.
     ///
-    /// Equivalent to `to_prompt_with_context(&[])` — no sibling context.
-    /// Callers that have a `TicketBoard` in hand should prefer
-    /// `to_prompt_with_context` so the prompt can surface live sub-tickets
-    /// under the relay (R8 cycle).
+    /// Equivalent to `to_prompt_with_ctx(&PromptContext::default())` —
+    /// no hierarchy context. Callers that have a `TicketBoard` in hand
+    /// should prefer `to_prompt_with_ctx` (fed by
+    /// `TicketBoard::build_prompt_context`) so the prompt can surface
+    /// live sub-tickets, parent gotchas, and epic grandchild counts.
     pub fn to_prompt(&self) -> String {
-        self.to_prompt_with_context(&[])
+        self.to_prompt_with_ctx(&PromptContext::default())
     }
 
-    /// Generate a continuation prompt, optionally including live sub-tickets
-    /// so the next agent sees the R8 cycle they're stepping into.
-    /// `live_children` should be the sub-tickets/child relays still in flight
-    /// (Open / Active / Handoff), sorted by ID. Pass `&[]` if none or unknown.
+    /// Legacy shim: build a prompt from a flat children list (no parent,
+    /// no grandchild counts). Retained so existing callers and tests
+    /// that only pass children don't need to know about `PromptContext`.
     pub fn to_prompt_with_context(&self, live_children: &[&Ticket]) -> String {
+        let ctx = PromptContext {
+            live_children: live_children.to_vec(),
+            child_live_counts: HashMap::new(),
+            parent: None,
+        };
+        self.to_prompt_with_ctx(&ctx)
+    }
+
+    /// Build the continuation prompt with full hierarchy context.
+    ///
+    /// The shape of the prompt adapts to the ticket's place in the tree:
+    /// - **Leaf sub-ticket** (`ctx.parent.is_some()`, no live_children):
+    ///   inherits the parent relay's gotchas and combined verify smoke
+    ///   so the pickup doesn't relearn traps the relay already paid for.
+    /// - **Relay with sub-tickets** (live_children non-empty, not epic):
+    ///   hoists the "Sub-tickets in flight" section above `next_steps`
+    ///   and relabels `next_steps` as "Follow-on spawns" — the baton is
+    ///   the sub-ticket cycle (Rule08), not the author's spawn list.
+    /// - **Epic** (`self.is_epic` + live_children are child relays):
+    ///   two-level walk — each child relay is rendered with its own
+    ///   live-subticket counts, and the starter points at the earliest
+    ///   live child (preferring ones that already have work in flight).
+    /// - **Plain ticket** (no parent, no children): classic flat prompt.
+    ///
+    /// Picker fix: earliest-live by ID includes `Claimed`/`InProgress`,
+    /// not just `Open`/`Handoff`. A relay with an already-in-progress
+    /// sub-ticket points at that sub-ticket with a "continue it" verb
+    /// rather than skipping to the next fresh one.
+    pub fn to_prompt_with_ctx(&self, ctx: &PromptContext) -> String {
+        let live_children = ctx.live_children.as_slice();
+        let is_container = !live_children.is_empty();
+        let is_epic_container = is_container && self.is_epic;
+
         let mut prompt = String::new();
 
         prompt.push_str(&format!("# Continue: {} — {}\n\n", self.id, self.title));
@@ -441,6 +674,23 @@ impl Ticket {
                 prompt.push_str(&format!("- {}\n", g));
             }
             prompt.push('\n');
+        }
+
+        // Inherited gotchas from parent relay. Sub-ticket pickups routinely
+        // starve for parser traps / pre-existing breakage the relay already
+        // discovered — surface them here, clearly marked as inherited so
+        // the reader knows the source.
+        if let Some(parent) = ctx.parent {
+            if !parent.gotchas.is_empty() {
+                prompt.push_str(&format!(
+                    "## ⚠ Gotchas inherited from {} (read first)\n\n",
+                    parent.id
+                ));
+                for g in &parent.gotchas {
+                    prompt.push_str(&format!("- {}\n", g));
+                }
+                prompt.push('\n');
+            }
         }
 
         prompt.push_str("## Context\n\n");
@@ -487,8 +737,116 @@ impl Ticket {
             }
         }
 
+        // Container section — hoisted above next_steps so the Rule08 cycle
+        // (or epic child-relay walk) reads as THE next action. For containers
+        // the relay/epic's own `next_steps` are usually forward-spawn noise
+        // (follow-on tickets to file), not the baton.
+        if is_container {
+            if is_epic_container {
+                prompt.push_str("## Child relays (watering hole — work one at a time)\n\n");
+                prompt.push_str(
+                    "This is an epic — its baton is the chain of child relays below. \
+                     You don't have to finish the whole epic in one session; pick the \
+                     earliest live child, work its sub-tickets, then come back to this \
+                     prompt to see what's next. Epic progress is measured by children \
+                     reaching Review.\n\n",
+                );
+                for child in live_children {
+                    let status = child.status.column().to_lowercase();
+                    let counts = ctx
+                        .child_live_counts
+                        .get(&child.id)
+                        .copied()
+                        .unwrap_or_default();
+                    let counts_suffix = {
+                        let d = counts.describe();
+                        if d.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {}", d)
+                        }
+                    };
+                    let assignee = child
+                        .assignee
+                        .as_deref()
+                        .map(|a| format!(" · {}", a))
+                        .unwrap_or_default();
+                    prompt.push_str(&format!(
+                        "- **{}** [{}]{}{} · {}\n",
+                        child.id, status, assignee, counts_suffix, child.title
+                    ));
+                }
+                prompt.push('\n');
+            } else {
+                prompt.push_str("## Sub-tickets in flight\n\n");
+                prompt.push_str(
+                    "This relay has live sub-tickets. Work them one at a time (Rule08): \
+                     the earliest live one is the next action. Do it, archive it, then come \
+                     back here for the next. Don't try to do the full chain in a single \
+                     session.\n\n",
+                );
+                for child in live_children {
+                    let status = child.status.column().to_lowercase();
+                    let phase = child
+                        .phase
+                        .as_deref()
+                        .map(|p| format!(" · {}", p))
+                        .unwrap_or_default();
+                    let assignee = child
+                        .assignee
+                        .as_deref()
+                        .map(|a| format!(" · {}", a))
+                        .unwrap_or_default();
+                    prompt.push_str(&format!(
+                        "- **{}** [{}]{}{} · {}\n",
+                        child.id, status, phase, assignee, child.title
+                    ));
+                }
+            }
+
+            // Picker: earliest LIVE child by ID order. Includes InProgress /
+            // Claimed — the R005 fix. Previously we only matched Open|Handoff,
+            // which skipped an already-in-progress sub-ticket and pointed at
+            // the next fresh one instead.
+            if let Some(next) = live_children.first().copied() {
+                let line = match next.status {
+                    TicketStatus::Open => format!(
+                        "\nStart with:\n\n```bash\nrs-hack board claim {}\n```\n\n",
+                        next.id
+                    ),
+                    TicketStatus::Handoff => format!(
+                        "\nStart with:\n\n```bash\nrs-hack board move {} active\n```\n\n",
+                        next.id
+                    ),
+                    TicketStatus::Claimed | TicketStatus::InProgress => format!(
+                        "\nContinue with **{}** — already in flight ({}). Pull its pickup \
+                         prompt:\n\n```bash\nrs-hack board tickets --prompt {}\n```\n\n",
+                        next.id,
+                        next.status.column().to_lowercase(),
+                        next.id
+                    ),
+                    // Review/Done shouldn't appear in live_children, but
+                    // render something coherent if one slips through.
+                    _ => format!("\nStart with **{}**.\n\n", next.id),
+                };
+                prompt.push_str(&line);
+            } else {
+                prompt.push('\n');
+            }
+        }
+
         if !self.next_steps.is_empty() {
-            prompt.push_str("## Next steps\n\n");
+            // When the relay has live children, its own `next_steps` is the
+            // author's forward-spawn list (follow-on tickets to file) — not
+            // the current baton. Relabel so a pickup agent doesn't confuse
+            // them with the sub-ticket cycle, which is hoisted above.
+            if is_container {
+                prompt.push_str(
+                    "## Follow-on spawns (not the baton — see sub-tickets above)\n\n",
+                );
+            } else {
+                prompt.push_str("## Next steps\n\n");
+            }
             for step in &self.next_steps {
                 prompt.push_str(&format!("- {}\n", step));
             }
@@ -534,6 +892,33 @@ impl Ticket {
             }
         }
 
+        // Parent-relay verify smoke: a sub-ticket pickup should be able to
+        // run the relay's catch-all regression chain without opening the
+        // parent card. Render only shell commands (prose criteria are too
+        // context-heavy to inherit), as a combined smoke for copy-paste.
+        if let Some(parent) = ctx.parent {
+            let parent_cmds: Vec<String> = parent
+                .verify
+                .iter()
+                .filter(|v| looks_like_shell_command(v))
+                .map(|v| strip_trailing_comment(v))
+                .collect();
+            if !parent_cmds.is_empty() {
+                prompt.push_str(&format!(
+                    "## Verification inherited from {}\n\n",
+                    parent.id
+                ));
+                prompt.push_str(
+                    "Run the parent relay's smoke after your own checks — it catches \
+                     regressions in adjacent sub-tickets that a narrow verify would \
+                     miss.\n\n",
+                );
+                prompt.push_str("```bash\n");
+                prompt.push_str(&parent_cmds.join(" && "));
+                prompt.push_str("\n```\n\n");
+            }
+        }
+
         // Assumptions baked into the handoff that the next agent should validate.
         if !self.assumes.is_empty() {
             prompt.push_str("## Assumptions (unverified — confirm or challenge)\n\n");
@@ -554,56 +939,11 @@ impl Ticket {
         prompt.push_str("## Source\n\n");
         prompt.push_str(&format!("Defined at `{}:{}`\n\n", self.file.display(), self.line));
 
-        // Sub-tickets in flight — if the relay has live children, teach the R8
-        // cycle explicitly. Agents shepherding a relay need this more than they
-        // need another restatement of R1.
-        if !live_children.is_empty() {
-            prompt.push_str("## Sub-tickets in flight\n\n");
-            prompt.push_str(
-                "This relay has live sub-tickets. Work them one at a time (R8): \
-                 claim the earliest open one, do it, archive it, then claim the next. \
-                 Don't try to do the full chain in a single session.\n\n",
-            );
-            for child in live_children {
-                let status = child.status.column().to_lowercase();
-                let phase = child
-                    .phase
-                    .as_deref()
-                    .map(|p| format!(" · {}", p))
-                    .unwrap_or_default();
-                let assignee = child
-                    .assignee
-                    .as_deref()
-                    .map(|a| format!(" · {}", a))
-                    .unwrap_or_default();
-                prompt.push_str(&format!(
-                    "- **{}** [{}]{}{} · {}\n",
-                    child.id, status, phase, assignee, child.title
-                ));
-            }
-            // Suggest the earliest claimable child by ID order.
-            if let Some(first_claimable) = live_children
-                .iter()
-                .find(|c| matches!(c.status, TicketStatus::Open | TicketStatus::Handoff))
-            {
-                let verb = match first_claimable.status {
-                    TicketStatus::Handoff => format!("move {} active", first_claimable.id),
-                    _ => format!("claim {}", first_claimable.id),
-                };
-                prompt.push_str(&format!(
-                    "\nStart with:\n\n```bash\nrs-hack board {}\n```\n\n",
-                    verb
-                ));
-            } else {
-                prompt.push('\n');
-            }
-        }
-
         prompt.push_str("## First action\n\n");
         match self.status {
             TicketStatus::Open => {
                 prompt.push_str(&format!(
-                    "Claim this ticket — one atomic command flips status and assignee (R1):\n\n\
+                    "Claim this ticket — one atomic command flips status and assignee (Rule01):\n\n\
                      ```bash\n\
                      rs-hack board claim {}\n\
                      ```\n\n\
@@ -614,7 +954,7 @@ impl Ticket {
             }
             TicketStatus::Handoff => {
                 prompt.push_str(&format!(
-                    "Pick up the baton — one atomic command flips status and assignee (R1):\n\n\
+                    "Pick up the baton — one atomic command flips status and assignee (Rule01):\n\n\
                      ```bash\n\
                      rs-hack board move {} active\n\
                      ```\n\n\
@@ -642,22 +982,27 @@ impl Ticket {
         }
 
         // Playbook — name the rules that are load-bearing for THIS pickup, not
-        // a generic list. R8 only matters when the relay has live children.
+        // a generic list. Rule08 only matters when the relay has live children.
         prompt.push_str("## Playbook\n\n");
         if !live_children.is_empty() {
             prompt.push_str(
-                "Load-bearing rules for this pickup: **R1** (claim first — above), \
-                 **R8** (sub-ticket cycle — above), **C1** (three end-states — below). \
+                "Load-bearing rules for this pickup: **Rule01** (claim first — above), \
+                 **Rule08** (sub-ticket cycle — above), **Col01** (three end-states — below). \
                  Full ruleset: `rs-hack board rules --context pickup` (or `finishing` \
                  when you wrap up).\n\n",
             );
         } else {
             prompt.push_str(
-                "Load-bearing rules for this pickup: **R1** (claim first — above), \
-                 **C1** (three end-states — below). Full ruleset: \
+                "Load-bearing rules for this pickup: **Rule01** (claim first — above), \
+                 **Col01** (three end-states — below). Full ruleset: \
                  `rs-hack board rules --context pickup` (or `finishing` when you wrap up).\n\n",
             );
         }
+        prompt.push_str(
+            "Inspect any related ticket: `rs-hack board show <ID>` \
+             (compact view) or `rs-hack board show <ID> --prompt` (full \
+             pickup form, like this one).\n\n",
+        );
 
         prompt.push_str("## Then\n\n");
         let mut step = 1usize;
@@ -675,11 +1020,11 @@ impl Ticket {
             ));
             step += 1;
         }
-        prompt.push_str(&format!("{}. Pick the right end-state (C1):\n", step));
+        prompt.push_str(&format!("{}. Pick the right end-state (Col01):\n", step));
         prompt.push_str(&format!(
             "   - **More work remains (another phase, another agent):** \
                 `rs-hack board move {} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
-                — same R-number, baton moves forward in place (R3).\n",
+                — same R-number, baton moves forward in place (Rule03).\n",
             self.id
         ));
         prompt.push_str(&format!(
@@ -961,66 +1306,244 @@ fn is_hack_relevant(kind: &ArchKind) -> bool {
     )
 }
 
-/// Build a Ticket or Relay from a group of annotations on the same target.
-fn build_item(anns: &[&ArchAnnotation]) -> Option<Ticket> {
-    let mut id = None;
-    let mut title = String::new();
-    let mut item_type = None;
-    let mut kind = None;
-    let mut status = TicketStatus::Open;
-    let mut assignee = None;
-    let mut phase = None;
-    let mut parent = None;
-    let mut severity = None;
-    let mut handoff = Vec::new();
-    let mut next_steps = Vec::new();
-    let mut cleanup = Vec::new();
-    let mut verify = Vec::new();
-    let mut gotchas = Vec::new();
-    let mut assumes = Vec::new();
-    let mut see_also = Vec::new();
-    let mut depends_on = Vec::new();
+/// One file's contribution to a (potentially multi-file) ticket.
+/// Scalars are last-write-wins within the file; vec fields accumulate.
+/// Multiple `PartialTicket`s from different files are then CRDT-merged
+/// in `build_item`: vecs union, scalars take the lex-first non-empty
+/// value with disagreements surfaced via `Ticket::conflicts`.
+#[derive(Default)]
+struct PartialTicket {
+    file: PathBuf,
+    header_line: usize, // line of the first defining @hack:ticket/@hack:relay
+    target: Option<AnnotationTarget>,
+    id: Option<String>,
+    title: Option<String>,
+    item_type: Option<ItemType>,
+    kind: Option<String>,
+    status: Option<TicketStatus>,
+    assignee: Option<String>,
+    phase: Option<String>,
+    parent: Option<String>,
+    severity: Option<String>,
+    handoff: Vec<String>,
+    next_steps: Vec<String>,
+    cleanup: Vec<String>,
+    verify: Vec<String>,
+    gotchas: Vec<String>,
+    assumes: Vec<String>,
+    see_also: Vec<String>,
+    depends_on: Vec<String>,
+}
 
+/// Fold one file's worth of annotations (already sorted by line) into a
+/// `PartialTicket`. Last-write-wins for scalars (matches the original
+/// single-file behavior); vecs accumulate in source order.
+fn fold_file(file: PathBuf, anns: &[&ArchAnnotation]) -> Option<PartialTicket> {
     let first = anns.first()?;
-    let file = first.file.clone();
-    let line = first.line;
-    let target = first.target.clone();
-
+    let mut p = PartialTicket {
+        file,
+        header_line: first.line,
+        target: Some(first.target.clone()),
+        ..Default::default()
+    };
     for ann in anns {
         match &ann.kind {
-            ArchKind::Ticket { id: tid, title: ttitle } => {
-                id = Some(tid.clone());
-                title = ttitle.clone();
-                item_type = Some(ItemType::Ticket);
+            ArchKind::Ticket { id, title } => {
+                p.id = Some(id.clone());
+                p.title = Some(title.clone());
+                p.item_type = Some(ItemType::Ticket);
             }
-            ArchKind::Relay { id: rid, title: rtitle } => {
-                id = Some(rid.clone());
-                title = rtitle.clone();
-                item_type = Some(ItemType::Relay);
-                if status == TicketStatus::Open {
-                    status = TicketStatus::Handoff;
+            ArchKind::Relay { id, title } => {
+                p.id = Some(id.clone());
+                p.title = Some(title.clone());
+                p.item_type = Some(ItemType::Relay);
+                // Relays default to handoff unless an explicit status follows.
+                if p.status.is_none() {
+                    p.status = Some(TicketStatus::Handoff);
                 }
             }
-            ArchKind::Kind(k) => kind = Some(k.clone()),
-            ArchKind::Status(s) => status = TicketStatus::parse(s),
-            ArchKind::Assignee(a) => assignee = Some(a.clone()),
-            ArchKind::Phase(p) => phase = Some(p.clone()),
-            ArchKind::Parent(p) => parent = Some(p.clone()),
-            ArchKind::HackSeverity(s) => severity = Some(s.clone()),
-            ArchKind::Handoff(h) => handoff.push(h.clone()),
-            ArchKind::Next(n) => next_steps.push(n.clone()),
-            ArchKind::Cleanup(c) => cleanup.push(c.clone()),
-            ArchKind::Verify(v) => verify.push(v.clone()),
-            ArchKind::Gotcha(g) => gotchas.push(g.clone()),
-            ArchKind::Assumes(a) => assumes.push(a.clone()),
-            ArchKind::See(s) => see_also.push(s.clone()),
-            ArchKind::DependsOn { target: dep, .. } => depends_on.push(dep.clone()),
+            ArchKind::Kind(k) => p.kind = Some(k.clone()),
+            ArchKind::Status(s) => p.status = Some(TicketStatus::parse(s)),
+            ArchKind::Assignee(a) => p.assignee = Some(a.clone()),
+            ArchKind::Phase(ph) => p.phase = Some(ph.clone()),
+            ArchKind::Parent(pa) => p.parent = Some(pa.clone()),
+            ArchKind::HackSeverity(s) => p.severity = Some(s.clone()),
+            ArchKind::Handoff(h) => p.handoff.push(h.clone()),
+            ArchKind::Next(n) => p.next_steps.push(n.clone()),
+            ArchKind::Cleanup(c) => p.cleanup.push(c.clone()),
+            ArchKind::Verify(v) => p.verify.push(v.clone()),
+            ArchKind::Gotcha(g) => p.gotchas.push(g.clone()),
+            ArchKind::Assumes(a) => p.assumes.push(a.clone()),
+            ArchKind::See(s) => p.see_also.push(s.clone()),
+            ArchKind::DependsOn { target: dep, .. } => p.depends_on.push(dep.clone()),
             _ => {}
         }
     }
+    Some(p)
+}
+
+/// Push items from `src` into `dst` skipping duplicates (set-union semantics).
+/// Order: lex-first file's items first, then any new items from later files.
+fn extend_dedup<T: Clone + PartialEq>(dst: &mut Vec<T>, src: &[T]) {
+    for item in src {
+        if !dst.contains(item) {
+            dst.push(item.clone());
+        }
+    }
+}
+
+/// Record a scalar conflict: `value` from `loc` differs from a value
+/// already chosen for `field`. Idempotent on (field, value, loc).
+fn record_conflict(
+    conflicts: &mut std::collections::BTreeMap<String, Vec<FieldConflict>>,
+    field: &str,
+    value: String,
+    file: &Path,
+    line: usize,
+) {
+    let entry = conflicts.entry(field.to_string()).or_default();
+    let new = FieldConflict {
+        value,
+        path: file.to_path_buf(),
+        line,
+    };
+    if !entry.contains(&new) {
+        entry.push(new);
+    }
+}
+
+/// Merge a scalar from `incoming` (from `loc`) into the winning `dst`
+/// (already populated from the lex-first file when not None). On
+/// disagreement, both values are recorded in `conflicts`.
+fn merge_scalar<T: Clone + PartialEq + ToString>(
+    dst: &mut Option<T>,
+    incoming: &Option<T>,
+    field: &str,
+    file: &Path,
+    line: usize,
+    winner_loc: Option<(&Path, usize)>,
+    conflicts: &mut std::collections::BTreeMap<String, Vec<FieldConflict>>,
+) {
+    let Some(inc) = incoming else { return };
+    match dst {
+        None => *dst = Some(inc.clone()),
+        Some(existing) if existing == inc => {} // agreement, no-op
+        Some(existing) => {
+            // Record both the winner and this dissenting value, once each.
+            if let Some((wf, wl)) = winner_loc {
+                record_conflict(conflicts, field, existing.to_string(), wf, wl);
+            }
+            record_conflict(conflicts, field, inc.to_string(), file, line);
+        }
+    }
+}
+
+/// Build a Ticket or Relay from a group of annotations on the same ID.
+/// `anns` may span multiple source files when the ID is declared in
+/// more than one place; the per-file folds are CRDT-merged here.
+fn build_item(anns: &[&ArchAnnotation]) -> Option<Ticket> {
+    if anns.is_empty() {
+        return None;
+    }
+
+    // Group by file (anns are pre-sorted by (file, line) so a simple
+    // sequential scan keeps each file's annotations contiguous).
+    let mut per_file: Vec<(PathBuf, Vec<&ArchAnnotation>)> = Vec::new();
+    for ann in anns {
+        match per_file.last_mut() {
+            Some((f, group)) if f == &ann.file => group.push(ann),
+            _ => per_file.push((ann.file.clone(), vec![ann])),
+        }
+    }
+    let partials: Vec<PartialTicket> = per_file
+        .into_iter()
+        .filter_map(|(f, anns)| fold_file(f, &anns))
+        .collect();
+    if partials.is_empty() {
+        return None;
+    }
+
+    // Lex-first partial wins for scalars and supplies the canonical
+    // (file, line, target). Subsequent partials union vecs and surface
+    // scalar disagreements via `conflicts`.
+    let winner = &partials[0];
+    let canonical_file = winner.file.clone();
+    let canonical_line = winner.header_line;
+    let target = winner
+        .target
+        .clone()
+        .expect("fold_file always sets target when at least one ann present");
+
+    let mut id = winner.id.clone();
+    let mut title = winner.title.clone();
+    let mut item_type = winner.item_type.clone();
+    let mut kind = winner.kind.clone();
+    let mut status = winner.status.clone();
+    let mut assignee = winner.assignee.clone();
+    let mut phase = winner.phase.clone();
+    let mut parent = winner.parent.clone();
+    let mut severity = winner.severity.clone();
+    let mut handoff = winner.handoff.clone();
+    let mut next_steps = winner.next_steps.clone();
+    let mut cleanup = winner.cleanup.clone();
+    let mut verify = winner.verify.clone();
+    let mut gotchas = winner.gotchas.clone();
+    let mut assumes = winner.assumes.clone();
+    let mut see_also = winner.see_also.clone();
+    let mut depends_on = winner.depends_on.clone();
+    let mut conflicts: std::collections::BTreeMap<String, Vec<FieldConflict>> =
+        std::collections::BTreeMap::new();
+
+    let winner_loc: Option<(&Path, usize)> =
+        Some((winner.file.as_path(), winner.header_line));
+
+    for p in &partials[1..] {
+        let f = p.file.as_path();
+        let l = p.header_line;
+        // Title and kind are scalars too — surface any disagreement.
+        merge_scalar(&mut title, &p.title, "title", f, l, winner_loc, &mut conflicts);
+        merge_scalar(&mut kind, &p.kind, "kind", f, l, winner_loc, &mut conflicts);
+        merge_scalar(&mut status, &p.status, "status", f, l, winner_loc, &mut conflicts);
+        merge_scalar(&mut assignee, &p.assignee, "assignee", f, l, winner_loc, &mut conflicts);
+        merge_scalar(&mut phase, &p.phase, "phase", f, l, winner_loc, &mut conflicts);
+        merge_scalar(&mut parent, &p.parent, "parent", f, l, winner_loc, &mut conflicts);
+        merge_scalar(&mut severity, &p.severity, "severity", f, l, winner_loc, &mut conflicts);
+        // id and item_type can't legitimately differ (same neighborhood
+        // key, by construction) — fall back to the partial's value if
+        // the winner had none, otherwise skip.
+        if id.is_none() {
+            id = p.id.clone();
+        }
+        if item_type.is_none() {
+            item_type = p.item_type.clone();
+        }
+        // Vec fields union (set semantics).
+        extend_dedup(&mut handoff, &p.handoff);
+        extend_dedup(&mut next_steps, &p.next_steps);
+        extend_dedup(&mut cleanup, &p.cleanup);
+        extend_dedup(&mut verify, &p.verify);
+        extend_dedup(&mut gotchas, &p.gotchas);
+        extend_dedup(&mut assumes, &p.assumes);
+        extend_dedup(&mut see_also, &p.see_also);
+        extend_dedup(&mut depends_on, &p.depends_on);
+    }
+
+    // `files` is always populated, even with a single entry, so the
+    // wire shape is uniform across single- and multi-file tickets.
+    let files: Vec<TicketLocation> = partials
+        .iter()
+        .map(|p| TicketLocation {
+            path: p.file.clone(),
+            line: p.header_line,
+        })
+        .collect();
 
     let id = id?;
     let item_type = item_type?;
+    let title = title.unwrap_or_default();
+    let status = status.unwrap_or(TicketStatus::Open);
+    let file = canonical_file;
+    let line = canonical_line;
 
     // Infer kind from legacy aliases (bug/feature/task parsed as Ticket)
     // or from ID prefix if no explicit @hack:kind
@@ -1053,6 +1576,8 @@ fn build_item(anns: &[&ArchAnnotation]) -> Option<Ticket> {
         file,
         line,
         target,
+        files,
+        conflicts,
         is_epic: false,       // resolved later by TicketBoard::resolve_epics
         epic_status: None,
     })
@@ -1125,6 +1650,89 @@ pub mod thing;
         let t2 = board.get("R010-T2").expect("R010-T2 must exist");
         assert_eq!(t2.status, TicketStatus::Open);
         assert_eq!(t2.next_steps, vec!["T2 next step".to_string()]);
+    }
+
+    #[test]
+    fn test_single_occurrence_files_field_has_one_entry() {
+        // `files` is always-on: even a single-file ticket lists its
+        // location, so consumers can iterate uniformly without an
+        // empty-vs-singular branch. The conflicts map stays empty.
+        let source = r#"//! @hack:ticket(F01, "single")
+//! @hack:status(open)
+"#;
+        let anns = extract_from_source(source, Path::new("src/lib.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&anns);
+        let t = board.get("F01").unwrap();
+        assert_eq!(t.files.len(), 1);
+        assert_eq!(t.files[0].path, Path::new("src/lib.rs"));
+        assert_eq!(t.files[0].path, t.file);
+        assert_eq!(t.files[0].line, t.line);
+        assert!(t.conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_duplicate_id_surfaces_conflicts_and_unions_vec_fields() {
+        // Two files declare R013-T2 with disagreeing scalars and
+        // partly-overlapping vec fields. Expect:
+        //  - lex-first file's scalar wins (`status: review`)
+        //  - both values appear in `conflicts.status`
+        //  - vec fields union (no duplicates), order = winner-first
+        let src = r#"//! @hack:ticket(R013-T2, "P2: src view")
+//! @hack:status(review)
+//! @hack:assignee(agent:claude)
+//! @hack:next("ship the signature change")
+//! @hack:next("update callers")
+"#;
+        let test = r#"//! @hack:ticket(R013-T2, "P2: tests view")
+//! @hack:status(open)
+//! @hack:assignee(agent:claude)
+//! @hack:next("update callers")
+//! @hack:next("add fixture for chip_args")
+"#;
+        let mut anns = Vec::new();
+        anns.extend(
+            extract_from_source(src, Path::new("crates/banana/src/description.rs"))
+                .unwrap(),
+        );
+        anns.extend(
+            extract_from_source(test, Path::new("crates/banana/tests/chip_args.rs"))
+                .unwrap(),
+        );
+
+        for _ in 0..8 {
+            let board = TicketBoard::from_annotations(&anns);
+            let t = board.get("R013-T2").expect("R013-T2 exists");
+            // Lex-first wins for canonical singular fields.
+            assert_eq!(t.file, Path::new("crates/banana/src/description.rs"));
+            assert_eq!(t.status, TicketStatus::Review);
+            assert_eq!(t.title, "P2: src view");
+
+            // files lists both, sorted by (file, line).
+            assert_eq!(t.files.len(), 2);
+            assert_eq!(t.files[0].path, Path::new("crates/banana/src/description.rs"));
+            assert_eq!(t.files[1].path, Path::new("crates/banana/tests/chip_args.rs"));
+
+            // conflicts surfaces the disagreement on status + title.
+            let status_conflicts = t.conflicts.get("status").expect("status conflict");
+            assert_eq!(status_conflicts.len(), 2);
+            assert!(status_conflicts.iter().any(|c| c.value == "review"));
+            assert!(status_conflicts.iter().any(|c| c.value == "open"));
+            let title_conflicts = t.conflicts.get("title").expect("title conflict");
+            assert!(title_conflicts.iter().any(|c| c.value == "P2: src view"));
+            assert!(title_conflicts.iter().any(|c| c.value == "P2: tests view"));
+            // assignee agrees → no conflict entry.
+            assert!(!t.conflicts.contains_key("assignee"));
+
+            // Vec union: 3 distinct next_steps, winner-first ordering.
+            assert_eq!(
+                t.next_steps,
+                vec![
+                    "ship the signature change".to_string(),
+                    "update callers".to_string(),
+                    "add fixture for chip_args".to_string(),
+                ]
+            );
+        }
     }
 
     #[test]
@@ -1331,6 +1939,47 @@ mod child {
     }
 
     #[test]
+    fn test_mixed_kind_compound_ids_all_infer_parent() {
+        // R004: sub-tickets under one relay can use any of B/F/T as the
+        // letter. Parent inference is letter-agnostic (split on '-'), so
+        // R020-B1, R020-F2, R020-T3 should all resolve to parent R020 and
+        // none should promote R020 to epic status.
+        let source = r#"
+//! @hack:relay(R020, "mixed-kind sub-tickets")
+//! @hack:status(handoff)
+
+pub mod m;
+
+mod c1 {
+    //! @hack:ticket(R020-B1, "bug")
+    //! @hack:kind(bug)
+    //! @hack:status(open)
+}
+
+mod c2 {
+    //! @hack:ticket(R020-F2, "feature")
+    //! @hack:kind(feature)
+    //! @hack:status(open)
+}
+
+mod c3 {
+    //! @hack:ticket(R020-T3, "task")
+    //! @hack:kind(task)
+    //! @hack:status(open)
+}
+"#;
+        let annotations = extract_from_source(source, Path::new("mix.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&annotations);
+        for id in ["R020-B1", "R020-F2", "R020-T3"] {
+            let t = board.get(id).unwrap_or_else(|| panic!("{id} missing"));
+            assert_eq!(t.parent.as_deref(), Some("R020"), "{id} parent");
+            assert_eq!(t.item_type, ItemType::Ticket, "{id} type");
+        }
+        let r020 = board.get("R020").unwrap();
+        assert!(!r020.is_epic, "mixed-kind sub-tickets don't promote to epic");
+    }
+
+    #[test]
     fn test_extract_code_locations_from_prose() {
         let prose = "Fixed classify_binding() at banana_graph_builder.rs:11256+. \
                      Also see src/foo.rs:42 and crates/vivarium/lib.rs:1. \
@@ -1462,9 +2111,9 @@ pub fn thing() {}
             "cargo check -p vivarium-banana-nodes --lib && cargo test -p banana --lib nodes::split::"
         ));
 
-        // Trimmed playbook — no longer dumps R2/R3/R4/C1 inline
-        assert!(prompt.contains("**R1**"));
-        assert!(!prompt.contains("**R3 —"));
+        // Trimmed playbook — no longer dumps Rule02/Rule03/Rule04/Col01 inline
+        assert!(prompt.contains("**Rule01**"));
+        assert!(!prompt.contains("**Rule03 —"));
         assert!(prompt.contains("rs-hack board rules"));
 
         // File:line extraction from handoff prose
@@ -1544,5 +2193,235 @@ pub struct Synth;
         let graph = crate::graph::ArchGraph::from_annotations(annotations);
         let ctx = crate::query::get_file_context(&graph, "synth");
         assert_eq!(ctx.layer.as_deref(), Some("vivarium"));
+    }
+
+    // ---------------------------------------------------------------
+    // R005: container-aware pickup prompts. Each test here locks in
+    // one specific piece of the hierarchy-context shape.
+    // ---------------------------------------------------------------
+
+    /// Picker fix: a relay with an InProgress sub-ticket points at that
+    /// sub-ticket ("continue"), not the next fresh Open one. Real-world
+    /// hit was R011 pointing at R011-T2 while R011-T1 was in-progress.
+    #[test]
+    fn test_picker_picks_in_progress_child_not_next_fresh() {
+        let source = r#"
+//! @hack:relay(R100, "container")
+//! @hack:status(handoff)
+//! @hack:ticket(R100-T1, "first — already in flight")
+//! @hack:status(in-progress)
+//! @hack:ticket(R100-T2, "second — open, ready")
+//! @hack:status(open)
+
+pub mod thing;
+"#;
+        let anns = extract_from_source(source, Path::new("c.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&anns);
+        let ctx = board.build_prompt_context("R100");
+        assert_eq!(
+            ctx.live_children.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            vec!["R100-T1", "R100-T2"],
+            "live_children sorted by ID include both — in-progress is not filtered out"
+        );
+
+        let prompt = board.get("R100").unwrap().to_prompt_with_ctx(&ctx);
+        // Continue-verb for in-progress earliest child:
+        assert!(
+            prompt.contains("Continue with **R100-T1**"),
+            "earliest live is in-progress → 'Continue with' verb, not 'claim':\n{}",
+            prompt
+        );
+        assert!(
+            prompt.contains("rs-hack board tickets --prompt R100-T1"),
+            "should point at T1's pickup prompt for the actual work"
+        );
+        // And must NOT have silently skipped to T2:
+        assert!(
+            !prompt.contains("rs-hack board claim R100-T2"),
+            "must not skip in-progress T1 and claim T2 instead:\n{}",
+            prompt
+        );
+    }
+
+    /// Sub-ticket pickup inherits the parent relay's gotchas and verify
+    /// smoke. Real example: R011-T1 had no gotchas even though the Koda
+    /// parser traps on the parent relay directly applied to it.
+    #[test]
+    fn test_subticket_inherits_parent_gotchas_and_verify() {
+        let source = r#"
+//! @hack:relay(R110, "parent with traps")
+//! @hack:status(handoff)
+//! @hack:gotcha("tuple-item lambda bodies need brackets; `&&` inside [ ] trips the parser")
+//! @hack:verify("cargo check -p vivarium-banana-nodes --lib")
+//! @hack:verify("cargo test -p banana --lib nodes::split::")
+//! @hack:ticket(R110-T1, "child work")
+//! @hack:status(handoff)
+//! @hack:next("do the thing")
+
+pub mod m;
+"#;
+        let anns = extract_from_source(source, Path::new("p.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&anns);
+
+        let ctx = board.build_prompt_context("R110-T1");
+        assert_eq!(
+            ctx.parent.map(|p| p.id.as_str()),
+            Some("R110"),
+            "parent resolved via compound-id inference"
+        );
+        let prompt = board.get("R110-T1").unwrap().to_prompt_with_ctx(&ctx);
+
+        // Inherited gotchas appear with a clearly-marked header:
+        assert!(
+            prompt.contains("## ⚠ Gotchas inherited from R110"),
+            "sub-ticket prompt surfaces parent gotchas:\n{}",
+            prompt
+        );
+        assert!(prompt.contains("tuple-item lambda bodies need brackets"));
+
+        // Inherited combined smoke at the tail of the verify section:
+        assert!(
+            prompt.contains("## Verification inherited from R110"),
+            "sub-ticket prompt surfaces parent's verify smoke:\n{}",
+            prompt
+        );
+        assert!(prompt.contains(
+            "cargo check -p vivarium-banana-nodes --lib && cargo test -p banana --lib nodes::split::"
+        ));
+    }
+
+    /// Relay-with-subtickets: the author's `next_steps` is forward-spawn
+    /// noise, not the baton. Sub-tickets render above it, and the header
+    /// relabels to "Follow-on spawns" so the pickup agent doesn't confuse
+    /// them with the cycle.
+    #[test]
+    fn test_relay_with_children_hoists_subtickets_and_relabels_next() {
+        let source = r#"
+//! @hack:relay(R120, "multi-phase work")
+//! @hack:status(handoff)
+//! @hack:next("FOLLOW-ON: file new ticket for the framework rule")
+//! @hack:next("FOLLOW-ON: retarget the design doc")
+//! @hack:ticket(R120-T1, "first chunk")
+//! @hack:status(open)
+
+pub mod m;
+"#;
+        let anns = extract_from_source(source, Path::new("p.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&anns);
+        let ctx = board.build_prompt_context("R120");
+        let prompt = board.get("R120").unwrap().to_prompt_with_ctx(&ctx);
+
+        let subticket_pos = prompt
+            .find("## Sub-tickets in flight")
+            .expect("sub-tickets section present");
+        let followon_pos = prompt
+            .find("## Follow-on spawns")
+            .expect("next_steps relabeled to Follow-on spawns");
+        assert!(
+            subticket_pos < followon_pos,
+            "sub-tickets must render above the spawn list — the cycle is the baton:\n{}",
+            prompt
+        );
+        // Legacy label must NOT be used when we have children:
+        assert!(
+            !prompt.contains("## Next steps\n"),
+            "with live children the next_steps section is relabeled"
+        );
+    }
+
+    /// Epic prompts walk one level deeper: each child relay carries its
+    /// own live-subticket count, and the header frames it as a "watering
+    /// hole" agents can revisit.
+    #[test]
+    fn test_epic_prompt_shows_child_relays_with_grandchild_counts() {
+        // R200 is an epic by virtue of child relays R201 / R202.
+        // R201 has two open sub-tickets + one in-progress; R202 has none.
+        let source = r#"
+//! @hack:relay(R200, "big epic")
+//! @hack:kind(epic)
+//! @hack:status(handoff)
+
+pub mod epic_root;
+
+mod r201 {
+    //! @hack:relay(R201, "first child relay")
+    //! @hack:parent(R200)
+    //! @hack:status(handoff)
+    //! @hack:ticket(R201-T1, "sub a")
+    //! @hack:status(in-progress)
+    //! @hack:ticket(R201-T2, "sub b")
+    //! @hack:status(open)
+    //! @hack:ticket(R201-T3, "sub c")
+    //! @hack:status(open)
+}
+
+mod r202 {
+    //! @hack:relay(R202, "second child relay")
+    //! @hack:parent(R200)
+    //! @hack:status(open)
+}
+"#;
+        let anns = extract_from_source(source, Path::new("e.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&anns);
+        let r200 = board.get("R200").unwrap();
+        assert!(r200.is_epic, "R200 qualifies as epic (has child relays)");
+
+        let ctx = board.build_prompt_context("R200");
+        assert_eq!(
+            ctx.live_children.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            vec!["R201", "R202"],
+            "epic's live_children are its live child relays"
+        );
+        let r201_counts = ctx.child_live_counts.get("R201").copied().unwrap_or_default();
+        assert_eq!(r201_counts.open, 2);
+        assert_eq!(r201_counts.in_flight, 1);
+        let r202_counts = ctx.child_live_counts.get("R202").copied().unwrap_or_default();
+        assert_eq!(r202_counts.total(), 0, "R202 has no sub-tickets of its own");
+
+        let prompt = r200.to_prompt_with_ctx(&ctx);
+        assert!(
+            prompt.contains("## Child relays"),
+            "epic uses 'Child relays' header, not 'Sub-tickets in flight':\n{}",
+            prompt
+        );
+        assert!(
+            prompt.contains("watering hole"),
+            "epic framing explicitly names the re-entry pattern"
+        );
+        // Per-child count suffix rendered:
+        assert!(
+            prompt.contains("R201")
+                && prompt.contains("2 open")
+                && prompt.contains("1 in-flight"),
+            "R201 line shows live-subticket counts:\n{}",
+            prompt
+        );
+        // Epic starts with the earliest live child (R201, which is in
+        // Handoff — picker verb = `move ... active`).
+        assert!(
+            prompt.contains("rs-hack board move R201 active"),
+            "epic picker points at R201 (earliest live, handoff):\n{}",
+            prompt
+        );
+    }
+
+    /// Regression: a leaf ticket with no parent/children gets the classic
+    /// flat prompt — no inherited sections, no container section.
+    #[test]
+    fn test_flat_ticket_unchanged() {
+        let source = r#"
+//! @hack:ticket(T999, "lonely")
+//! @hack:status(open)
+
+pub fn t() {}
+"#;
+        let anns = extract_from_source(source, Path::new("l.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&anns);
+        let prompt = board.get("T999").unwrap().to_prompt();
+        assert!(!prompt.contains("Gotchas inherited"));
+        assert!(!prompt.contains("Verification inherited"));
+        assert!(!prompt.contains("Sub-tickets in flight"));
+        assert!(!prompt.contains("Child relays"));
+        assert!(!prompt.contains("Follow-on spawns"));
     }
 }

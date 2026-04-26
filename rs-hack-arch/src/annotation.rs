@@ -49,6 +49,12 @@ pub enum AnnotationTarget {
         trait_name: Option<String>,
         module: String,
     },
+
+    /// Non-Rust source file (Markdown, TypeScript, TOML, YAML, …) where
+    /// there's no AST to bind to. `anchor` is the line of the first
+    /// annotation in the contiguous comment block, used to disambiguate
+    /// when one file declares multiple separate ticket headers.
+    File { path: PathBuf, anchor: usize },
 }
 
 /// The kind of architectural annotation and its value.
@@ -403,6 +409,7 @@ impl AnnotationTarget {
                     format!("impl:{}::{}", module, self_ty)
                 }
             }
+            Self::File { path, anchor } => format!("file:{}#{}", path.display(), anchor),
         }
     }
 
@@ -414,6 +421,7 @@ impl AnnotationTarget {
             Self::Enum { module, .. } => module,
             Self::Function { module, .. } => module,
             Self::Impl { module, .. } => module,
+            Self::File { path, .. } => path.to_str().unwrap_or(""),
         }
     }
 }

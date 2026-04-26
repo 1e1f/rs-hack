@@ -19,7 +19,7 @@ pub struct BoardStatus {
     pub counts: ColumnCounts,
 
     /// Who is holding what — tickets in `claimed` or `in-progress`. These are
-    /// off-limits for refactor work per R5.
+    /// off-limits for refactor work per Rule05.
     pub active: Vec<ActiveTicket>,
 
     /// Handoff column — claimable batons, with the first next-step for orientation.
@@ -169,7 +169,7 @@ impl BoardStatus {
         ));
 
         if !self.active.is_empty() {
-            out.push_str("## Active (off-limits for refactor — R5)\n\n");
+            out.push_str("## Active (off-limits for refactor — Rule05)\n\n");
             for t in &self.active {
                 let who = t.assignee.as_deref().unwrap_or("unassigned");
                 out.push_str(&format!(
@@ -248,6 +248,11 @@ impl BoardStatus {
         {
             out.push_str("_Board is empty._\n");
         }
+
+        out.push_str(
+            "\n---\n_Inspect a single ticket: `rs-hack board show <ID>` \
+             (or `rs-hack board status <ID>` — same thing)._\n",
+        );
 
         out
     }

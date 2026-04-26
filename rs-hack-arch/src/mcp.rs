@@ -1,8 +1,9 @@
 //! @arch:layer(arch)
 //! @arch:role(bridge)
 //! @hack:ticket(R001-T1, "Promote: board writes relay annotation back to source via rs-hack MCP")
+//! @hack:assignee(agent:claude)
 //! @hack:phase(P2)
-//! @hack:status(open)
+//! @hack:status(review)
 //!
 //! MCP (Model Context Protocol) integration for rs-hack-arch.
 //! Exposes architecture queries as tools for Claude and other AI assistants.
@@ -21,6 +22,7 @@
 
 use crate::extract::extract_from_workspace;
 use crate::graph::ArchGraph;
+use crate::promote::promote_summary;
 use crate::query::{get_file_context, trace_path, Query};
 use crate::summary;
 use crate::ticket::TicketBoard;
@@ -189,6 +191,36 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "hack_promote".into(),
+            description: "Promote an inbox summary to a real `@hack:relay(...)` annotation in source. Allocates the next R-number under a workspace-wide file lock, writes the annotation block to `target_file` (must be a .rs file), and updates the summary frontmatter (`promoted: true`, `relay_id`, `relay_title`). The relay lands in the Handoff column with the summary's first paragraph as `@hack:handoff(...)`. Use this after `hack_summary` to graduate freeform notes into trackable work.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "summary_id": {
+                        "type": "string",
+                        "description": "ID of the summary to promote (filename stem under .hack/summaries/, e.g. 'summary-1776192331')"
+                    },
+                    "target_file": {
+                        "type": "string",
+                        "description": "Path (workspace-relative or absolute) to a .rs file the relay annotation will be written into. The file must exist."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional title override. Defaults to the first non-blank line of the summary, truncated to 80 chars."
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "Optional @hack:assignee(...) value, e.g. 'agent:claude'"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Path to workspace root (default: current directory)"
+                    }
+                },
+                "required": ["summary_id", "target_file"]
+            }),
+        },
+        ToolDefinition {
             name: "arch_validate".into(),
             description: "Validate architecture rules. Returns violations with file locations. Use after making changes to ensure architecture constraints are satisfied.".into(),
             input_schema: serde_json::json!({
@@ -217,6 +249,7 @@ pub fn handle_tool(name: &str, args: serde_json::Value) -> ToolResult {
         "arch_validate" => handle_validate(args),
         "hack_tickets" => handle_tickets(args),
         "hack_summary" => handle_summary(args),
+        "hack_promote" => handle_promote(args),
         _ => ToolResult::error(format!("Unknown tool: {}", name)),
     }
 }
@@ -478,6 +511,42 @@ fn handle_summary(args: serde_json::Value) -> ToolResult {
     }
 }
 
+fn handle_promote(args: serde_json::Value) -> ToolResult {
+    let summary_id = match args["summary_id"].as_str() {
+        Some(s) if !s.is_empty() => s,
+        _ => return ToolResult::error("Missing required 'summary_id' parameter"),
+    };
+    let target_file = match args["target_file"].as_str() {
+        Some(s) if !s.is_empty() => s,
+        _ => return ToolResult::error("Missing required 'target_file' parameter"),
+    };
+    let title = args["title"].as_str();
+    let assignee = args["assignee"].as_str();
+    let path = args["path"].as_str().unwrap_or(".");
+
+    match promote_summary(
+        std::path::Path::new(path),
+        summary_id,
+        std::path::Path::new(target_file),
+        title,
+        assignee,
+    ) {
+        Ok(res) => {
+            let msg = format!(
+                "Promoted summary '{}' → {} \"{}\"\n  source: {}:{}\n  summary: {} (frontmatter updated)",
+                summary_id,
+                res.relay_id,
+                res.relay_title,
+                res.file.display(),
+                res.line,
+                res.summary_file.display()
+            );
+            ToolResult::text(msg)
+        }
+        Err(e) => ToolResult::error(format!("Promote failed: {}", e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,8 +554,9 @@ mod tests {
     #[test]
     fn test_tool_definitions() {
         let defs = tool_definitions();
-        assert_eq!(defs.len(), 6);
+        assert_eq!(defs.len(), 7);
         assert!(defs.iter().any(|d| d.name == "arch_query"));
         assert!(defs.iter().any(|d| d.name == "arch_context"));
+        assert!(defs.iter().any(|d| d.name == "hack_promote"));
     }
 }

@@ -275,7 +275,7 @@ rs-hack board claim --kind relay --file src/mod.rs --title "…"  # atomic ID + 
 rs-hack board rules [--context pickup|finishing|new-work|archive|refactor]   # SDLC ruleset
 ```
 
-The SDLC rules (R1–R7 + C1) are canonical in
+The SDLC rules (Rule01–Rule12 + Col01) are canonical in
 [`rs-hack-arch/src/sdlc.rs`](rs-hack-arch/src/sdlc.rs) and embedded in every
 pickup prompt — an agent picking up a ticket via `--prompt` sees the
 playbook inline, so the right status/column moves happen before work starts.

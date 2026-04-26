@@ -26,8 +26,14 @@ interface Ticket {
   verify?: string[];
   depends_on: string[];
   see_also: string[];
+  /** Convenience alias for `files[0].path`. */
   file: string;
+  /** Convenience alias for `files[0].line`. */
   line: number;
+  /** Always populated; length > 1 is a duplicate-id smell. */
+  files: { path: string; line: number }[];
+  /** Per-field disagreement when the same ID appears in multiple files. */
+  conflicts?: Record<string, { value: string; path: string; line: number }[]>;
   is_epic?: boolean;
   epic_status?: "active" | "closed";
 }
@@ -54,6 +60,7 @@ interface Summary {
   text: string;
   file: string;
   promoted: boolean;
+  archived?: boolean;
   relay_id?: string;
   relay_title?: string;
 }
@@ -198,26 +205,20 @@ function SeeRow({ see }: { see: string }) {
 // ── ArchiveButton ───────────────────────────────────────────────────────
 
 function ArchiveButton({ ticket }: { ticket: Ticket }) {
-  const [confirm, setConfirm] = useState(false);
-  const [state, setState] = useState<"idle" | "archived" | "error">("idle");
+  const [state, setState] = useState<"idle" | "loading" | "archived" | "error">(
+    "idle"
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const verify = ticket.verify || [];
 
   const btn = (
     <button
-      title={
-        confirm
-          ? "Click again to confirm archive (removes @hack: annotations from source)"
-          : "Archive this ticket"
-      }
+      disabled={state === "loading" || state === "archived"}
+      title="Archive this ticket — strips @hack: lines from source. Snapshot stays in .hack/events/ for unarchive."
       onClick={async (e) => {
         e.stopPropagation();
-        if (!confirm) {
-          setConfirm(true);
-          setErrorMsg(null);
-          setTimeout(() => setConfirm(false), 4000);
-          return;
-        }
+        if (state === "loading" || state === "archived") return;
+        setState("loading");
+        setErrorMsg(null);
         try {
           const res = await fetch(
             `/api/archive/${encodeURIComponent(ticket.id)}`,
@@ -225,20 +226,19 @@ function ArchiveButton({ ticket }: { ticket: Ticket }) {
           );
           if (res.ok) {
             setState("archived");
-            setErrorMsg(null);
+            return;
+          }
+          setState("error");
+          const body = await res.json().catch(() => ({}));
+          if (res.status === 409 && body.blockingChildren) {
+            const names = body.blockingChildren
+              .map((c: any) => `${c.id} (${c.status})`)
+              .join(", ");
+            setErrorMsg(`blocked by: ${names}`);
+          } else if (body.error) {
+            setErrorMsg(body.error);
           } else {
-            setState("error");
-            const body = await res.json().catch(() => ({}));
-            if (res.status === 409 && body.blockingChildren) {
-              const names = body.blockingChildren
-                .map((c: any) => `${c.id} (${c.status})`)
-                .join(", ");
-              setErrorMsg(`blocked by: ${names}`);
-            } else if (body.error) {
-              setErrorMsg(body.error);
-            } else {
-              setErrorMsg(`HTTP ${res.status}`);
-            }
+            setErrorMsg(`HTTP ${res.status}`);
           }
         } catch (err: any) {
           setState("error");
@@ -246,98 +246,54 @@ function ArchiveButton({ ticket }: { ticket: Ticket }) {
         }
       }}
       style={{
-        background: confirm
-          ? "#f38ba8"
-          : state === "archived"
+        background:
+          state === "archived"
             ? "#a6e3a1"
             : state === "error"
               ? "#f38ba8"
               : "#313244",
-        color: confirm || state !== "idle" ? "#11111b" : "#a6adc8",
+        color: state !== "idle" ? "#11111b" : "#a6adc8",
         border: "none",
         borderRadius: 3,
         padding: "1px 6px",
         fontSize: 10,
         fontFamily: "monospace",
-        cursor: "pointer",
+        cursor: state === "loading" ? "wait" : "pointer",
         lineHeight: 1.3,
+        minWidth: 56,
+        textAlign: "center",
       }}
     >
       {state === "archived"
         ? "archived"
         : state === "error"
           ? "error"
-          : confirm
-            ? verify.length > 0
-              ? "confirm?"
-              : "confirm archive"
+          : state === "loading"
+            ? <Spinner />
             : "archive"}
     </button>
   );
 
-  const errBox = errorMsg ? (
-    <div
-      style={{
-        fontSize: 10,
-        color: "#f38ba8",
-        fontFamily: "monospace",
-        background: "#45171e",
-        padding: "4px 6px",
-        borderRadius: 4,
-        maxWidth: 260,
-        lineHeight: 1.3,
-        wordBreak: "break-word",
-      }}
-      title={errorMsg}
-    >
-      {errorMsg}
-    </div>
-  ) : null;
-
-  // When armed and verify commands exist, surface them so the user can
-  // run them before committing to archive.
-  if (confirm && verify.length > 0) {
+  if (errorMsg) {
     return (
       <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+        {btn}
         <div
           style={{
             fontSize: 10,
-            color: "#f9e2af",
+            color: "#f38ba8",
             fontFamily: "monospace",
-            background: "#45291e",
+            background: "#45171e",
             padding: "4px 6px",
             borderRadius: 4,
             maxWidth: 260,
+            lineHeight: 1.3,
+            wordBreak: "break-word",
           }}
+          title={errorMsg}
         >
-          <div style={{ marginBottom: 3, color: "#fab387" }}>
-            verify before archive:
-          </div>
-          {verify.map((v, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                lineHeight: 1.4,
-              }}
-            >
-              <span style={{ flex: 1, wordBreak: "break-all" }}>• {v}</span>
-              <CopyBtn text={v} label="copy" />
-            </div>
-          ))}
+          {errorMsg}
         </div>
-        {btn}
-        {errBox}
-      </span>
-    );
-  }
-  if (errBox) {
-    return (
-      <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
-        {btn}
-        {errBox}
       </span>
     );
   }
@@ -358,24 +314,30 @@ function ArchiveButton({ ticket }: { ticket: Ticket }) {
  * clipboard copy that the user pastes into Claude Code.
  */
 function PromptButton({ ticket }: { ticket: Ticket }) {
-  const [state, setState] = useState<"idle" | "copied" | "error">("idle");
+  const [state, setState] = useState<"idle" | "loading" | "copied" | "error">(
+    "idle"
+  );
   const isReview = ticket.status === "review" || ticket.status === "done";
   const label = isReview ? "review" : "prompt";
   return (
     <button
+      disabled={state === "loading"}
       title={
         isReview
           ? "Copy a review-mode prompt (run verify, approve or send back)"
-          : "Copy a continuation prompt (pickup)"
+          : "Copy a continuation prompt (pickup) — full workspace scan, may take a few seconds"
       }
       onClick={async (e) => {
         e.stopPropagation();
+        if (state === "loading") return;
+        setState("loading");
         try {
           const res = await fetch(
             `/api/prompt/${encodeURIComponent(ticket.id)}`
           );
           if (!res.ok) {
             setState("error");
+            setTimeout(() => setState("idle"), 2000);
             return;
           }
           await navigator.clipboard.writeText(await res.text());
@@ -383,6 +345,7 @@ function PromptButton({ ticket }: { ticket: Ticket }) {
           setTimeout(() => setState("idle"), 2000);
         } catch {
           setState("error");
+          setTimeout(() => setState("idle"), 2000);
         }
       }}
       style={{
@@ -391,7 +354,9 @@ function PromptButton({ ticket }: { ticket: Ticket }) {
             ? "#a6e3a1"
             : state === "error"
               ? "#f38ba8"
-              : "#cba6f7",
+              : state === "loading"
+                ? "#9399b2"
+                : "#cba6f7",
         color: "#11111b",
         border: "none",
         borderRadius: 3,
@@ -399,12 +364,38 @@ function PromptButton({ ticket }: { ticket: Ticket }) {
         fontSize: 10,
         fontFamily: "monospace",
         fontWeight: 600,
-        cursor: "pointer",
+        cursor: state === "loading" ? "wait" : "pointer",
         lineHeight: 1.3,
+        minWidth: 50,
+        textAlign: "center",
       }}
     >
-      {state === "copied" ? "✓" : state === "error" ? "error" : label}
+      {state === "copied"
+        ? "✓"
+        : state === "error"
+          ? "error"
+          : state === "loading"
+            ? <Spinner />
+            : label}
     </button>
+  );
+}
+
+/** Tiny inline CSS spinner — no extra deps. */
+function Spinner() {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 10,
+        height: 10,
+        border: "2px solid rgba(17,17,27,0.3)",
+        borderTopColor: "#11111b",
+        borderRadius: "50%",
+        animation: "hb-spin 0.7s linear infinite",
+        verticalAlign: "-2px",
+      }}
+    />
   );
 }
 
@@ -414,6 +405,42 @@ function PromptButton({ ticket }: { ticket: Ticket }) {
  * an agent left a mid-session note you want to continue *from that note*
  * rather than from the ticket's current handoff.
  */
+function SummaryArchiveButton({ summaryId }: { summaryId: string }) {
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <button
+      title={
+        confirm
+          ? "Click again to confirm archive (hides from inbox)"
+          : "Archive this comment"
+      }
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (!confirm) {
+          setConfirm(true);
+          setTimeout(() => setConfirm(false), 2000);
+          return;
+        }
+        await fetch(
+          `/api/summaries/${encodeURIComponent(summaryId)}/archive`,
+          { method: "POST" }
+        );
+      }}
+      style={{
+        background: confirm ? "#f38ba8" : "transparent",
+        color: confirm ? "#11111b" : "#585b70",
+        border: "none",
+        cursor: "pointer",
+        fontSize: 12,
+        padding: "0 4px",
+        lineHeight: 1,
+      }}
+    >
+      {confirm ? "confirm" : "×"}
+    </button>
+  );
+}
+
 function SummaryPromptButton({
   summaryId,
 }: {
@@ -458,6 +485,18 @@ function SummaryPromptButton({
       {state === "copied" ? "Copied!" : "prompt from this comment"}
     </button>
   );
+}
+
+// ── Relative-time formatting ────────────────────────────────────────────
+
+/** Format a unix-seconds timestamp as "Ns / Nm / Nh / Nd / Nw ago". */
+function formatAgo(tSec: number, nowSec: number): string {
+  const diff = Math.max(0, nowSec - tSec);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 14) return `${Math.floor(diff / 86400)}d ago`;
+  return `${Math.floor(diff / (86400 * 7))}w ago`;
 }
 
 // ── Columns (claimed + in-progress collapsed into "Active") ─────────────
@@ -529,11 +568,15 @@ const DRAG_MIME = "application/x-hackboard-ticket";
 function TicketCard({
   ticket,
   summaries,
+  lastActivityAt,
+  nowSec,
   onDragStart,
   onDragEnd,
 }: {
   ticket: Ticket;
   summaries: Summary[];
+  lastActivityAt?: number;
+  nowSec?: number;
   onDragStart?: (status: string) => void;
   onDragEnd?: () => void;
 }) {
@@ -629,6 +672,18 @@ function TicketCard({
           {badge}
         </span>
         <TicketIdBadge id={ticket.id} />
+        {lastActivityAt && nowSec && (
+          <span
+            title={new Date(lastActivityAt * 1000).toLocaleString()}
+            style={{
+              color: "#585b70",
+              fontSize: 11,
+              fontFamily: "monospace",
+            }}
+          >
+            {formatAgo(lastActivityAt, nowSec)}
+          </span>
+        )}
         {hasMore && (
           <button
             onClick={() => setExpanded((x) => !x)}
@@ -661,7 +716,9 @@ function TicketCard({
             ticket.status === "done") && (
             <PromptButton ticket={ticket} />
           )}
-          <ArchiveButton ticket={ticket} />
+          {ticket.status !== "claimed" && ticket.status !== "in-progress" && (
+            <ArchiveButton ticket={ticket} />
+          )}
         </span>
       </div>
 
@@ -914,9 +971,50 @@ function TicketCard({
         </button>
       )}
 
-      {/* Source path (short + copy full) */}
+      {/* Source path (short + copy full) — list every occurrence so a
+          duplicate-ID smell is impossible to miss. */}
       <div style={{ marginTop: 8 }}>
-        <PathRow file={ticket.file} line={ticket.line} />
+        {(ticket.files && ticket.files.length > 0
+          ? ticket.files
+          : [{ path: ticket.file, line: ticket.line }]
+        ).map((loc, i) => (
+          <PathRow key={`${loc.path}:${loc.line}:${i}`} file={loc.path} line={loc.line} />
+        ))}
+        {ticket.files && ticket.files.length > 1 && (
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: "0.7em",
+              color: "#c45a00",
+              fontWeight: 600,
+            }}
+          >
+            ⚠ duplicate id in {ticket.files.length} files — pick a home, or renumber one (Rule11)
+          </div>
+        )}
+        {ticket.conflicts &&
+          Object.keys(ticket.conflicts).length > 0 && (
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: "0.7em",
+                color: "#b00020",
+                fontWeight: 600,
+              }}
+            >
+              {Object.entries(ticket.conflicts).map(([field, vals]) => (
+                <div
+                  key={field}
+                  title={vals
+                    .map((v) => `${v.value}  ←  ${v.path}:${v.line}`)
+                    .join("\n")}
+                >
+                  ⚠ {field} disagrees:{" "}
+                  {vals.map((v) => v.value).join(" / ")}
+                </div>
+              ))}
+            </div>
+          )}
       </div>
     </div>
   );
@@ -972,9 +1070,6 @@ function EpicCard({
           {epic.id}
         </span>
         <Pill label={status} color={color.bg} textColor={color.fg} />
-        <span style={{ marginLeft: "auto" }}>
-          <ArchiveButton ticket={epic} />
-        </span>
       </div>
       <div
         style={{
@@ -1471,6 +1566,8 @@ function Column({
   bucket,
   tickets,
   summaries,
+  lastActivity,
+  nowSec,
   draggedStatus,
   onDrop,
   onTicketDragStart,
@@ -1481,6 +1578,8 @@ function Column({
   bucket: string;
   tickets: Ticket[];
   summaries: Summary[];
+  lastActivity: Record<string, number>;
+  nowSec: number;
   draggedStatus: string | null;
   onDrop: (id: string, bucket: string) => void;
   onTicketDragStart: (status: string) => void;
@@ -1548,6 +1647,8 @@ function Column({
             key={t.id}
             ticket={t}
             summaries={summaries.filter((s) => s.ticket === t.id)}
+            lastActivityAt={lastActivity[t.id]}
+            nowSec={nowSec}
             onDragStart={onTicketDragStart}
             onDragEnd={onTicketDragEnd}
           />
@@ -2297,6 +2398,16 @@ function Board() {
   const [draggedStatus, setDraggedStatus] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<string>("");
+  const [lastActivity, setLastActivity] = useState<Record<string, number>>({});
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const id = setInterval(
+      () => setNowSec(Math.floor(Date.now() / 1000)),
+      30_000
+    );
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     fetch("/api/status")
@@ -2358,6 +2469,7 @@ function Board() {
           setTickets((data.tickets || []).map(normalizeTicket));
           setSummaries(data.summaries || []);
           setTodos(data.todos || []);
+          if (data.lastActivity) setLastActivity(data.lastActivity);
         }
         setConnected(true);
       } catch (e) {
@@ -2418,10 +2530,16 @@ function Board() {
 
   const ticketsInColumn = useCallback(
     (col: ColumnDef) =>
-      filteredTickets.filter(
-        (t) => !t.is_epic && col.statuses.includes(t.status)
-      ),
-    [filteredTickets]
+      filteredTickets
+        .filter((t) => !t.is_epic && col.statuses.includes(t.status))
+        .slice()
+        .sort((a, b) => {
+          const ta = lastActivity[a.id] ?? 0;
+          const tb = lastActivity[b.id] ?? 0;
+          if (tb !== ta) return tb - ta;
+          return a.id.localeCompare(b.id);
+        }),
+    [filteredTickets, lastActivity]
   );
 
   const filteredEpics = useMemo(
@@ -2443,7 +2561,9 @@ function Board() {
     );
   }, [todos, filterText, filterRelay, filterAssignee]);
 
-  const orphanSummaries = summaries.filter((s) => !s.ticket && !s.promoted);
+  const orphanSummaries = summaries.filter(
+    (s) => !s.ticket && !s.promoted && !s.archived
+  );
 
   const handleAddTodo = () => setFormOpen(true);
 
@@ -2746,17 +2866,23 @@ function Board() {
                       opacity: s.promoted ? 0.5 : 1,
                     }}
                   >
-                    {s.author && (
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#585b70",
-                          marginBottom: 4,
-                        }}
-                      >
-                        {s.author}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {s.author && (
+                        <div style={{ fontSize: 11, color: "#585b70" }}>
+                          {s.author}
+                        </div>
+                      )}
+                      <div style={{ marginLeft: "auto" }}>
+                        <SummaryArchiveButton summaryId={s.id} />
                       </div>
-                    )}
+                    </div>
                     <div
                       style={{
                         color: "#cdd6f4",
@@ -2797,6 +2923,8 @@ function Board() {
             bucket={col.key}
             tickets={ticketsInColumn(col)}
             summaries={summaries}
+            lastActivity={lastActivity}
+            nowSec={nowSec}
             draggedStatus={draggedStatus}
             onDrop={handleStatusDrop}
             onTicketDragStart={(s) => setDraggedStatus(s)}

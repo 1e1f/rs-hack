@@ -11,3 +11,5 @@ dist
 # Cargo.lock is committed at workspace root but ignored in sub-crates
 Cargo.lock
 !/Cargo.lock
+# hack-board sibling-workspace registry — each clone owns its own view
+.hack/worktrees.json

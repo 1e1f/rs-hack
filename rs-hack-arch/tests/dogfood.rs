@@ -353,7 +353,7 @@ fn test_json_roundtrip() {
 #[test]
 fn test_mcp_tool_definitions() {
     let defs = rs_hack_arch::mcp::tool_definitions();
-    assert_eq!(defs.len(), 6);
+    assert_eq!(defs.len(), 7);
 
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     assert!(names.contains(&"arch_query"));
@@ -361,6 +361,7 @@ fn test_mcp_tool_definitions() {
     assert!(names.contains(&"arch_context"));
     assert!(names.contains(&"arch_validate"));
     assert!(names.contains(&"hack_tickets"));
+    assert!(names.contains(&"hack_promote"));
 }
 
 // ─── Notes and Doc Text ──────────────────────────────────────────────────
@@ -420,26 +421,37 @@ fn test_hack_tickets_from_workspace() {
     let annotations = extract_from_workspace_verbose(&root, false).unwrap();
     let board = TicketBoard::from_annotations(&annotations);
 
-    // We have a @hack:relay(R001, ...) on ticket.rs
     assert!(
         !board.tickets.is_empty(),
         "Should find at least one @hack: ticket in the workspace"
     );
 
-    let r001 = board.get("R001");
-    assert!(r001.is_some(), "Should find relay R001");
-    let r001 = r001.unwrap();
-    assert!(r001.title.contains("hack-board"));
-    assert_eq!(r001.item_type, rs_hack_arch::ticket::ItemType::Relay);
-    assert_eq!(r001.status, rs_hack_arch::ticket::TicketStatus::Handoff);
+    // Pick the lex-first live ticket and exercise prompt generation
+    // end-to-end. Originally bound to R001 specifically, but R001 was
+    // archived; this rewrite keeps the coverage (prompt + markdown +
+    // playbook embed) without binding to a specific ID that may turn
+    // over as the project evolves.
+    let any = board
+        .tickets
+        .iter()
+        .find(|t| !t.is_epic)
+        .expect("at least one non-epic ticket should be live");
 
-    // Verify prompt generation works end-to-end
-    let prompt = r001.to_prompt();
-    assert!(prompt.contains("# Continue: R001"));
+    let prompt = any.to_prompt();
+    assert!(
+        prompt.contains(&format!("# Continue: {}", any.id)),
+        "prompt should head with `# Continue: {}`, got first line: {:?}",
+        any.id,
+        prompt.lines().next()
+    );
     assert!(prompt.contains("Playbook"));
-    assert!(prompt.contains("**R1"), "prompt should embed the pickup playbook leading with R1");
+    assert!(prompt.contains("**Rule01"), "prompt should embed the pickup playbook leading with Rule01");
 
-    // Verify markdown output shows [R] badge
+    // Verify markdown output renders the picked ticket with its badge.
     let md = board.to_markdown();
-    assert!(md.contains("[R] R001"));
+    assert!(
+        md.contains(&format!("] {}", any.id)),
+        "markdown should mention {}",
+        any.id
+    );
 }

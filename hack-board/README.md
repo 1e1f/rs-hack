@@ -169,26 +169,26 @@ events. Typed events:
 These are the conventions the board assumes. A future SDLC spec should
 either ratify each one or replace it with something explicit.
 
-### R1 — "First action on pickup = set `in-progress`"
+### Rule01 — "First action on pickup = set `in-progress`"
 
 When an agent claims a ticket from Open or Handoff, the *first* source
 edit is flipping `@hack:status(in-progress)` on that ticket. This is the
 claim signal; no other modifications come before it.
 
-### R2 — "Never pick IDs yourself"
+### Rule02 — "Never pick IDs yourself"
 
 Every new relay/ticket is created via `rs-hack board claim`, which holds
 `.hack/id.lock` during scan+write. An agent manually picking `max(id) + 1`
 will collide with another concurrent agent.
 
-### R3 — "Same-relay handoff is the default"
+### Rule03 — "Same-relay handoff is the default"
 
 When an agent finishes a phase, the default handoff *updates the existing
 relay in place* (same R-number, overwriting `@hack:handoff(...)`,
 `@hack:next(...)`, etc.). New R-numbers only for *parallel* or
 *independent* tracks.
 
-### R4 — "Archive, don't settle in Review"
+### Rule04 — "Archive, don't settle in Review"
 
 `status: done` is a short-lived staging state. Tickets don't rest there
 — the terminal action is `POST /api/archive/:id`, which removes the
@@ -196,18 +196,18 @@ annotation from source and logs to `.hack/events.jsonl`. If a ticket
 declared `@hack:verify(…)`, the archive confirm step surfaces those
 commands before writing.
 
-### R5 — "Do not modify items in `in-progress`"
+### Rule05 — "Do not modify items in `in-progress`"
 
 When an agent is doing refactor work triggered by doc/code drift, it
 touches items in `open` or `review` only. An item in `in-progress` has
 an active owner whose context would be corrupted.
 
-### R6 — "Epics coordinate, don't carry work"
+### Rule06 — "Epics coordinate, don't carry work"
 
 An epic is a parent coordination point. Work happens on its children.
 An epic's own `@hack:status(...)` is ignored; its state is derived.
 
-### R7 — "Source edits are the state machine"
+### Rule07 — "Source edits are the state machine"
 
 The only way to change board state is to edit source (or to go through
 one of the explicit server endpoints — archive, promote, add-todo —
@@ -227,7 +227,7 @@ API that doesn't ultimately result in a file write.
 3. Agent does the work.
 4. When done, agent either:
    - Updates the relay in place with new handoff + next steps (same-relay
-     handoff, R3) and sets `@hack:status(handoff)`, or
+     handoff, Rule03) and sets `@hack:status(handoff)`, or
    - Sets `@hack:status(review)` and pings the user for sign-off.
 
 ### Creating new work
@@ -405,7 +405,7 @@ before triggering a rescan.
 Things the current system encodes as conventions rather than rules,
 which a formal spec should either ratify or replace:
 
-1. **Who enforces R1–R7?** Today the rules live in prose (this file,
+1. **Who enforces Rule01–Rule12?** Today the rules live in prose (this file,
    `/handoff`, `/refine`, the ticket prompt). They're not machine-checked.
    Candidates for enforcement: a server-side hook that rejects commits
    moving an in-progress ticket to `done` without a prior `review` hop;
@@ -419,7 +419,7 @@ which a formal spec should either ratify or replace:
 4. **Concurrency scope.** The lock prevents ID collision. It does *not*
    prevent two agents from both editing the same ticket's `@hack:status`
    line. Is that a problem worth solving, or does source control catch it?
-5. **Relay "versions".** R3 says same R-number across iterations. Do we
+5. **Relay "versions".** Rule03 says same R-number across iterations. Do we
    ever want `R001.2` / `R001.3` for auditability, or is the event log
    enough?
 6. **Todo → ticket linkage.** `todo_promoted` records a free-form

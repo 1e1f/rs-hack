@@ -27,10 +27,10 @@
  * clobbered while the server was down.
  */
 
-import { watch } from "fs";
+import { watch, readFileSync } from "fs";
 import { appendFile } from "fs/promises";
 import { createSocket } from "dgram";
-import { join, resolve } from "path";
+import { extname, join, resolve } from "path";
 import { $ } from "bun";
 
 // ── Config ──────────────────────────────────────────────────────────────
@@ -79,8 +79,25 @@ interface Ticket {
   verify?: string[];
   depends_on: string[];
   see_also: string[];
+  /** Convenience alias for `files[0].path` — the lex-first location. */
   file: string;
+  /** Convenience alias for `files[0].line`. */
   line: number;
+  /**
+   * Always-on array of every source location declaring this ID. Sorted
+   * by `(path, line)`. Length 1 is the common case; length > 1 is a
+   * smell to resolve (Rule11) — see `conflicts` for any disagreeing
+   * scalar metadata between the files.
+   */
+  files: { path: string; line: number }[];
+  /**
+   * Per-field disagreement when the same ID is declared in multiple
+   * files with different scalar metadata. The Ticket's top-level scalar
+   * holds the lex-first value; this map exposes every observed value so
+   * the divergence is loud rather than silent. Empty/absent for the
+   * common case.
+   */
+  conflicts?: Record<string, { value: string; path: string; line: number }[]>;
   is_epic?: boolean;
   epic_status?: "active" | "closed";
 }
@@ -93,6 +110,7 @@ interface Summary {
   text: string;
   file: string;
   promoted: boolean;
+  archived?: boolean;
   relay_id?: string;
   relay_title?: string;
 }
@@ -150,12 +168,18 @@ type EventType =
   | "todo_promoted"
   | "renamed"; // emitted by `board rebase-ids` (R002 P5)
 
+type FieldChange = { before: any; after: any };
+
 interface TicketEvent {
   t: number; // unix seconds
   type: EventType;
   id: string;
-  hash?: string; // scan
-  ticket?: Ticket; // scan / archived
+  // Scan events are EITHER genesis (full `ticket`) OR delta (`changes`).
+  // Genesis is emitted the first time a ticket is seen (or the first time
+  // after an archived/disappeared event removed it from the live set).
+  // All other scans carry only changed fields.
+  ticket?: Ticket; // scan genesis / archived
+  changes?: Record<string, FieldChange>; // scan delta
   lastTicket?: Ticket; // disappeared
   sourceLines?: string[]; // archived
   file?: string;
@@ -166,49 +190,145 @@ interface TicketEvent {
   to?: string; // renamed
 }
 
-// ── Hash ────────────────────────────────────────────────────────────────
+// ── Diff ────────────────────────────────────────────────────────────────
 //
-// Content hash of a ticket, used to decide whether to emit a new `scan` event.
-// Canonical JSON with sorted keys, excluding `line` (which churns any time
-// someone inserts a doc comment above an annotation) and keeping everything
-// else that actually matters for audit.
+// Compare two tickets and return only the fields whose values differ. Text
+// values and arrays are treated atomically — we never emit sub-field
+// diffs (no word-level or element-level deltas). `line` is excluded
+// because it churns on any doc-comment insertion above an annotation.
 
-function fnv1a64(s: string): string {
-  const MASK = 0xffffffffffffffffn;
-  let h = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  for (let i = 0; i < s.length; i++) {
-    h = (h ^ BigInt(s.charCodeAt(i) & 0xff)) & MASK;
-    h = (h * prime) & MASK;
+const DIFF_IGNORE = new Set(["line"]);
+
+// Strip `line` from any nested location records before diffing. `files`
+// is `{path, line}[]` and `conflicts` is `Record<string, {value, path,
+// line}[]>` — both churn on every doc-comment insertion above an
+// annotation, even when nothing about the ticket actually changed.
+function stripLines(v: any): any {
+  if (Array.isArray(v)) return v.map(stripLines);
+  if (v && typeof v === "object") {
+    const out: any = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (k === "line") continue;
+      out[k] = stripLines(val);
+    }
+    return out;
   }
-  return h.toString(16).padStart(16, "0");
+  return v;
 }
 
-function canonicalTicketJSON(t: Ticket): string {
-  const { line: _line, ...rest } = t as any;
-  // Stable key order; array element order preserved (semantically meaningful
-  // for next_steps / verify / etc.)
-  const keys = Object.keys(rest).sort();
-  const ordered: any = {};
-  for (const k of keys) ordered[k] = rest[k];
-  return JSON.stringify(ordered);
+// ── Path normalization ──────────────────────────────────────────────────
+//
+// `rs-hack board tickets -f json` emits absolute paths in `ticket.file`.
+// If the same repo is checked out at multiple locations (e.g. `nt_alt` and
+// `noisetable`), scanning each one in turn produces spurious `file`
+// deltas purely because the absolute prefix differs. Strip the workspace
+// prefix so everything downstream — priorState, diffs, event shards —
+// uses repo-relative paths.
+
+function toRelativeFile(p: string | undefined | null): string | undefined {
+  if (p == null) return p ?? undefined;
+  const prefix = WORKSPACE + "/";
+  if (p.startsWith(prefix)) return p.slice(prefix.length);
+  if (p === WORKSPACE) return "";
+  return p;
 }
 
-function hashTicket(t: Ticket): string {
-  return fnv1a64(canonicalTicketJSON(t));
+function normalizeTicket(t: Ticket | undefined | null): Ticket | undefined {
+  if (!t) return t ?? undefined;
+  // Relativize every path field that rs-hack might emit as absolute
+  // (depends on how the caller invoked it — `HACK_WORKSPACE` is
+  // canonicalized → absolute). Without this, `files[].path` and
+  // `conflicts[*].path` leaked full `/Users/leif/...` into the events
+  // log, and workspace-diff between siblings (noisetable vs nt_alt)
+  // showed up as spurious `changes` events on every scan.
+  let changed = false;
+  let next: any = t;
+  const relFile = typeof t.file === "string" ? toRelativeFile(t.file) : undefined;
+  if (relFile !== undefined && relFile !== t.file) {
+    next = { ...next, file: relFile };
+    changed = true;
+  }
+  if (Array.isArray(t.files)) {
+    const relFiles = t.files.map((loc) => {
+      const rp = toRelativeFile(loc.path);
+      return rp !== undefined && rp !== loc.path ? { ...loc, path: rp } : loc;
+    });
+    if (relFiles.some((loc, i) => loc !== t.files![i])) {
+      next = { ...next, files: relFiles };
+      changed = true;
+    }
+  }
+  if (t.conflicts) {
+    const relConflicts: Record<string, { value: string; path: string; line: number }[]> = {};
+    let cChanged = false;
+    for (const [field, vals] of Object.entries(t.conflicts)) {
+      const relVals = vals.map((v) => {
+        const rp = toRelativeFile(v.path);
+        return rp !== undefined && rp !== v.path ? { ...v, path: rp } : v;
+      });
+      if (relVals.some((v, i) => v !== vals[i])) cChanged = true;
+      relConflicts[field] = relVals;
+    }
+    if (cChanged) {
+      next = { ...next, conflicts: relConflicts };
+      changed = true;
+    }
+  }
+  return changed ? (next as Ticket) : t;
+}
+
+function diffTicket(before: Ticket, after: Ticket): Record<string, FieldChange> {
+  const changes: Record<string, FieldChange> = {};
+  const keys = new Set<string>([
+    ...Object.keys(before as any),
+    ...Object.keys(after as any),
+  ]);
+  for (const k of Array.from(keys).sort()) {
+    if (DIFF_IGNORE.has(k)) continue;
+    const a = (before as any)[k];
+    const b = (after as any)[k];
+    // Deep equality via canonical-stringify. Good enough for the shapes
+    // we actually use (scalars, arrays of strings, flat objects). For
+    // `files` / `conflicts` strip nested `line` first so line-only
+    // churn doesn't surface as a delta.
+    const cmpA = k === "files" || k === "conflicts" ? stripLines(a) : a;
+    const cmpB = k === "files" || k === "conflicts" ? stripLines(b) : b;
+    if (JSON.stringify(cmpA) !== JSON.stringify(cmpB)) {
+      changes[k] = { before: a, after: b };
+    }
+  }
+  return changes;
+}
+
+// Apply a `changes` delta to a ticket in-place (returns the updated
+// ticket). Used by reconstructShardState to walk deltas forward from a
+// genesis snapshot.
+function applyChanges(
+  prior: Ticket,
+  changes: Record<string, FieldChange>
+): Ticket {
+  const updated: any = { ...prior };
+  for (const [k, v] of Object.entries(changes)) {
+    if (v.after === undefined) {
+      delete updated[k];
+    } else {
+      updated[k] = v.after;
+    }
+  }
+  return updated as Ticket;
 }
 
 // ── Shard routing ───────────────────────────────────────────────────────
 //
 // Given a ticket, which shard file does it belong to?
 //
-// - Compound sub-ticket (`R007-T1`) → bare relay shard (`R007.jsonl`)
-// - Ticket with `@hack:parent(Rxxx)` or `@hack:parent(Rxxx-Ty)` → the bare relay
+// - Compound sub-ticket (`R007-T1`, `R007-B2`, `R007-F3`) → bare relay shard (`R007.jsonl`)
+// - Ticket with `@hack:parent(Rxxx)` or `@hack:parent(Rxxx-Ly)` → the bare relay
 // - Bare relay (`R001`) → own shard
 // - Standalone (bare F/B/T with no parent) → own shard
 
 function bareRelayOf(id: string): string | null {
-  const compound = id.match(/^(R\d+)-T\d+$/);
+  const compound = id.match(/^(R\d+)-[BFT]\d+$/);
   if (compound) return compound[1];
   if (/^R\d+$/.test(id)) return id;
   return null;
@@ -240,6 +360,38 @@ async function appendEventToShard(
 ): Promise<void> {
   await ensureEventsDir();
   await appendFile(shardPathFor(shard), JSON.stringify(e) + "\n");
+  if (e.id && typeof e.t === "number") {
+    const prev = lastActivity[e.id] ?? 0;
+    if (e.t > prev) lastActivity[e.id] = e.t;
+  }
+}
+
+// ── Last-activity index ─────────────────────────────────────────────────
+// id → unix seconds of the latest event in any shard. Used to render
+// "N minutes ago" on the board and to sort cards within a column by
+// recency. Seeded once on startup, then incremented by appendEventToShard.
+
+const lastActivity: Record<string, number> = {};
+
+async function seedLastActivity(): Promise<void> {
+  const shards = await listShardNames();
+  if (shards.length === 0) {
+    for (const ev of await readLegacyEvents()) {
+      if (ev.id && typeof ev.t === "number") {
+        const prev = lastActivity[ev.id] ?? 0;
+        if (ev.t > prev) lastActivity[ev.id] = ev.t;
+      }
+    }
+    return;
+  }
+  for (const s of shards) {
+    for (const ev of await readShardLines(s)) {
+      if (ev.id && typeof ev.t === "number") {
+        const prev = lastActivity[ev.id] ?? 0;
+        if (ev.t > prev) lastActivity[ev.id] = ev.t;
+      }
+    }
+  }
 }
 
 async function readShardLines(name: string): Promise<TicketEvent[]> {
@@ -326,12 +478,12 @@ async function migrateLegacyEventsIfNeeded(): Promise<MigrationResult | null> {
 
   const legacy = await readLegacyEvents();
 
-  // Walk the legacy log in order, maintaining per-id state so each `scan`
-  // event we emit reflects the ticket's state AT THAT POINT IN TIME — not
-  // the final post-migration state. Dedupe consecutive same-hash scans so
-  // no-op modifications (e.g. a `line` field flip) don't produce noise.
+  // Walk the legacy log in order, maintaining per-id state. First time
+  // we see an id → emit a genesis `scan` with the full ticket. Every
+  // subsequent `modified` → emit a delta `scan` with only the changed
+  // fields. Skip if the change would produce an empty delta (e.g. a
+  // `line`-only legacy modification).
   const stateById = new Map<string, Ticket>();
-  const lastHashById = new Map<string, string>();
 
   const buckets = new Map<string, string[]>();
   const push = (shard: string, line: string) => {
@@ -354,45 +506,78 @@ async function migrateLegacyEventsIfNeeded(): Promise<MigrationResult | null> {
       continue;
     }
 
-    // Advance per-id state for ticket-lifecycle events.
-    if (tKind === "created" && ev.ticket) {
-      stateById.set(ev.id, ev.ticket);
-    } else if (tKind === "modified" && (ev as any).changes) {
+    // Handle ticket-lifecycle events: compute the post-event state,
+    // diff against what we last emitted for this id, and emit genesis
+    // or delta accordingly.
+    if (tKind === "created" || tKind === "modified" || tKind === "archived") {
       const prev = stateById.get(ev.id);
-      if (prev) {
+      let next: Ticket | null = null;
+
+      if (tKind === "created" && ev.ticket) {
+        next = ev.ticket;
+      } else if (tKind === "modified" && (ev as any).changes && prev) {
         const updated: any = { ...prev };
         for (const [k, v] of Object.entries(
           (ev as any).changes as Record<string, { after: any }>
         )) {
           updated[k] = v.after;
         }
-        stateById.set(ev.id, updated);
+        next = updated as Ticket;
+      } else if (tKind === "archived") {
+        next = ev.ticket ?? prev ?? null;
       }
-    } else if (tKind === "archived" && ev.ticket) {
-      stateById.set(ev.id, ev.ticket);
-    }
 
-    const t =
-      stateById.get(ev.id) ?? ev.ticket ?? ev.lastTicket ?? null;
-    const shard = t ? shardNameForTicket(t) : ev.id;
+      if (tKind === "archived" && next) {
+        // Archive is a distinct event, not a scan. Carry through with
+        // the full ticket so the audit trail stays readable.
+        const shard = shardNameForTicket(next);
+        push(shard, JSON.stringify({ ...ev, ticket: next }));
+        stateById.delete(ev.id);
+        continue;
+      }
 
-    if (tKind === "created" || tKind === "modified") {
-      if (!t) continue;
-      const h = hashTicket(t);
-      if (lastHashById.get(ev.id) === h) continue; // same state as last emitted
-      lastHashById.set(ev.id, h);
-      const scanEv: TicketEvent = {
-        t: ev.t,
-        type: "scan",
-        id: ev.id,
-        hash: h,
-        ticket: t,
-      };
-      push(shard, JSON.stringify(scanEv));
+      if (!next) continue;
+      const shard = shardNameForTicket(next);
+
+      if (!prev) {
+        // Genesis
+        push(
+          shard,
+          JSON.stringify({
+            t: ev.t,
+            type: "scan",
+            id: ev.id,
+            ticket: next,
+          })
+        );
+      } else {
+        // Delta
+        const changes = diffTicket(prev, next);
+        if (Object.keys(changes).length === 0) {
+          // no-op (e.g. legacy change recorded only on `line`)
+          stateById.set(ev.id, next);
+          continue;
+        }
+        push(
+          shard,
+          JSON.stringify({
+            t: ev.t,
+            type: "scan",
+            id: ev.id,
+            changes,
+          })
+        );
+      }
+      stateById.set(ev.id, next);
       continue;
     }
-    // archived / disappeared — carry through with original shape
+
+    // disappeared — carry through; we don't reconstruct its shard here
+    // because state is already removed on a prior event ordering.
+    const t = stateById.get(ev.id) ?? ev.ticket ?? ev.lastTicket ?? null;
+    const shard = t ? shardNameForTicket(t) : ev.id;
     push(shard, JSON.stringify(ev));
+    if (tKind === "disappeared") stateById.delete(ev.id);
   }
 
   await ensureEventsDir();
@@ -410,112 +595,143 @@ async function migrateLegacyEventsIfNeeded(): Promise<MigrationResult | null> {
 //
 // For each ticket, compute its hash. Read its shard's tail state (id →
 // last-seen-scan-hash). If the new hash differs, append a `scan` event.
-// Then: enumerate shards, find ids whose tail is `scan` (not archived /
-// disappeared) and who are absent from the current source → emit a
+// Then: anything in priorState not in the current scan got clobbered
+// (archived without an archive event, or doc-comment deletion) → emit a
 // `disappeared` event.
 //
-// Replaces the old diffAndLog + diffTicket + in-memory snapshot. No
-// startup replay needed; the tail of each shard IS the snapshot.
+// In-memory `priorState` per id. Seeded from shard reconstruction on
+// startup so the first scan after server restart can detect while-down
+// drift. Updated after every emit so subsequent scans diff against the
+// most recent known state.
 
-async function tailStateFor(shardName: string): Promise<Map<string, TicketEvent>> {
+/**
+ * Walk a shard's events in order and reconstruct the last-known full
+ * ticket state per id. Genesis (scan with `ticket`) sets the state;
+ * deltas (scan with `changes`) apply forward; archived/disappeared
+ * remove the id from the live set.
+ */
+async function reconstructShardState(
+  shardName: string
+): Promise<Map<string, Ticket>> {
   const lines = await readShardLines(shardName);
-  const byId = new Map<string, TicketEvent>();
+  const state = new Map<string, Ticket>();
   for (const ev of lines) {
-    if (ev.id) byId.set(ev.id, ev);
+    if (!ev.id) continue;
+    if (ev.type === "scan") {
+      if (ev.ticket) {
+        // Normalize as we read — older shards may carry absolute paths,
+        // so the in-memory state always holds the repo-relative form.
+        state.set(ev.id, normalizeTicket(ev.ticket)!);
+      } else if (ev.changes && state.has(ev.id)) {
+        const next = applyChanges(state.get(ev.id)!, ev.changes);
+        state.set(ev.id, normalizeTicket(next)!);
+      }
+    } else if (ev.type === "archived" || ev.type === "disappeared") {
+      state.delete(ev.id);
+    }
   }
-  return byId;
+  return state;
+}
+
+// In-memory snapshot. Seeded by `loadPriorStateFromShards` on startup.
+let priorState = new Map<string, Ticket>();
+let priorTodos = new Map<string, Todo>();
+
+async function loadPriorStateFromShards(): Promise<void> {
+  priorState = new Map();
+  const shards = await listShardNames();
+  for (const shard of shards) {
+    if (shard === TODOS_SHARD || shard === RENAMED_SHARD) continue;
+    const state = await reconstructShardState(shard);
+    for (const [id, t] of state) priorState.set(id, t);
+  }
+
+  // Reconstruct live todos from the _todos shard: todo_created brings an
+  // id into the live set; todo_removed / todo_promoted removes it.
+  priorTodos = new Map();
+  const todoEvents = await readShardLines(TODOS_SHARD);
+  for (const ev of todoEvents) {
+    if (!ev.id) continue;
+    if (ev.type === "todo_created" && ev.todo) {
+      priorTodos.set(ev.id, ev.todo);
+    } else if (ev.type === "todo_removed" || ev.type === "todo_promoted") {
+      priorTodos.delete(ev.id);
+    }
+  }
 }
 
 async function scanAndLog(current: Ticket[]): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
+  // Same-id-in-multiple-files merge happens upstream in
+  // `rs-hack-arch::ticket::TicketBoard::from_annotations`: a stable
+  // sort by `(file, line)` picks the canonical occurrence and a `files`
+  // array surfaces the smell. `current` is therefore already one entry
+  // per id and stable across scans.
   const currentIds = new Set(current.map((t) => t.id));
 
-  // Cache each shard's tail state so we only read each file once even if
-  // many tickets map to the same shard (common — a relay and its sub-tickets).
-  const tailCache = new Map<string, Map<string, TicketEvent>>();
-  const tailFor = async (shardName: string) => {
-    if (!tailCache.has(shardName)) {
-      tailCache.set(shardName, await tailStateFor(shardName));
-    }
-    return tailCache.get(shardName)!;
-  };
-
-  // 1) Emit `scan` events for tickets whose hash changed.
+  // 1) For each current ticket: emit genesis if unseen, delta if changed,
+  //    skip if no change.
   for (const t of current) {
+    const prior = priorState.get(t.id);
     const shard = shardNameForTicket(t);
-    const tails = await tailFor(shard);
-    const prior = tails.get(t.id);
-    const priorHash =
-      prior && prior.type === "scan" ? prior.hash ?? null : null;
-    const newHash = hashTicket(t);
-    if (priorHash !== newHash) {
-      const scanEv: TicketEvent = {
+    if (!prior) {
+      await appendEventToShard(shard, {
         t: now,
         type: "scan",
         id: t.id,
-        hash: newHash,
         ticket: t,
-      };
-      await appendEventToShard(shard, scanEv);
-      // Keep cache coherent for downstream disappeared detection.
-      tails.set(t.id, scanEv);
+      });
+      priorState.set(t.id, t);
+      continue;
     }
+    const changes = diffTicket(prior, t);
+    if (Object.keys(changes).length === 0) continue;
+    await appendEventToShard(shard, {
+      t: now,
+      type: "scan",
+      id: t.id,
+      changes,
+    });
+    priorState.set(t.id, t);
   }
 
-  // 2) Disappeared detection: every shard id whose tail is a live `scan`
-  //    event but who is absent from source got clobbered.
-  const shards = await listShardNames();
-  for (const shard of shards) {
-    if (shard === TODOS_SHARD || shard === RENAMED_SHARD) continue;
-    const tails = await tailFor(shard);
-    for (const [id, ev] of tails) {
-      if (ev.type !== "scan") continue;
-      if (currentIds.has(id)) continue;
-      const disappearedEv: TicketEvent = {
-        t: now,
-        type: "disappeared",
-        id,
-        lastTicket: ev.ticket,
-      };
-      await appendEventToShard(shard, disappearedEv);
-      tails.set(id, disappearedEv);
-    }
+  // 2) Disappeared: anything in priorState not in the current source scan.
+  for (const [id, lastTicket] of Array.from(priorState)) {
+    if (currentIds.has(id)) continue;
+    const shard = shardNameForTicket(lastTicket);
+    await appendEventToShard(shard, {
+      t: now,
+      type: "disappeared",
+      id,
+      lastTicket,
+    });
+    priorState.delete(id);
   }
 }
 
 async function scanAndLogTodos(current: Todo[]): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-
-  // Reconstruct the current set of known-live todo ids from the tail of
-  // _todos.jsonl — per-id last event wins.
-  const lines = await readShardLines(TODOS_SHARD);
-  const lastById = new Map<string, TicketEvent>();
-  for (const ev of lines) {
-    if (ev.id) lastById.set(ev.id, ev);
-  }
-  const known = new Set<string>();
-  for (const [id, ev] of lastById) {
-    if (ev.type === "todo_created") known.add(id);
-  }
-
   const currentSet = new Set(current.map((t) => t.id));
+
   for (const t of current) {
-    if (!known.has(t.id)) {
+    if (!priorTodos.has(t.id)) {
       await appendEventToShard(TODOS_SHARD, {
         t: now,
         type: "todo_created",
         id: t.id,
         todo: t,
       });
+      priorTodos.set(t.id, t);
     }
   }
-  for (const id of known) {
+  for (const id of Array.from(priorTodos.keys())) {
     if (!currentSet.has(id)) {
       await appendEventToShard(TODOS_SHARD, {
         t: now,
         type: "todo_removed",
         id,
       });
+      priorTodos.delete(id);
     }
   }
 }
@@ -646,7 +862,17 @@ function synthesizeReviewPrompt(t: Ticket, recentSummaries: Summary[]): string {
   lines.push("3. Decide:");
   lines.push("");
   lines.push(
-    "   **Approve** → click the `archive` button on the ticket card. That strips the `@hack:` annotations from source (ticket leaves the board) and appends an `archived` event to `.hack/events.jsonl` for audit."
+    "   **Approve** → archive the ticket yourself. Because this ticket is already in `review`, agents are allowed to archive it directly:"
+  );
+  lines.push("");
+  lines.push("   ```bash");
+  lines.push(`   rs-hack board archive ${t.id}`);
+  lines.push("   ```");
+  lines.push("");
+  lines.push(
+    "   That strips the `@hack:` annotations from source and writes an `archived` event to `.hack/events/`. The snapshot stays in the shard, so the ticket can still be inspected via `rs-hack board show " +
+      t.id +
+      "` and unarchived if needed. No server / port lookup required."
   );
   lines.push("");
   lines.push(
@@ -654,7 +880,7 @@ function synthesizeReviewPrompt(t: Ticket, recentSummaries: Summary[]): string {
   );
   lines.push("");
   lines.push(
-    "Do not leave a reviewed ticket sitting in `review` indefinitely — decide one way or the other."
+    "Do not leave a reviewed ticket sitting in `review` indefinitely — decide one way or the other. Note: the archive endpoint refuses tickets in `claimed` / `in-progress` — those must be moved to `review` (or `handoff`) first. This prompt is the only context where an agent should self-archive."
   );
 
   return lines.join("\n");
@@ -699,33 +925,86 @@ function setHackStatus(
 }
 
 /**
- * Remove `@hack:` doc-comment lines belonging to the ticket defined at `lineNum`.
- * Walks up/down across the contiguous doc-comment block and strips only lines
- * that match `//! @hack:` or `/// @hack:`. Non-hack annotations (e.g. @arch:)
- * and regular doc text are preserved.
+ * Per-extension rules for finding the contiguous "annotation block"
+ * around a ticket's defining line, and for spotting the `@hack:` lines
+ * inside it. Mirrors the extractor's prefix table in
+ * `rs-hack-arch/src/extract.rs::line_extract`.
+ */
+interface AnnotationStripRules {
+  isBlockLine: (line: string) => boolean;
+  isHackLine: (line: string) => boolean;
+}
+
+function annotationStripRulesFor(filePath: string): AnnotationStripRules | null {
+  switch (extname(filePath).toLowerCase()) {
+    case ".rs":
+      return {
+        isBlockLine: (l) => /^\s*\/\/[!/]/.test(l),
+        isHackLine: (l) => /^\s*\/\/[!/]\s*@hack:/.test(l),
+      };
+    case ".ts":
+    case ".tsx":
+    case ".js":
+    case ".jsx":
+      // `//`, `//!`, `///`, `/**`, `/*`, or `*` (JSDoc body).
+      return {
+        isBlockLine: (l) => /^\s*(\/\/|\/\*|\*)/.test(l),
+        isHackLine: (l) =>
+          /^\s*(\/\/[!/]?\s*@hack:|\*\s*@hack:|\/\*\*?\s*@hack:)/.test(l),
+      };
+    case ".md":
+      // No prefix; block bounded by blank lines.
+      return {
+        isBlockLine: (l) => l.trim() !== "",
+        isHackLine: (l) => /^\s*@hack:/.test(l),
+      };
+    case ".toml":
+    case ".yaml":
+    case ".yml":
+      return {
+        isBlockLine: (l) => /^\s*#/.test(l),
+        isHackLine: (l) => /^\s*#\s*@hack:/.test(l),
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Remove `@hack:` annotation lines belonging to the ticket defined at
+ * `lineNum`. Walks up/down across the contiguous annotation block (per
+ * the per-extension rules above) and strips only `@hack:` lines —
+ * `@arch:` and surrounding doc text are preserved.
+ *
+ * Returns `removed: []` for unsupported extensions or when the line is
+ * out of range; the caller surfaces that as a 500 ("no annotations
+ * found").
  */
 function stripHackAnnotations(
   content: string,
-  lineNum: number
+  lineNum: number,
+  filePath: string
 ): { newContent: string; removed: string[] } {
-  const lines = content.split("\n");
-  const isDocLine = (l: string) => /^\s*\/\/[!/]/.test(l);
-  const isHackLine = (l: string) => /^\s*\/\/[!/]\s*@hack:/.test(l);
+  const rules = annotationStripRulesFor(filePath);
+  if (!rules) {
+    return { newContent: content, removed: [] };
+  }
 
+  const lines = content.split("\n");
   const idx = lineNum - 1;
   if (idx < 0 || idx >= lines.length) {
     return { newContent: content, removed: [] };
   }
 
   let start = idx;
-  while (start > 0 && isDocLine(lines[start - 1])) start--;
+  while (start > 0 && rules.isBlockLine(lines[start - 1])) start--;
   let end = idx;
-  while (end < lines.length - 1 && isDocLine(lines[end + 1])) end++;
+  while (end < lines.length - 1 && rules.isBlockLine(lines[end + 1])) end++;
 
   const removed: string[] = [];
   const result: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (i >= start && i <= end && isHackLine(lines[i])) {
+    if (i >= start && i <= end && rules.isHackLine(lines[i])) {
       removed.push(lines[i]);
       continue;
     }
@@ -814,7 +1093,8 @@ async function scanTickets(): Promise<Ticket[]> {
   try {
     const result = await $`${RS_HACK} board tickets -f json -p ${WORKSPACE}`
       .text();
-    const tickets = JSON.parse(result) as Ticket[];
+    const raw = JSON.parse(result) as Ticket[];
+    const tickets = raw.map((t) => normalizeTicket(t) ?? t);
     scanCount++;
     return tickets;
   } catch (e) {
@@ -878,6 +1158,7 @@ function parseSummary(
     text: body,
     file: filename,
     promoted: fm.promoted === "true",
+    archived: fm.archived === "true",
     relay_id: fm.relay_id || undefined,
     relay_title: fm.relay_title || undefined,
   };
@@ -888,7 +1169,12 @@ function parseSummary(
 const sseClients = new Set<ReadableStreamDefaultController>();
 
 function broadcast(tickets: Ticket[], summaries: Summary[], todos: Todo[]) {
-  const data = JSON.stringify({ tickets, summaries, todos });
+  const data = JSON.stringify({
+    tickets,
+    summaries,
+    todos,
+    lastActivity,
+  });
   const msg = `data: ${data}\n\n`;
   for (const controller of sseClients) {
     try {
@@ -923,14 +1209,91 @@ function triggerRescan(reason: string) {
 
 // ── File Watcher ────────────────────────────────────────────────────────
 
-console.log(`[watch] ${WORKSPACE}`);
+// Load root .gitignore once at startup so we skip re-scans for files under
+// ignored dirs (target/, node_modules/, dist/, …). Stale after startup is
+// fine — a .gitignore edit is rare and a server restart picks it up.
+interface GitignoreRule {
+  negate: boolean;
+  pattern: string;
+  anchored: boolean; // starts with "/"
+  hasSlash: boolean; // pattern contains "/" (after anchor strip)
+}
+
+function loadGitignore(root: string): GitignoreRule[] {
+  let text: string;
+  try {
+    text = readFileSync(join(root, ".gitignore"), "utf8");
+  } catch {
+    return [];
+  }
+  const rules: GitignoreRule[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const negate = line.startsWith("!");
+    let pattern = negate ? line.slice(1) : line;
+    const anchored = pattern.startsWith("/");
+    if (anchored) pattern = pattern.slice(1);
+    if (pattern.endsWith("/")) pattern = pattern.slice(0, -1);
+    rules.push({ negate, pattern, anchored, hasSlash: pattern.includes("/") });
+  }
+  return rules;
+}
+
+function globSegment(pattern: string, text: string): boolean {
+  // Minimal glob: * matches anything except "/", ? matches one char.
+  const re = new RegExp(
+    "^" +
+      pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, "[^/]*")
+        .replace(/\?/g, "[^/]") +
+      "$",
+  );
+  return re.test(text);
+}
+
+function isIgnored(path: string, rules: GitignoreRule[]): boolean {
+  const segments = path.split("/");
+  let ignored = false;
+  for (const rule of rules) {
+    let matched = false;
+    const { pattern, anchored, hasSlash } = rule;
+    if (anchored) {
+      if (hasSlash) {
+        matched = path === pattern || path.startsWith(pattern + "/");
+      } else if (pattern.includes("*") || pattern.includes("?")) {
+        matched = !path.includes("/") && globSegment(pattern, path);
+      } else {
+        matched = path === pattern || path.startsWith(pattern + "/");
+      }
+    } else if (hasSlash) {
+      matched =
+        path === pattern ||
+        path.startsWith(pattern + "/") ||
+        path.includes("/" + pattern + "/") ||
+        path.endsWith("/" + pattern);
+    } else {
+      // bare name — match any path segment
+      matched = pattern.includes("*") || pattern.includes("?")
+        ? segments.some((s) => globSegment(pattern, s))
+        : segments.includes(pattern);
+    }
+    if (matched) ignored = !rule.negate;
+  }
+  return ignored;
+}
+
+const gitignoreRules = loadGitignore(WORKSPACE);
+console.log(`[watch] ${WORKSPACE} (${gitignoreRules.length} gitignore rules)`);
 const watcher = watch(WORKSPACE, { recursive: true }, (event, filename) => {
   if (
     filename &&
     (filename.endsWith(".rs") ||
       filename.includes(".hack/summaries/") ||
       filename.endsWith(".hack/todo.md") ||
-      filename === ".hack/todo.md")
+      filename === ".hack/todo.md") &&
+    !isIgnored(filename, gitignoreRules)
   ) {
     triggerRescan(`fs:${filename}`);
   }
@@ -1270,6 +1633,7 @@ const server = Bun.serve({
             tickets: currentTickets,
             summaries: currentSummaries,
             todos: currentTodos,
+            lastActivity,
           });
           controller.enqueue(
             new TextEncoder().encode(`data: ${data}\n\n`)
@@ -1339,7 +1703,15 @@ const server = Bun.serve({
       }
     }
 
-    // API: promote a summary to a relay ticket
+    // API: promote a summary to a relay ticket.
+    //
+    // Body: { target_file: string, title?: string, assignee?: string }
+    // `target_file` is required and must be a workspace-relative path to a
+    // `.rs` file — that's where the @hack:relay annotation gets written.
+    //
+    // Allocation, file write, and frontmatter update all happen inside
+    // `rs-hack board promote`, which holds the workspace ID lock so it
+    // serializes against `board claim`.
     if (
       url.pathname.startsWith("/api/promote/") &&
       req.method === "POST"
@@ -1355,25 +1727,92 @@ const server = Bun.serve({
         );
       }
 
+      let body: { target_file?: string; title?: string; assignee?: string } = {};
       try {
-        // Find next R-number from existing tickets
-        const existingRelays = currentTickets
-          .filter((t) => t.id.startsWith("R"))
-          .map((t) => parseInt(t.id.slice(1)) || 0);
-        // Also check summaries that were already promoted
-        const promotedRelays = currentSummaries
-          .filter((s) => s.promoted)
-          .map((s) => {
-            const match = (s as any).relay_id?.match(/R(\d+)/);
-            return match ? parseInt(match[1]) : 0;
-          });
-        const nextNum =
-          Math.max(0, ...existingRelays, ...promotedRelays) + 1;
-        const relayId = `R${String(nextNum).padStart(3, "0")}`;
+        body = (await req.json()) ?? {};
+      } catch {
+        // empty body is fine; target_file check below handles it
+      }
+      if (!body.target_file) {
+        return Response.json(
+          {
+            error:
+              "Missing 'target_file' in request body. " +
+              "Pass a workspace-relative path to a .rs file where the relay annotation will be written.",
+          },
+          { status: 400 }
+        );
+      }
 
-        const title = summary.text.split("\n")[0].slice(0, 80);
+      try {
+        const args = [
+          "board",
+          "promote",
+          "--summary-id",
+          summary.id,
+          "--file",
+          body.target_file,
+          "--path",
+          WORKSPACE,
+          "--json",
+        ];
+        if (body.title) args.push("--title", body.title);
+        if (body.assignee) args.push("--assignee", body.assignee);
 
-        // Update the summary file in place: add relay_id, set promoted: true
+        const proc = Bun.spawn([RS_HACK, ...args], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [stdout, stderr, exitCode] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+        if (exitCode !== 0) {
+          return Response.json(
+            { error: `Promote failed: ${stderr.trim() || stdout.trim()}` },
+            { status: 500 }
+          );
+        }
+
+        const result = JSON.parse(stdout.trim());
+        triggerRescan("promote");
+
+        return Response.json({
+          ok: true,
+          relayId: result.relay_id,
+          relayTitle: result.relay_title,
+          file: result.file,
+          line: result.line,
+          summaryFile: result.summary_file,
+          message: `Promoted to ${result.relay_id}`,
+        });
+      } catch (e: any) {
+        return Response.json(
+          { error: `Promote failed: ${e.message}` },
+          { status: 500 }
+        );
+      }
+    }
+
+    // API: archive an inbox summary — marks `archived: true` in frontmatter
+    // so it drops out of the inbox view without losing the file on disk.
+    if (
+      url.pathname.startsWith("/api/summaries/") &&
+      url.pathname.endsWith("/archive") &&
+      req.method === "POST"
+    ) {
+      const parts = url.pathname.split("/");
+      const summaryId = decodeURIComponent(parts[parts.length - 2] || "");
+      const summary = currentSummaries.find((s) => s.id === summaryId);
+      if (!summary) {
+        return Response.json(
+          { error: `Summary '${summaryId}' not found` },
+          { status: 404 }
+        );
+      }
+
+      try {
         const summaryPath = join(
           WORKSPACE,
           ".hack",
@@ -1381,26 +1820,31 @@ const server = Bun.serve({
           `${summary.id}.md`
         );
         let content = await Bun.file(summaryPath).text();
-        content = content.replace("promoted: false", "promoted: true");
-        // Add relay_id to frontmatter
-        content = content.replace(
-          "promoted: true",
-          `promoted: true\nrelay_id: ${relayId}\nrelay_title: ${title}`
-        );
+        if (!content.startsWith("---\n")) {
+          return Response.json(
+            { error: `Summary '${summaryId}' has no frontmatter` },
+            { status: 400 }
+          );
+        }
+        if (/^archived:\s*/m.test(content)) {
+          content = content.replace(/^archived:\s*\S+/m, "archived: true");
+        } else {
+          const endIdx = content.indexOf("---\n", 4);
+          if (endIdx === -1) {
+            return Response.json(
+              { error: `Summary '${summaryId}' has malformed frontmatter` },
+              { status: 400 }
+            );
+          }
+          content =
+            content.slice(0, endIdx) + "archived: true\n" + content.slice(endIdx);
+        }
         await Bun.write(summaryPath, content);
-
-        // Trigger rescan
-        triggerRescan("promote");
-
-        return Response.json({
-          ok: true,
-          relayId,
-          summaryFile: summaryPath,
-          message: `Promoted to ${relayId}`,
-        });
+        triggerRescan("summary:archive");
+        return Response.json({ ok: true, id: summaryId });
       } catch (e: any) {
         return Response.json(
-          { error: `Promote failed: ${e.message}` },
+          { error: `Archive failed: ${e.message}` },
           { status: 500 }
         );
       }
@@ -1438,6 +1882,20 @@ const server = Bun.serve({
           { status: 404 }
         );
       }
+      // Active-state guard: an agent should never archive straight from
+      // `claimed` / `in-progress`. Force the work through `review` (or
+      // `handoff`) first so a second pair of eyes sees it. Humans can still
+      // bypass via direct source edit if they really need to.
+      if (ticket.status === "claimed" || ticket.status === "in-progress") {
+        return Response.json(
+          {
+            error: `Cannot archive '${id}' — ticket is ${ticket.status}. Move to review or handoff first.`,
+            status: ticket.status,
+            hint: "Drag the card to Review (or set @hack:status(review) in source), then archive from there.",
+          },
+          { status: 409 }
+        );
+      }
       // Epic guard: refuse to archive an epic while children still exist in source.
       if (ticket.is_epic) {
         const liveChildren = currentTickets.filter(
@@ -1466,7 +1924,8 @@ const server = Bun.serve({
         const content = await Bun.file(sourcePath).text();
         const { newContent, removed } = stripHackAnnotations(
           content,
-          ticket.line
+          ticket.line,
+          sourcePath
         );
         if (removed.length === 0) {
           return Response.json(
@@ -1487,8 +1946,12 @@ const server = Bun.serve({
           file: ticket.file,
           line: ticket.line,
         });
-        // The next scan's tail-read of the shard sees `archived` as the
-        // latest event for this id and won't re-emit as `disappeared`.
+        // Drop the id from priorState so the follow-up rescan's step-2
+        // "disappeared" pass doesn't double-log this removal. `disappeared`
+        // is reserved for clobbered annotations (a hand-delete with no
+        // archive event). Without this, archive always emits the pair
+        // (archived, disappeared) back-to-back.
+        priorState.delete(id);
         triggerRescan("api:archive");
         return Response.json({
           ok: true,
@@ -1633,13 +2096,19 @@ if (migration) {
   );
 }
 
+await seedLastActivity();
+
+// Reconstruct per-id state from each shard (walk genesis + deltas
+// forward, skip archived/disappeared). priorState / priorTodos then
+// serve as the baseline for the first scan so we can detect
+// while-down drift and emit deltas rather than full-ticket snapshots.
+await loadPriorStateFromShards();
+
 [currentTickets, currentSummaries, currentTodos] = await Promise.all([
   scanTickets(),
   scanSummaries(),
   scanTodos(),
 ]);
-// No startup replay — the tail of each shard IS the snapshot. scanAndLog
-// reads tails directly and only emits events when hashes differ.
 await scanAndLog(currentTickets);
 await scanAndLogTodos(currentTodos);
 console.log(

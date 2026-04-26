@@ -2,16 +2,14 @@
 //! @arch:role(extract)
 //! @arch:role(parser)
 //! @hack:ticket(R001-T2, "Scan non-Rust files for @hack: annotations (md, ts, toml, yaml)")
-//! @hack:phase(P3)
-//! @hack:status(open)
-//! @hack:handoff("Plan refined — see architecture/ts-annotation-scanning.md. Scope is extraction only (not TS AST refactoring). Add AnnotationTarget::File { path, anchor } variant; dispatch extractor by extension (rs → existing syn path; ts/tsx/js/jsx/md/toml/yaml → new line_extract with per-language comment prefixes). Board shard routing already works for non-Rust tickets — shardNameForTicket routes by id/parent, not language. Biggest follow-up is the TS archive endpoint's block-strip rule (P3 in the doc). Concrete smell: R002-T1 in hack-board/src/server.ts is invisible on the board today; landing P1 of this ticket makes it appear.")
-//! @hack:next("P1: Add AnnotationTarget::File variant + line_extract function. Wire into extract_from_workspace via extension dispatch. Smoke: rs-hack board status picks up R002-T1 from hack-board/src/server.ts.")
-//! @hack:next("P2: Test fixtures for each file type under rs-hack-arch/tests/. Include a .md with annotation inside vs outside a ``` code fence (fenced should be ignored — see 'False positives in prose' in the arch doc).")
-//! @hack:next("P3: Non-Rust archive endpoint. Extend stripHackAnnotations in hack-board/src/server.ts to dispatch by extension; TS accepts //!///, //, and `* @hack:…` inside /** */; MD/TOML/YAML accept contiguous plain or #-prefixed lines. Blocker for the terminal lifecycle (R4) on TS/MD tickets.")
-//! @hack:next("P4 (optional, defer): Decide whether @arch: annotations on non-Rust files participate in the architecture graph / query engine. Probably yes for architecture/*.md but the target shape needs rethinking — File targets don't have syn::Item kinds. Skip until someone asks for it.")
-//! @hack:verify("After P1: rs-hack board status shows R002-T1 with source hack-board/src/server.ts:1")
-//! @hack:verify("After P1: a .md file with '@hack:ticket(T99, \"test\")' on a bare line (not fenced) produces an annotation; same line inside ``` produces nothing")
+//! @hack:assignee(agent:claude)
+//! @hack:status(review)
+//! @hack:handoff("P1+P2+P3 landed. AnnotationTarget::File { path, anchor } variant added; line_extract walks ts/tsx/js/jsx/md/toml/yaml with per-language comment-prefix tables (TS: //, //!, ///, /**, /*, *; MD: empty prefix with code-fence skipping; TOML/YAML: #). Block grouping mirrors Rust's per-doc-block: contiguous comment-prefixed (or non-blank for MD) lines share an anchor. Wired into extract_from_workspace via extension dispatch. Tests: 10 new integration tests in rs-hack-arch/tests/non_rust_extract.rs (TS module block, // and /** */, MD with/without code fences, TOML/YAML, blank-line block break, File target id format, @arch on MD). Smoke verified: rs-hack board status / show R002-T1 surfaces with source ./hack-board/src/server.ts:1. P3 archive endpoint: hack-board/src/server.ts::stripHackAnnotations now dispatches via annotationStripRulesFor(filePath) — covers .rs/.ts/.tsx/.js/.jsx/.md/.toml/.yaml/.yml. Validated all rules with an inline bun smoke test (15/15 pass). Drive-by: dogfood test_hack_tickets_from_workspace was asserting on archived R001 — rewrote to bind to lex-first live ticket so it survives ID turnover.")
+//! @hack:cleanup("setHackStatus (drag-and-drop column move) at hack-board/src/server.ts:889 still uses Rust-only //! / /// regexes — TS/MD tickets will silently no-op when dragged between columns. Same per-extension dispatch pattern as stripHackAnnotations applies; refactor both to share annotationStripRulesFor.")
+//! @hack:cleanup("compute_workspace_hash now hashes non-Rust files too, so cached-graph invalidation should be correct — but no test covers that.")
 //! @hack:verify("cargo test -p rs-hack-arch")
+//! @hack:verify("rs-hack board show R002-T1 — surfaces with source ./hack-board/src/server.ts:1")
+//! @hack:verify("Smoke archive: bun run hack-board/src/server.ts in a test workspace, drag a .ts ticket to Review, click archive — should strip @hack: lines from the .ts file and append an `archived` event to .hack/events/<shard>.jsonl")
 //! @arch:see(architecture/ts-annotation-scanning.md)
 //!
 //! Annotation extraction from Rust source files.
@@ -41,16 +39,27 @@ fn extract_from_workspace_with_options(root: impl AsRef<Path>, verbose: bool) ->
     let mut annotations = Vec::new();
     let mut file_count = 0;
 
-    // Walk through all .rs files
     for entry in WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| !is_hidden(e) && !is_target_dir(e))
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if path.extension().map_or(false, |ext| ext == "rs") {
+        let ext = path.extension().and_then(|e| e.to_str());
+        let extracted = match ext {
+            Some("rs") => Some(extract_from_file(path)),
+            Some("ts" | "tsx" | "js" | "jsx") => {
+                Some(line_extract(path, TS_PREFIXES, false))
+            }
+            Some("md") => Some(line_extract(path, MD_PREFIXES, true)),
+            Some("toml" | "yaml" | "yml") => {
+                Some(line_extract(path, TOML_PREFIXES, false))
+            }
+            _ => None,
+        };
+        if let Some(result) = extracted {
             file_count += 1;
-            match extract_from_file(path) {
+            match result {
                 Ok(file_annotations) => {
                     if verbose && !file_annotations.is_empty() {
                         eprintln!("  {} -> {} annotations", path.display(), file_annotations.len());
@@ -70,6 +79,102 @@ fn extract_from_workspace_with_options(root: impl AsRef<Path>, verbose: bool) ->
         eprintln!("Scanned {} files, found {} annotations", file_count, annotations.len());
     }
     Ok(annotations)
+}
+
+// Length-descending so longest match wins (//! before //).
+const TS_PREFIXES: &[&str] = &["//!", "///", "/**", "//", "/*", "*"];
+const TOML_PREFIXES: &[&str] = &["#"];
+const MD_PREFIXES: &[&str] = &[""];
+
+/// Extract `@hack:` / `@arch:` annotations from a non-Rust file using a
+/// per-language comment-prefix table. Block-grouping rule: contiguous
+/// comment lines (or, for empty-prefix formats like Markdown, contiguous
+/// non-blank lines) share an `anchor` so multi-line headers like
+///
+/// ```text
+/// //! @hack:ticket(R002-T1, "...")
+/// //! @hack:status(review)
+/// ```
+///
+/// roll up into one ticket. A non-comment / blank line / fence boundary
+/// closes the block; the next annotation starts a fresh anchor.
+pub fn line_extract(
+    path: &Path,
+    prefixes: &[&str],
+    allow_fences: bool,
+) -> Result<Vec<ArchAnnotation>> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+
+    let mut annotations = Vec::new();
+    let mut in_fence = false;
+    let mut block_anchor: Option<usize> = None;
+    let has_empty_prefix = prefixes.iter().any(|p| p.is_empty());
+
+    for (idx, line) in content.lines().enumerate() {
+        let line_num = idx + 1;
+
+        if allow_fences {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_fence = !in_fence;
+                block_anchor = None;
+                continue;
+            }
+            if in_fence {
+                block_anchor = None;
+                continue;
+            }
+        }
+
+        let stripped = strip_any_prefix(line, prefixes);
+        match stripped {
+            Some(after_prefix) => {
+                let trimmed = after_prefix.trim_start();
+                let annotation_rest = trimmed
+                    .strip_prefix("@arch:")
+                    .or_else(|| trimmed.strip_prefix("@hack:"));
+                if let Some(rest) = annotation_rest {
+                    let anchor = *block_anchor.get_or_insert(line_num);
+                    if let Some(kind) = parse_single_annotation(rest.trim()) {
+                        annotations.push(ArchAnnotation {
+                            file: path.to_path_buf(),
+                            line: line_num,
+                            target: AnnotationTarget::File {
+                                path: path.to_path_buf(),
+                                anchor,
+                            },
+                            kind,
+                            doc_text: None,
+                        });
+                    }
+                } else if has_empty_prefix && line.trim().is_empty() {
+                    // Markdown: blank line breaks the block.
+                    block_anchor = None;
+                }
+                // Otherwise: comment-prefixed continuation — keep anchor.
+            }
+            None => {
+                // No comment prefix matched — block break.
+                block_anchor = None;
+            }
+        }
+    }
+
+    Ok(annotations)
+}
+
+fn strip_any_prefix<'a>(line: &'a str, prefixes: &[&str]) -> Option<&'a str> {
+    let trimmed = line.trim_start();
+    for prefix in prefixes {
+        if prefix.is_empty() {
+            return Some(trimmed);
+        }
+        if let Some(rest) = trimmed.strip_prefix(*prefix) {
+            return Some(rest);
+        }
+    }
+    None
 }
 
 /// Extract annotations from a single Rust source file.
@@ -328,28 +433,51 @@ fn parse_single_annotation(s: &str) -> Option<ArchKind> {
 
 /// Convert a file path to a Rust module path.
 fn file_path_to_module(path: &Path) -> String {
-    let path_str = path.to_string_lossy();
+    // Walk components and slice from the rightmost `src` boundary so that
+    // both relative (`src/foo/bar.rs`, `crates/koda/core/src/state.rs`) and
+    // absolute (`/Users/leif/.../crates/koda/core/src/state.rs`) inputs
+    // produce a clean module path. Falling back to the leading-prefix
+    // strip alone produced bogus modules like `::Users::leif::ss::…` for
+    // absolute paths (every `/` became `::`).
+    let comps: Vec<String> = path
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => s.to_str().map(|s| s.to_string()),
+            // Drop RootDir, CurDir, ParentDir, Prefix — they're filesystem
+            // artifacts, not module path segments.
+            _ => None,
+        })
+        .collect();
 
-    // Normalize leading ./
-    let path_str = path_str.strip_prefix("./").unwrap_or(&path_str);
-
-    // Remove common prefixes
-    let module = if let Some(rest) = path_str.strip_prefix("src/") {
-        rest
-    } else if let Some(rest) = path_str.strip_prefix("crates/") {
-        rest
+    // Find the rightmost Cargo-known boundary (`src`, `tests`, `examples`,
+    // `benches`); module path = components after it. If no boundary exists
+    // and `crates/` is the leading segment, drop just that. Otherwise fall
+    // back to the filename stem so absolute paths like
+    // `/Users/leif/.../foo.rs` don't leak the whole filesystem path.
+    let boundary = ["src", "tests", "examples", "benches"];
+    let module_segments: Vec<&str> = if let Some(idx) = comps
+        .iter()
+        .rposition(|s| boundary.contains(&s.as_str()))
+    {
+        comps[idx + 1..].iter().map(|s| s.as_str()).collect()
+    } else if comps.first().map(|s| s.as_str()) == Some("crates") {
+        comps[1..].iter().map(|s| s.as_str()).collect()
+    } else if path.is_absolute() {
+        // Absolute path with no recognizable Cargo boundary — fall back
+        // to filename stem to avoid leaking `/Users/leif/...` segments.
+        comps.last().map(|s| vec![s.as_str()]).unwrap_or_default()
     } else {
-        path_str
+        comps.iter().map(|s| s.as_str()).collect()
     };
 
-    // Remove .rs extension
-    let module = module.strip_suffix(".rs").unwrap_or(module);
-
-    // Remove /mod suffix
-    let module = module.strip_suffix("/mod").unwrap_or(module);
-
-    // Convert path separators to ::
-    module.replace('/', "::")
+    let mut joined = module_segments.join("/");
+    if let Some(stripped) = joined.strip_suffix(".rs") {
+        joined = stripped.to_string();
+    }
+    if let Some(stripped) = joined.strip_suffix("/mod") {
+        joined = stripped.to_string();
+    }
+    joined.replace('/', "::")
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
@@ -382,7 +510,11 @@ pub fn compute_workspace_hash(root: impl AsRef<Path>) -> Result<String> {
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if path.extension().map_or(false, |ext| ext == "rs") {
+        let scanned = matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("rs" | "ts" | "tsx" | "js" | "jsx" | "md" | "toml" | "yaml" | "yml")
+        );
+        if scanned {
             if let Ok(content) = std::fs::read(path) {
                 hasher.update(&content);
             }
@@ -454,9 +586,44 @@ mod tests {
             file_path_to_module(Path::new("src/vivarium/impulse.rs")),
             "vivarium::impulse"
         );
+        // Multi-crate workspace path slices from the rightmost `src` so the
+        // module path matches what `cargo` would call it.
         assert_eq!(
             file_path_to_module(Path::new("crates/koda/core/src/state.rs")),
-            "koda::core::src::state"
+            "state"
+        );
+    }
+
+    #[test]
+    fn test_file_path_to_module_absolute() {
+        // Regression: absolute paths used to produce `::Users::leif::ss::…`
+        // because every `/` became `::`. The rightmost-boundary slice fixes it.
+        assert_eq!(
+            file_path_to_module(Path::new(
+                "/Users/leif/ss/rs-hack/rs-hack-arch/src/mcp.rs"
+            )),
+            "mcp"
+        );
+        assert_eq!(
+            file_path_to_module(Path::new(
+                "/Users/leif/ss/nt_alt/crates/spill/src/banana.rs"
+            )),
+            "banana"
+        );
+        // tests/ is a Cargo boundary too — was leaking the absolute prefix.
+        assert_eq!(
+            file_path_to_module(Path::new(
+                "/Users/leif/ss/noisetable/crates/vivarium/banana_nodes/tests/chip_type_args.rs"
+            )),
+            "chip_type_args"
+        );
+    }
+
+    #[test]
+    fn test_file_path_to_module_mod_rs() {
+        assert_eq!(
+            file_path_to_module(Path::new("src/foo/mod.rs")),
+            "foo"
         );
     }
 

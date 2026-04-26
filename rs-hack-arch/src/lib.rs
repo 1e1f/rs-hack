@@ -60,12 +60,16 @@
 //! ```
 
 pub mod annotation;
+pub mod archive;
+pub mod comment;
 pub mod extract;
 pub mod graph;
 pub mod mcp;
+pub mod promote;
 pub mod query;
 pub mod schema;
 pub mod sdlc;
+pub mod smell;
 pub mod status;
 pub mod summary;
 pub mod ticket;
