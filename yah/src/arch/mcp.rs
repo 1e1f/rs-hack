@@ -1,11 +1,11 @@
 //! @arch:layer(arch)
 //! @arch:role(bridge)
-//! @yah:ticket(R001-T1, "Promote: board writes relay annotation back to source via rs-hack MCP")
+//! @yah:ticket(R001-T1, "Promote: board writes relay annotation back to source via yah MCP")
 //! @yah:assignee(agent:claude)
 //! @yah:phase(P2)
 //! @yah:status(review)
 //!
-//! MCP (Model Context Protocol) integration for rs-hack-arch.
+//! MCP (Model Context Protocol) integration for yah-arch.
 //! Exposes architecture queries as tools for Claude and other AI assistants.
 //!
 //! ## Tools
@@ -15,9 +15,9 @@
 //! - `arch_context`: Get architectural context for a file
 //! - `arch_validate`: Validate architecture rules
 //!
-//! ## Integration with rs-hack-mcp
+//! ## Integration with yah mcp
 //!
-//! These tools can be added to rs-hack-mcp by adding this crate as a dependency
+//! These tools can be added to yah mcp by adding this crate as a dependency
 //! and registering the tools in the MCP server.
 
 use crate::arch::extract::extract_from_workspace;

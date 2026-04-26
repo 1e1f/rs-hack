@@ -811,16 +811,16 @@ impl Ticket {
             if let Some(next) = live_children.first().copied() {
                 let line = match next.status {
                     TicketStatus::Open => format!(
-                        "\nStart with:\n\n```bash\nrs-hack board claim {}\n```\n\n",
+                        "\nStart with:\n\n```bash\nyah board claim {}\n```\n\n",
                         next.id
                     ),
                     TicketStatus::Handoff => format!(
-                        "\nStart with:\n\n```bash\nrs-hack board move {} active\n```\n\n",
+                        "\nStart with:\n\n```bash\nyah board move {} active\n```\n\n",
                         next.id
                     ),
                     TicketStatus::Claimed | TicketStatus::InProgress => format!(
                         "\nContinue with **{}** — already in flight ({}). Pull its pickup \
-                         prompt:\n\n```bash\nrs-hack board tickets --prompt {}\n```\n\n",
+                         prompt:\n\n```bash\nyah board tickets --prompt {}\n```\n\n",
                         next.id,
                         next.status.column().to_lowercase(),
                         next.id
@@ -945,7 +945,7 @@ impl Ticket {
                 prompt.push_str(&format!(
                     "Claim this ticket — one atomic command flips status and assignee (Rule01):\n\n\
                      ```bash\n\
-                     rs-hack board claim {}\n\
+                     yah board claim {}\n\
                      ```\n\n\
                      The Prompt button's clipboard copy does **not** move the card for you. \
                      Run the claim before any other code edits.\n\n",
@@ -956,7 +956,7 @@ impl Ticket {
                 prompt.push_str(&format!(
                     "Pick up the baton — one atomic command flips status and assignee (Rule01):\n\n\
                      ```bash\n\
-                     rs-hack board move {} active\n\
+                     yah board move {} active\n\
                      ```\n\n\
                      The Prompt button's clipboard copy does **not** move the card for you. \
                      Run the move before any other code edits.\n\n",
@@ -973,7 +973,7 @@ impl Ticket {
             TicketStatus::Review | TicketStatus::Done => {
                 prompt.push_str(&format!(
                     "This ticket is already in `{}`. If it needs more work, send it back \
-                     with `rs-hack board move {} handoff --handoff \"what still needs doing\"`. \
+                     with `yah board move {} handoff --handoff \"what still needs doing\"`. \
                      Otherwise use the review-mode prompt from the card's Review button.\n\n",
                     self.status.column().to_lowercase(),
                     self.id
@@ -988,19 +988,19 @@ impl Ticket {
             prompt.push_str(
                 "Load-bearing rules for this pickup: **Rule01** (claim first — above), \
                  **Rule08** (sub-ticket cycle — above), **Col01** (three end-states — below). \
-                 Full ruleset: `rs-hack board rules --context pickup` (or `finishing` \
+                 Full ruleset: `yah board rules --context pickup` (or `finishing` \
                  when you wrap up).\n\n",
             );
         } else {
             prompt.push_str(
                 "Load-bearing rules for this pickup: **Rule01** (claim first — above), \
                  **Col01** (three end-states — below). Full ruleset: \
-                 `rs-hack board rules --context pickup` (or `finishing` when you wrap up).\n\n",
+                 `yah board rules --context pickup` (or `finishing` when you wrap up).\n\n",
             );
         }
         prompt.push_str(
-            "Inspect any related ticket: `rs-hack board show <ID>` \
-             (compact view) or `rs-hack board show <ID> --prompt` (full \
+            "Inspect any related ticket: `yah board show <ID>` \
+             (compact view) or `yah board show <ID> --prompt` (full \
              pickup form, like this one).\n\n",
         );
 
@@ -1023,13 +1023,13 @@ impl Ticket {
         prompt.push_str(&format!("{}. Pick the right end-state (Col01):\n", step));
         prompt.push_str(&format!(
             "   - **More work remains (another phase, another agent):** \
-                `rs-hack board move {} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
+                `yah board move {} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
                 — same R-number, baton moves forward in place (Rule03).\n",
             self.id
         ));
         prompt.push_str(&format!(
             "   - **This ticket's tasks are met, awaiting human sign-off:** \
-                `rs-hack board move {} review` and ping the user. Do **not** self-archive — \
+                `yah board move {} review` and ping the user. Do **not** self-archive — \
                 review is where a human exercises `@yah:verify(...)` and confirms.\n",
             self.id
         ));
@@ -1806,7 +1806,7 @@ pub mod process_block;
         // First-action block: relay is in Handoff, so the pickup verb is
         // `board move <ID> active`, not a hand-edit of the status line.
         assert!(
-            prompt.contains("rs-hack board move R001 active"),
+            prompt.contains("yah board move R001 active"),
             "expected pickup verb in prompt:\n{}",
             prompt
         );
@@ -2115,7 +2115,7 @@ pub fn thing() {}
         // Trimmed playbook — no longer dumps Rule02/Rule03/Rule04/Col01 inline
         assert!(prompt.contains("**Rule01**"));
         assert!(!prompt.contains("**Rule03 —"));
-        assert!(prompt.contains("rs-hack board rules"));
+        assert!(prompt.contains("yah board rules"));
 
         // File:line extraction from handoff prose
         assert!(prompt.contains("Locations referenced above"));
@@ -2233,12 +2233,12 @@ pub mod thing;
             prompt
         );
         assert!(
-            prompt.contains("rs-hack board tickets --prompt R100-T1"),
+            prompt.contains("yah board tickets --prompt R100-T1"),
             "should point at T1's pickup prompt for the actual work"
         );
         // And must NOT have silently skipped to T2:
         assert!(
-            !prompt.contains("rs-hack board claim R100-T2"),
+            !prompt.contains("yah board claim R100-T2"),
             "must not skip in-progress T1 and claim T2 instead:\n{}",
             prompt
         );
@@ -2400,7 +2400,7 @@ mod r202 {
         // Epic starts with the earliest live child (R201, which is in
         // Handoff — picker verb = `move ... active`).
         assert!(
-            prompt.contains("rs-hack board move R201 active"),
+            prompt.contains("yah board move R201 active"),
             "epic picker points at R201 (earliest live, handoff):\n{}",
             prompt
         );

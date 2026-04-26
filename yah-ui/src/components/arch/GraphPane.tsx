@@ -115,6 +115,7 @@ interface GraphPaneProps {
   enabledKinds: Set<EdgeKind>;
   onNodeClick?: (nodeId: string) => void;
   onNodeHover?: (nodeId: string | null) => void;
+  onPinView?: () => void;
 }
 
 export function GraphPane({
@@ -122,6 +123,7 @@ export function GraphPane({
   enabledKinds,
   onNodeClick,
   onNodeHover,
+  onPinView,
 }: GraphPaneProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -194,7 +196,11 @@ export function GraphPane({
         <span>
           {subgraph.edges.filter((e) => enabledKinds.has(e.kind)).length} edges
         </span>
-        <button className="ml-auto rounded px-2 py-1 text-ink-3 hover:bg-paper-2 hover:text-ink">
+        <button
+          onClick={onPinView}
+          disabled={!onPinView}
+          className="ml-auto rounded px-2 py-1 text-ink-3 hover:bg-paper-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+        >
           Pin view
         </button>
       </div>

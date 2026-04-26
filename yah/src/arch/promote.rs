@@ -5,7 +5,7 @@
 //! Promote a freeform summary into a structured `@yah:relay(...)` annotation
 //! in source. This is the shared backend for both:
 //!
-//! - The CLI: `rs-hack board promote --summary <ID> --file <PATH>`
+//! - The CLI: `yah board promote --summary <ID> --file <PATH>`
 //! - The MCP tool: `hack_promote`
 //! - The HTTP endpoint: `POST /api/promote/<id>` (shells out to the CLI)
 //!
@@ -148,7 +148,7 @@ pub fn promote_summary(
 }
 
 /// File lock held during ID allocation. Created at `.yah/id.lock`; released
-/// on drop. Mirrors the lock used by `rs-hack board claim` so the two
+/// on drop. Mirrors the lock used by `yah board claim` so the two
 /// allocators serialize against each other.
 pub struct IdLock {
     path: PathBuf,
@@ -183,7 +183,7 @@ impl IdLock {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     if start.elapsed() > std::time::Duration::from_secs(5) {
                         bail!(
-                            "Another rs-hack process is holding {}; waited 5s. \
+                            "Another yah process is holding {}; waited 5s. \
                              Delete the lock file if stale.",
                             path.display()
                         );

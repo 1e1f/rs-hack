@@ -187,7 +187,7 @@ impl BoardStatus {
                 if let Some(ref n) = t.next {
                     out.push_str(&format!("  next: {}\n", n));
                 }
-                out.push_str(&format!("  pickup: `rs-hack board tickets --prompt {}`\n", t.id));
+                out.push_str(&format!("  pickup: `yah board tickets --prompt {}`\n", t.id));
             }
             out.push('\n');
         }
@@ -250,8 +250,8 @@ impl BoardStatus {
         }
 
         out.push_str(
-            "\n---\n_Inspect a single ticket: `rs-hack board show <ID>` \
-             (or `rs-hack board status <ID>` — same thing)._\n",
+            "\n---\n_Inspect a single ticket: `yah board show <ID>` \
+             (or `yah board status <ID>` — same thing)._\n",
         );
 
         out
@@ -351,7 +351,7 @@ fn preview_text(s: &str, max: usize) -> String {
 /// exist. Falls back to the legacy single-file `.yah/events.jsonl` for
 /// workspaces that haven't been migrated yet — the board server's first
 /// run rewrites the legacy file into shards, but this function should
-/// work either way so `rs-hack board status` doesn't break during
+/// work either way so `yah board status` doesn't break during
 /// migration.
 fn scan_disappeared(workspace: &Path) -> (Vec<String>, usize) {
     let mut lines: Vec<String> = Vec::new();

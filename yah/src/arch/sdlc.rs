@@ -2,7 +2,7 @@
 //! @arch:role(sdlc)
 //!
 //! Canonical SDLC rules for hack-board. The board's ruleset lives in code so
-//! that `rs-hack board rules` and the continuation-prompt synthesizer read
+//! that `yah board rules` and the continuation-prompt synthesizer read
 //! from the same source. Prose in READMEs is a mirror, not the authority.
 
 use serde::Serialize;
@@ -67,8 +67,8 @@ pub const RULES: &[SdlcRule] = &[
     SdlcRule {
         id: "Rule01",
         title: "First action on pickup is the claim",
-        rule: "Your first action on picking up a ticket is `rs-hack board claim <ID>` \
-               (Open → Active) or `rs-hack board move <ID> active` (Handoff → Active). \
+        rule: "Your first action on picking up a ticket is `yah board claim <ID>` \
+               (Open → Active) or `yah board move <ID> active` (Handoff → Active). \
                Either one flips `@yah:status(in-progress)` and sets assignee atomically. \
                No other code changes come before the claim is recorded.",
         why: "The status flip is the claim signal — until it lands in source, another agent \
@@ -80,8 +80,8 @@ pub const RULES: &[SdlcRule] = &[
     SdlcRule {
         id: "Rule02",
         title: "Never pick IDs yourself",
-        rule: "Allocate every relay, epic, and ticket via `rs-hack board open` or \
-               `rs-hack board claim` — never hand-write an annotation with an ID you \
+        rule: "Allocate every relay, epic, and ticket via `yah board open` or \
+               `yah board claim` — never hand-write an annotation with an ID you \
                chose by reading the board and picking `max+1`.",
         why: "The allocator holds `.yah/id.lock` during scan+write. Two agents running in \
               parallel will otherwise pick the same number and silently clobber one ticket \
@@ -95,7 +95,7 @@ pub const RULES: &[SdlcRule] = &[
     SdlcRule {
         id: "Rule03",
         title: "Same-relay handoff is the default",
-        rule: "Finish a phase with `rs-hack board move R<n> handoff --handoff '…' --next '…'`. \
+        rule: "Finish a phase with `yah board move R<n> handoff --handoff '…' --next '…'`. \
                Same R-number, same annotation block — the baton moves forward, the thread \
                doesn't fork. New R-numbers are only for genuinely parallel or independent \
                tracks (see Rule08).",
@@ -143,7 +143,7 @@ pub const RULES: &[SdlcRule] = &[
         id: "Rule07",
         title: "Source is truth; the three verbs are the interface",
         rule: "The only way to change board state is to write source. In practice that \
-               means `rs-hack board open` / `claim` / `move`, or the archive / add-todo \
+               means `yah board open` / `claim` / `move`, or the archive / add-todo \
                card actions — each of which edits source (or `.yah/`) for you. Anything \
                that sidesteps a source edit desyncs on the next scan.",
         why: "Source is the single source of truth. The board watcher rescans after every \
@@ -158,7 +158,7 @@ pub const RULES: &[SdlcRule] = &[
         id: "Rule08",
         title: "Sub-tickets stay under the relay; new relays are for independent tracks",
         rule: "When the next chunk of work is a sub-unit of the current relay, claim a \
-               sub-ticket under it (`rs-hack board open --kind task --parent R012` → \
+               sub-ticket under it (`yah board open --kind task --parent R012` → \
                `R012-T1`), not a new bare relay. New R-numbers are reserved for threads \
                that genuinely run in parallel or independently from the current one.",
         why: "The relay is the baton across agent sessions; sub-tickets are checkpoints \
@@ -195,15 +195,15 @@ pub const RULES: &[SdlcRule] = &[
                 tickets (doc refs, ordering, shared gotchas, strategy) and open a \
                 ticket for anything that's itself a concrete work unit. Before adding \
                 a `@yah:next` line, ask: 'is this a concrete chunk of work?' If yes \
-                → `rs-hack board open --kind task --parent R<n>`. If it's context the \
+                → `yah board open --kind task --parent R<n>`. If it's context the \
                 next picker needs to read first → keep it on the relay.",
         contexts: &[Context::Finishing, Context::NewWork],
     },
     SdlcRule {
         id: "Rule10",
         title: "Scan in-flight relays before refining new work",
-        rule: "Before `/refine` or `rs-hack board open --kind relay`, run \
-               `rs-hack board inflight` and read every Open / Active / Handoff relay. \
+        rule: "Before `/refine` or `yah board open --kind relay`, run \
+               `yah board inflight` and read every Open / Active / Handoff relay. \
                If your planned work overlaps an existing relay's purpose, either claim \
                the existing one (Open → Active), add your plan as a sub-ticket under it \
                (per Rule08), or — if it's genuinely independent — reference the neighboring \
@@ -224,7 +224,7 @@ pub const RULES: &[SdlcRule] = &[
         rule: "If a ticket card shows `files.length > 1` (the ⚠ duplicate-id badge), \
                resolve it before doing other work on that ticket. Either: dedupe — \
                pick one home for the annotation block and delete the other; or renumber \
-               — `rs-hack board open --kind <K>` to allocate a fresh ID for the second \
+               — `yah board open --kind <K>` to allocate a fresh ID for the second \
                occurrence. If `conflicts` lists disagreeing scalar metadata \
                (status / phase / assignee / title / kind / severity), reconcile in \
                source first; the lex-first value is the temporary winner but is not \
@@ -271,9 +271,9 @@ pub const RULES: &[SdlcRule] = &[
               tasks are met but no human has verified — that bypasses the one gate where \
               `@yah:verify(...)` gets exercised. Handoff passes a still-alive baton; \
               Review is the final checkpoint before archive.",
-        apply: "More work to follow → `rs-hack board move R<n> handoff` with updated \
+        apply: "More work to follow → `yah board move R<n> handoff` with updated \
                 handoff/next (same R-number per Rule03). Tasks met, nothing left to do → \
-                `rs-hack board move <ID> review` and ping the user. Archive only after \
+                `yah board move <ID> review` and ping the user. Archive only after \
                 the user confirms — never self-archive on the same turn you set review.",
         contexts: &[Context::Finishing, Context::Pickup],
     },

@@ -14,7 +14,7 @@
 //!   this machine. Listed in `.yah/worktrees.json`.
 //! - **`remote`** — another machine reachable via SSH. Listed in
 //!   `.yah/worktrees.json` with `{host, path}`. Queried via
-//!   `ssh <host> rs-hack board tickets -f json -p <path>`.
+//!   `ssh <host> yah board tickets -f json -p <path>`.
 //!
 //! The registry file is gitignored — every clone owns its own view.
 
@@ -164,8 +164,8 @@ pub fn enumerate(workspace: &Path) -> Result<Vec<Sibling>> {
 
 /// Query a sibling for the IDs of every `@yah:ticket` / `@yah:relay`
 /// declaration in its source. Local/git siblings are scanned via subprocess
-/// (`rs-hack board tickets -f json -p <path>`); remote siblings via
-/// `ssh <host> rs-hack board tickets -f json -p <path>`.
+/// (`yah board tickets -f json -p <path>`); remote siblings via
+/// `ssh <host> yah board tickets -f json -p <path>`.
 ///
 /// Errors are non-fatal: returns `Ok(Err(message))` so the caller can warn
 /// and proceed (per design doc — race resolution is P5's job).

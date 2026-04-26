@@ -53,8 +53,8 @@ fn count_dated_markers(s: &str) -> usize {
 /// strategy notes.
 fn next_looks_like_concrete_chunk(s: &str) -> bool {
     let lower = s.to_lowercase();
-    let mentions_alloc_verb = lower.contains("rs-hack board claim")
-        || lower.contains("rs-hack board open")
+    let mentions_alloc_verb = lower.contains("yah board claim")
+        || lower.contains("yah board open")
         || lower.contains("board claim --kind")
         || lower.contains("board open --kind");
     let has_numbered_recipe =
@@ -110,7 +110,7 @@ pub fn write_time_warnings(
             out.push(format!(
                 "Rule09: --next #{} reads like a concrete work unit, not relay guidance: \
                  \"{}…\". Open it as a sub-ticket now: \
-                 `rs-hack board open --kind task --parent <RELAY> --next \"...\"`. \
+                 `yah board open --kind task --parent <RELAY> --next \"...\"`. \
                  Keep --next on the relay for cross-ticket strategy only.",
                 i + 1,
                 preview
@@ -257,7 +257,7 @@ mod tests {
     fn flags_concrete_next_with_alloc_verb() {
         let mut t = mk_ticket("R001");
         t.next_steps = vec![
-            "Open R012-T2-B as the next free child via rs-hack board claim --kind task --parent R012".to_string(),
+            "Open R012-T2-B as the next free child via yah board claim --kind task --parent R012".to_string(),
         ];
         let board = TicketBoard { tickets: vec![t.clone()] };
         let smells = ticket_smells(&t, &board);
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn write_time_warns_on_concrete_next() {
         let new_next = vec![
-            "Open the next free child via rs-hack board claim --kind task --parent R012 then begin: (1) ... (2) ...".to_string(),
+            "Open the next free child via yah board claim --kind task --parent R012 then begin: (1) ... (2) ...".to_string(),
         ];
         let warnings = write_time_warnings(None, &[], &new_next);
         assert!(warnings.iter().any(|w| w.contains("Rule09")));

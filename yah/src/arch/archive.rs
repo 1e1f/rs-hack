@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn missing_shard_returns_none() {
-        let tmp = std::env::temp_dir().join("rs-hack-archive-test-missing");
+        let tmp = std::env::temp_dir().join("yah-archive-test-missing");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         assert!(lookup(&tmp, "R999").is_none());
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn replays_genesis_then_changes_then_disappeared() {
-        let tmp = std::env::temp_dir().join("rs-hack-archive-test-replay");
+        let tmp = std::env::temp_dir().join("yah-archive-test-replay");
         let _ = std::fs::remove_dir_all(&tmp);
         let genesis = r#"{"t":1,"type":"scan","id":"R001","ticket":{"id":"R001","title":"hello","item_type":"relay","status":"open","depends_on":[],"see_also":[],"file":"a.rs","line":1,"target":{"Module":{"path":"a"}},"files":[{"path":"a.rs","line":1}]}}"#;
         let delta = r#"{"t":2,"type":"scan","id":"R001","changes":{"status":{"before":"open","after":"in-progress"}}}"#;
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn sub_ticket_uses_parent_shard() {
-        let tmp = std::env::temp_dir().join("rs-hack-archive-test-subtick");
+        let tmp = std::env::temp_dir().join("yah-archive-test-subtick");
         let _ = std::fs::remove_dir_all(&tmp);
         let ev = r#"{"t":1,"type":"scan","id":"R001-T1","ticket":{"id":"R001-T1","title":"sub","item_type":"ticket","status":"open","parent":"R001","depends_on":[],"see_also":[],"file":"a.rs","line":2,"target":{"Module":{"path":"a"}},"files":[{"path":"a.rs","line":2}]}}"#;
         write_shard(&tmp, "R001", &[ev]);

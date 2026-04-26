@@ -4,7 +4,7 @@
 //! @arch:depends_on(core, reason = "uses editor, operations, state, diff")
 //! @arch:thread(main)
 //!
-//! CLI frontend for rs-hack. Parses clap commands and dispatches
+//! CLI frontend for yah. Parses clap commands and dispatches
 //! to core library operations.
 //!
 //! @arch:see(architecture/multi-worktree-sync.md)
@@ -105,9 +105,17 @@
 //! @yah:parent(R009)
 //!
 //! @yah:ticket(R009-T2, "ArchToolbar: RootSelector, DepthControl, EdgeKindFilters, PinnedViews, Legend")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:phase(P3)
 //! @yah:parent(R009)
+//! @yah:handoff("Composed the Architecture left rail. Added arch/constants.ts (shared EDGE_KINDS metadata + LAYER_HUES + strokeDasharray helper) so EdgeKindFilters, GraphPane, and Legend pull from one source of truth. Built five rail sections: DepthControl (1/2/3 hops segmented buttons with serif numeral + italic label, accent-tinted when active), EdgeKindFilters (checkbox + 22x6 svg stroke sample matched to the design — solid/dashed/dotted), PinnedViews (per-pin row with pin icon + hover-revealed × remove button + 'pin current view' add row + 'none yet' empty state), Legend (layer hue swatches limited to 4 by default to fit the rail). Refactored RootSelector off the pre-yah-design tokens onto parchment + the shared Menu primitive — anchored popover with 'From file' / 'Other roots' eyebrow groups, file/sub display per choice. Built ArchToolbar.tsx as the rail composer (Root/Depth/Edges/Pinned/Legend with SectionHeader between each, mt-auto pushes Legend to the bottom, paper-2/50 wash). Rewrote ArchView.tsx to lift pinned-views state up + wire ArchToolbar; GraphPane gained an onPinView prop so the canvas's existing 'Pin view' button now feeds the rail. Typecheck clean for new code. bun run build:css + build:js both green. I built clean but did NOT exercise the UI in a browser this turn — flag any visual regressions.")
+//! @yah:next("Visual sign-off: open localhost:5173, switch to Architecture tab. Confirm rail shows Root (file dropdown opens via Menu, eyebrow groups visible), Depth (1/2/3 hops, accent tint follows active), Edges (six rows with stroke samples), Pinned views (initial seed 'voice_allocator · 2 hops'; click 'pin current view' or canvas 'Pin view' button → row appears; hover row → × reveals; click row → root + depth restore), Legend (4 hue swatches at bottom).")
+//! @yah:next("R009-T3 picks up next: NodeHoverCard + NodeActionMenu + cross-tab nav. Current GraphPane has an inline hover card (top-right aside in GraphPane.tsx); T3 should extract it into NodeHoverCard.tsx, add NodeActionMenu (jump-to-source / re-root / open-in-agent), wire click handler in App.tsx so 'open in agent' switches to Agent tab + selects the relay.")
+//! @yah:next("Edge cases not exercised: dark theme palette swap on rail, long pin labels, RootSelector with a value not in CHOICES (falls back to displaying raw id).")
+//! @yah:gotcha("Two `rs-hack board serve` instances are running (pids 34870 + 34952). Stale rs-hack v0.5.4 only reads @hack: annotations so they show empty boards but still touch yah/src/main.rs every scan; that races with Edit tools. If you hit 'File has been modified since read' loops, kill them and use ./target/release/yah board serve instead.")
+//! @yah:verify("cd yah-ui && bun run typecheck")
+//! @yah:verify("cd yah-ui && bun run build")
 //!
 //! @yah:ticket(R009-T3, "NodeHoverCard + NodeActionMenu + cross-tab nav (jumpToFile, openInAgent)")
 //! @yah:status(open)
@@ -138,6 +146,21 @@
 //! @yah:status(open)
 //! @yah:phase(P5)
 //! @yah:parent(R011)
+//!
+//! @yah:relay(R012, "Stage 4: docs/help-text rs-hack→yah sweep")
+//! @yah:status(in-progress)
+//! @yah:assignee(agent:claude)
+//! @yah:handoff("Eliminating remaining literal 'rs-hack' string references in clap help text, doc-comments, templates, slash commands, and CLAUDE.md. Annotations + dir paths already migrated in Stages 1-3.")
+//! @yah:next("Hand-edit yah/src/main.rs (296 hits, mostly clap after_help / deprecated subcommand examples — pattern is mechanical: 'rs-hack <subcmd>' → 'yah hack <subcmd>')")
+//! @yah:next("Hand-edit other yah/**/*.rs files (smaller files: state.rs, worktrees.rs, arch/*.rs, mcp/*.rs)")
+//! @yah:next("Hand-edit CLAUDE.md (13 hits — Rule #1 dogfood line, 'yah board serve' bullet, slash commands section)")
+//! @yah:next("Hand-edit templates/ + .claude/commands/ (97+28 hits — keep templates/ and .claude/commands/ in sync)")
+//! @yah:next("Defer README.md (211 hits) — separate decision (rewrite for yah vs split umbrella+yah/README.md)")
+//! @yah:next("Build, spot-check help output (yah board claim --help should no longer say 'rs-hack')")
+//! @yah:verify("cargo build -p yah")
+//! @yah:verify("cargo run --quiet --bin yah -- board claim --help | grep -c rs-hack  # should be 0")
+//! @yah:gotcha("Do NOT touch RS_HACK_STATE_DIR env var (legacy fallback in state.rs:40) or the 'rs-hack' verify-line allowlist in arch/ticket.rs — these are intentional historical compatibility")
+//! @yah:gotcha("README.md (211 hits) is excluded by handoff; treat as separate decision")
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -169,30 +192,30 @@ use diff::{print_diff, print_summary_diff, DiffStats};
 #[command(about = "Bulk refactor Rust: find/modify struct literals, enum variants, and function calls across your entire codebase")]
 #[command(long_about = "AST-aware Rust refactoring tool that finds and modifies ALL usages across your codebase.
 
-WHAT MAKES RS-HACK DIFFERENT:
+WHAT MAKES YAH DIFFERENT:
   • Works on struct LITERALS (instantiation sites), not just definitions
   • One command updates 50 struct initializations scattered across many files
   • AST-aware: no false positives from comments or strings
 
 COMMON USE CASES:
   Add a field to a struct + update ALL places it's instantiated:
-    rs-hack add --name Config --field-name timeout --field-type Duration \\
+    yah hack add --name Config --field-name timeout --field-type Duration \\
                --field-value \"Duration::from_secs(30)\" --paths src --apply
 
   Find all places a struct is instantiated (not just where it's defined):
-    rs-hack find --paths src --node-type struct-literal --name Config
+    yah hack find --paths src --node-type struct-literal --name Config
 
   Remove a field from definition AND all 47 places it's used:
-    rs-hack remove --name User --field-name deprecated_field --paths src --apply")]
-#[command(after_help = "For detailed help on any command, use: rs-hack <COMMAND> --help
+    yah hack remove --name User --field-name deprecated_field --paths src --apply")]
+#[command(after_help = "For detailed help on any command, use: yah <COMMAND> --help
 
 Examples:
-  rs-hack find --help
-  rs-hack add --help
-  rs-hack rename --help")]
+  yah hack find --help
+  yah hack add --help
+  yah hack rename --help")]
 #[command(version)]
 struct Cli {
-    /// Use project-local state directory (.rs-hack) instead of ~/.rs-hack
+    /// Use project-local state directory (.yah) instead of ~/.yah
     #[arg(long, global = true)]
     local_state: bool,
 
@@ -259,17 +282,17 @@ enum HackCommands {
     #[command(hide = true)]
     #[command(after_help = "EXAMPLES:
     # Add field to struct definition only
-    rs-hack add-struct-field --struct-name Config --field \"timeout: Duration\" --paths src --apply
+    yah hack add-struct-field --struct-name Config --field \"timeout: Duration\" --paths src --apply
 
     # Add field to definition AND all struct literals
-    rs-hack add-struct-field --struct-name Config --field \"timeout: Duration\" --literal-default \"Duration::from_secs(30)\" --paths src --apply
+    yah hack add-struct-field --struct-name Config --field \"timeout: Duration\" --literal-default \"Duration::from_secs(30)\" --paths src --apply
 
     # Common case: field exists in struct, add to all literals
-    rs-hack add-struct-field --struct-name Config --field timeout --literal-default \"Duration::from_secs(30)\" --paths src --apply
+    yah hack add-struct-field --struct-name Config --field timeout --literal-default \"Duration::from_secs(30)\" --paths src --apply
 
     # Insert field at specific position
-    rs-hack add-struct-field --struct-name User --field \"created_at: DateTime\" --position first --paths src --apply
-    rs-hack add-struct-field --struct-name User --field \"updated_at: DateTime\" --position \"after:created_at\" --paths src --apply
+    yah hack add-struct-field --struct-name User --field \"created_at: DateTime\" --position first --paths src --apply
+    yah hack add-struct-field --struct-name User --field \"updated_at: DateTime\" --position \"after:created_at\" --paths src --apply
 
 BEHAVIOR WITH --literal-default:
     Without --literal-default:
@@ -315,20 +338,20 @@ BEHAVIOR WITH --literal-default:
         apply: bool,
     },
 
-    /// [DEPRECATED] Update an existing struct field (changes type/visibility) - use 'rs-hack update' instead
+    /// [DEPRECATED] Update an existing struct field (changes type/visibility) - use 'yah hack update' instead
     #[command(hide = true)]
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --name <NAME> --field <FIELD>' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack update --name <NAME> --field <FIELD>' instead
 
 MIGRATION:
-    Old: rs-hack update-struct-field --struct-name User --field \"pub email: String\"
-    New: rs-hack update --name User --field \"pub email: String\"
+    Old: yah hack update-struct-field --struct-name User --field \"pub email: String\"
+    New: yah hack update --name User --field \"pub email: String\"
 
 EXAMPLES:
     # Update struct field type/visibility
-    rs-hack update-struct-field --struct-name User --field \"pub email: String\" --paths src --apply
+    yah hack update-struct-field --struct-name User --field \"pub email: String\" --paths src --apply
 
     # Update field type
-    rs-hack update-struct-field --struct-name Config --field \"timeout: u64\" --paths src --apply")]
+    yah hack update-struct-field --struct-name Config --field \"timeout: u64\" --paths src --apply")]
     UpdateStructField {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -352,28 +375,28 @@ EXAMPLES:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Remove a field from struct definitions and all struct literal expressions - use 'rs-hack remove' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --name <NAME> --field-name <FIELD>' instead
+    /// [DEPRECATED] Remove a field from struct definitions and all struct literal expressions - use 'yah hack remove' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack remove --name <NAME> --field-name <FIELD>' instead
 
 MIGRATION:
-    Old: rs-hack remove-struct-field --struct-name User --field-name email
-    New: rs-hack remove --name User --field-name email
+    Old: yah hack remove-struct-field --struct-name User --field-name email
+    New: yah hack remove --name User --field-name email
 
 EXAMPLES:
     # Remove field from struct definition AND all struct literals
-    rs-hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --paths src --apply
+    yah hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --paths src --apply
 
     # Dry-run to preview changes (default behavior)
-    rs-hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --paths src
+    yah hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --paths src
 
     # Remove field from enum variant (use Enum::Variant syntax)
-    rs-hack remove-struct-field --struct-name \"View::Rectangle\" --field-name \"immediate_mode\" --paths src --apply
+    yah hack remove-struct-field --struct-name \"View::Rectangle\" --field-name \"immediate_mode\" --paths src --apply
 
     # Remove field from literals only (keep in struct definition)
-    rs-hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --literal-only --paths src --apply
+    yah hack remove-struct-field --struct-name \"Config\" --field-name \"debug_mode\" --literal-only --paths src --apply
 
     # Works on multiple files in a directory
-    rs-hack remove-struct-field --struct-name \"User\" --field-name \"deprecated_field\" --paths src --apply
+    yah hack remove-struct-field --struct-name \"User\" --field-name \"deprecated_field\" --paths src --apply
 
 WHAT IT DOES:
     This command removes a field in TWO places:
@@ -435,7 +458,7 @@ WHAT IT DOES:
         apply: bool,
     },
 
-    /// [LEGACY] Add a variant to an enum - use 'rs-hack add' instead
+    /// [LEGACY] Add a variant to an enum - use 'yah hack add' instead
     #[command(hide = true)]
     AddEnumVariant {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
@@ -464,19 +487,19 @@ WHAT IT DOES:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Update an existing enum variant - use 'rs-hack update' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --name <NAME> --variant <VARIANT>' instead
+    /// [DEPRECATED] Update an existing enum variant - use 'yah hack update' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack update --name <NAME> --variant <VARIANT>' instead
 
 MIGRATION:
-    Old: rs-hack update-enum-variant --enum-name Status --variant \"Draft { created_at: u64 }\"
-    New: rs-hack update --name Status --variant \"Draft { created_at: u64 }\"
+    Old: yah hack update-enum-variant --enum-name Status --variant \"Draft { created_at: u64 }\"
+    New: yah hack update --name Status --variant \"Draft { created_at: u64 }\"
 
 EXAMPLES:
     # Update enum variant
-    rs-hack update-enum-variant --enum-name Status --variant \"Draft { created_at: u64 }\" --paths src --apply
+    yah hack update-enum-variant --enum-name Status --variant \"Draft { created_at: u64 }\" --paths src --apply
 
     # Add field to enum variant
-    rs-hack update-enum-variant --enum-name Status --variant \"Active { user_id: u32 }\" --paths src --apply")]
+    yah hack update-enum-variant --enum-name Status --variant \"Active { user_id: u32 }\" --paths src --apply")]
     UpdateEnumVariant {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -500,12 +523,12 @@ EXAMPLES:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Remove a variant from an enum - use 'rs-hack remove' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --name <NAME> --variant <VARIANT>' instead
+    /// [DEPRECATED] Remove a variant from an enum - use 'yah hack remove' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack remove --name <NAME> --variant <VARIANT>' instead
 
 MIGRATION:
-    Old: rs-hack remove-enum-variant --enum-name Status --variant-name Draft
-    New: rs-hack remove --name Status --variant Draft")]
+    Old: yah hack remove-enum-variant --enum-name Status --variant-name Draft
+    New: yah hack remove --name Status --variant Draft")]
     RemoveEnumVariant {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -529,16 +552,16 @@ MIGRATION:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Rename an enum variant across the codebase - use 'rs-hack rename' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack rename --name <NAME> --to <NEW_NAME>' instead
+    /// [DEPRECATED] Rename an enum variant across the codebase - use 'yah hack rename' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack rename --name <NAME> --to <NEW_NAME>' instead
 
 MIGRATION:
-    Old: rs-hack rename-enum-variant --enum-name Status --old-variant Draft --new-variant Pending
-    New: rs-hack rename --name Status::Draft --to Pending
+    Old: yah hack rename-enum-variant --enum-name Status --old-variant Draft --new-variant Pending
+    New: yah hack rename --name Status::Draft --to Pending
 
 EXAMPLES:
     # Rename enum variant
-    rs-hack rename-enum-variant --enum-name Status --old-variant Draft --new-variant Pending --paths src --apply")]
+    yah hack rename-enum-variant --enum-name Status --old-variant Draft --new-variant Pending --paths src --apply")]
     RenameEnumVariant {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -575,16 +598,16 @@ EXAMPLES:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Rename a function across the codebase - use 'rs-hack rename' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack rename --name <NAME> --to <NEW_NAME>' instead
+    /// [DEPRECATED] Rename a function across the codebase - use 'yah hack rename' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack rename --name <NAME> --to <NEW_NAME>' instead
 
 MIGRATION:
-    Old: rs-hack rename-function --old-name process_v2 --new-name process
-    New: rs-hack rename --name process_v2 --to process
+    Old: yah hack rename-function --old-name process_v2 --new-name process
+    New: yah hack rename --name process_v2 --to process
 
 EXAMPLES:
     # Rename function
-    rs-hack rename-function --old-name process_v2 --new-name process --paths src --apply")]
+    yah hack rename-function --old-name process_v2 --new-name process --paths src --apply")]
     RenameFunction {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -616,23 +639,23 @@ EXAMPLES:
         apply: bool,
     },
 
-    /// Rename functions, enum variants - updates ALL call sites (see: rs-hack rename --help)
+    /// Rename functions, enum variants - updates ALL call sites (see: yah hack rename --help)
     #[command(display_order = 3)]
     #[command(after_help = "EXAMPLES:
     # Rename function
-    rs-hack rename --name process_v2 --to process --paths src --apply
+    yah hack rename --name process_v2 --to process --paths src --apply
 
     # Rename enum variant (with :: syntax)
-    rs-hack rename --name Status::Draft --to Pending --paths src --apply
+    yah hack rename --name Status::Draft --to Pending --paths src --apply
 
     # Rename enum variant with qualified path for disambiguation
-    rs-hack rename --name Status::Draft --to Pending --enum-path \"types::Status\" --paths src --apply
+    yah hack rename --name Status::Draft --to Pending --enum-path \"types::Status\" --paths src --apply
 
     # Validation mode (check for remaining references)
-    rs-hack rename --name Status::Draft --to Pending --validate --paths src
+    yah hack rename --name Status::Draft --to Pending --validate --paths src
 
     # Use reformat mode instead of surgical (preserves formatting less precisely)
-    rs-hack rename --name process_v2 --to process --edit-mode reformat --paths src --apply
+    yah hack rename --name process_v2 --to process --edit-mode reformat --paths src --apply
 
 AUTO-DETECTION:
     The command auto-detects whether to rename a function or enum variant:
@@ -642,7 +665,7 @@ AUTO-DETECTION:
 
 ENUM VARIANT SYNTAX:
     Use EnumName::VariantName to specify an enum variant:
-      rs-hack rename --name Status::Draft --to Pending --paths src --apply
+      yah hack rename --name Status::Draft --to Pending --paths src --apply
 
     This works for both the target name (--name) specification.
 
@@ -657,7 +680,7 @@ EDIT MODES:
 
 VALIDATION:
     Use --validate to check for remaining references without making changes:
-      rs-hack rename --name old_name --to new_name --validate --paths src
+      yah hack rename --name old_name --to new_name --validate --paths src
 
 NOTES:
     - Use --name <NAME> to specify the target to rename
@@ -707,15 +730,15 @@ NOTES:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Add a match arm for a specific pattern - use 'rs-hack add' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack add --match-arm <PATTERN> --body <BODY>' instead
+    /// [DEPRECATED] Add a match arm for a specific pattern - use 'yah hack add' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack add --match-arm <PATTERN> --body <BODY>' instead
 
 MIGRATION:
-    Old: rs-hack add-match-arm --pattern \"Status::Archived\" --body \"todo!()\"
-    New: rs-hack add --match-arm \"Status::Archived\" --body \"todo!()\" --paths src --apply
+    Old: yah hack add-match-arm --pattern \"Status::Archived\" --body \"todo!()\"
+    New: yah hack add --match-arm \"Status::Archived\" --body \"todo!()\" --paths src --apply
 
-    Old: rs-hack add-match-arm --auto-detect --enum-name Status --body \"todo!()\"
-    New: rs-hack add --auto-detect --enum-name Status --body \"todo!()\" --paths src --apply")]
+    Old: yah hack add-match-arm --auto-detect --enum-name Status --body \"todo!()\"
+    New: yah hack add --auto-detect --enum-name Status --body \"todo!()\" --paths src --apply")]
     AddMatchArm {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -747,12 +770,12 @@ MIGRATION:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Update an existing match arm - use 'rs-hack update' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --match-arm <PATTERN> --body <BODY>' instead
+    /// [DEPRECATED] Update an existing match arm - use 'yah hack update' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack update --match-arm <PATTERN> --body <BODY>' instead
 
 MIGRATION:
-    Old: rs-hack update-match-arm --pattern \"Status::Draft\" --body \"\\\"pending\\\".to_string()\"
-    New: rs-hack update --match-arm \"Status::Draft\" --body \"\\\"pending\\\".to_string()\" --paths src --apply")]
+    Old: yah hack update-match-arm --pattern \"Status::Draft\" --body \"\\\"pending\\\".to_string()\"
+    New: yah hack update --match-arm \"Status::Draft\" --body \"\\\"pending\\\".to_string()\" --paths src --apply")]
     UpdateMatchArm {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -776,12 +799,12 @@ MIGRATION:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Remove a match arm - use 'rs-hack remove' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --match-arm <PATTERN>' instead
+    /// [DEPRECATED] Remove a match arm - use 'yah hack remove' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack remove --match-arm <PATTERN>' instead
 
 MIGRATION:
-    Old: rs-hack remove-match-arm --pattern \"Status::Deleted\"
-    New: rs-hack remove --match-arm \"Status::Deleted\" --paths src --apply")]
+    Old: yah hack remove-match-arm --pattern \"Status::Deleted\"
+    New: yah hack remove --match-arm \"Status::Deleted\" --paths src --apply")]
     RemoveMatchArm {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
         #[arg(short, long, num_args = 1..)]
@@ -811,48 +834,48 @@ MIGRATION:
         apply: bool,
     },
 
-    /// Find definitions AND all usages across files (see: rs-hack find --help)
+    /// Find definitions AND all usages across files (see: yah hack find --help)
     #[command(display_order = 1)]
     #[command(after_help = "EXAMPLES:
     # NEW: Search all node types when you don't know what you're looking for
-    rs-hack find --paths src --name Rectangle
+    yah hack find --paths src --name Rectangle
 
     # Find all struct literal expressions for a specific struct
-    rs-hack find --paths src --node-type struct-literal --name Shadow
+    yah hack find --paths src --node-type struct-literal --name Shadow
 
     # Find all calls to unwrap() method
-    rs-hack find --paths src --node-type method-call --name unwrap
+    yah hack find --paths src --node-type method-call --name unwrap
 
     # Find all eprintln! debug statements
-    rs-hack find --paths src --node-type macro-call --name eprintln
+    yah hack find --paths src --node-type macro-call --name eprintln
 
     # Find enum variant usages
-    rs-hack find --paths src --node-type enum-usage --name \"Operator::Error\"
+    yah hack find --paths src --node-type enum-usage --name \"Operator::Error\"
 
     # NEW: Enum variant filtering - all four patterns work:
     # 1. Find any enum with Rectangle variant
-    rs-hack find --paths src --node-type enum --variant Rectangle
+    yah hack find --paths src --node-type enum --variant Rectangle
     # 2. Find View enum, show only Rectangle variant
-    rs-hack find --paths src --node-type enum --name View --variant Rectangle
+    yah hack find --paths src --node-type enum --name View --variant Rectangle
     # 3. Same using :: syntax
-    rs-hack find --paths src --node-type enum --name View::Rectangle
+    yah hack find --paths src --node-type enum --name View::Rectangle
     # 4. Wildcard: any enum with Rectangle variant
-    rs-hack find --paths src --node-type enum --name \"*::Rectangle\"
+    yah hack find --paths src --node-type enum --name \"*::Rectangle\"
 
     # Find nodes containing specific text
-    rs-hack find --paths src --node-type struct-literal --content-filter \"[SHADOW RENDER]\"
+    yah hack find --paths src --node-type struct-literal --content-filter \"[SHADOW RENDER]\"
 
     # Get JSON output (useful for scripting)
-    rs-hack find --paths src --node-type function --name process --format json
+    yah hack find --paths src --node-type function --name process --format json
 
     # Get just file locations (grep-like output)
-    rs-hack find --paths src --node-type method-call --name unwrap --format locations
+    yah hack find --paths src --node-type method-call --name unwrap --format locations
 
     # Search multiple files with glob patterns
-    rs-hack find --paths \"src/**/*.rs\" --node-type struct --name Config
+    yah hack find --paths \"src/**/*.rs\" --node-type struct --name Config
 
     # Include documentation comments in output
-    rs-hack find --paths src --node-type function --name main --include-comments true
+    yah hack find --paths src --node-type function --name main --include-comments true
 
 OUTPUT FORMATS:
     snippets    Show full code snippets with file locations (default, most readable)
@@ -896,7 +919,7 @@ OUTPUT FORMATS:
         format: String,
     },
 
-    /// [LEGACY] Add derive macros - use 'rs-hack add' instead
+    /// [LEGACY] Add derive macros - use 'yah hack add' instead
     #[command(hide = true)]
     AddDerive {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
@@ -920,7 +943,7 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// [LEGACY] Add a method to an impl block - use 'rs-hack add' instead
+    /// [LEGACY] Add a method to an impl block - use 'yah hack add' instead
     #[command(hide = true)]
     AddImplMethod {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
@@ -944,7 +967,7 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// [LEGACY] Add a use statement - use 'rs-hack add' instead
+    /// [LEGACY] Add a use statement - use 'yah hack add' instead
     #[command(hide = true)]
     AddUse {
         /// Path to the Rust file or directory (supports multiple paths and glob patterns)
@@ -964,44 +987,44 @@ OUTPUT FORMATS:
         apply: bool,
     },
 
-    /// Add fields, variants, methods, derives, match arms - updates ALL usages (see: rs-hack add --help)
+    /// Add fields, variants, methods, derives, match arms - updates ALL usages (see: yah hack add --help)
     #[command(display_order = 2)]
     #[command(after_help = "COMMON USE CASE - Add field to ALL struct literal instantiations:
     # Add a field to every place MyStruct { ... } appears in your codebase
-    rs-hack add --name MyStruct --field-name new_field --field-value \"None\" --paths src --apply
+    yah hack add --name MyStruct --field-name new_field --field-value \"None\" --paths src --apply
 
     # For enum variants like View::Container, use the full path
-    rs-hack add --name \"View::Container\" --field-name style --field-value \"None\" --paths src --apply
+    yah hack add --name \"View::Container\" --field-name style --field-value \"None\" --paths src --apply
 
 EXAMPLES:
     # Add field to struct definition only (no --field-value)
-    rs-hack add --name User --field-name email --field-type String --paths src --apply
+    yah hack add --name User --field-name email --field-type String --paths src --apply
 
     # Add field to definition AND all literals (with --field-value)
-    rs-hack add --name Config --field-name timeout --field-type Duration \\
+    yah hack add --name Config --field-name timeout --field-type Duration \\
                --field-value \"Duration::from_secs(30)\" --paths src --apply
 
     # Add field to literals only, not definition (--literal-only)
-    rs-hack add --name Config --field-name timeout --field-value \"Duration::from_secs(30)\" \\
+    yah hack add --name Config --field-name timeout --field-value \"Duration::from_secs(30)\" \\
                --literal-only --paths src --apply
 
     # Add enum variant
-    rs-hack add --name Status --variant \"Archived\" --paths src --apply
+    yah hack add --name Status --variant \"Archived\" --paths src --apply
 
     # Add impl method
-    rs-hack add --name User --method \"pub fn new() -> Self { Self { id: 0 } }\" --paths src --apply
+    yah hack add --name User --method \"pub fn new() -> Self { Self { id: 0 } }\" --paths src --apply
 
     # Add derive macros
-    rs-hack add --name User --derive \"Clone,Debug\" --paths src --apply
+    yah hack add --name User --derive \"Clone,Debug\" --paths src --apply
 
     # Add use statement (no --name required)
-    rs-hack add --use \"serde::Serialize\" --paths src --apply
+    yah hack add --use \"serde::Serialize\" --paths src --apply
 
     # Add ..Default::default() to struct literals that need it
-    rs-hack add --name Config --default-rest --paths src --apply
+    yah hack add --name Config --default-rest --paths src --apply
 
     # Add custom base expression (e.g., ..other_instance)
-    rs-hack add --name Config --base \"existing_config\" --paths src --apply
+    yah hack add --name Config --base \"existing_config\" --paths src --apply
 
 AUTO-DETECTION:
     The command auto-detects what to add based on which flags you provide:
@@ -1017,14 +1040,14 @@ AUTO-DETECTION:
 
 ENUM VARIANT SYNTAX:
     For enum struct variants, use \"EnumName::VariantName\" syntax:
-    rs-hack add --name \"View::Container\" --field-name shadow --field-value \"None\" --paths src
+    yah hack add --name \"View::Container\" --field-name shadow --field-value \"None\" --paths src
 
 MATCH ARMS (two modes):
     Mode 1 - Auto-detect ALL missing arms (enum must be in scanned files):
-    rs-hack add --auto-detect --enum-name Status --body \"todo!()\" --paths src --apply
+    yah hack add --auto-detect --enum-name Status --body \"todo!()\" --paths src --apply
 
     Mode 2 - Add ONE specific arm (works with external enums):
-    rs-hack add --match-arm \"Status::Archived\" --body \"\\\"archived\\\".to_string()\" --paths src --apply
+    yah hack add --match-arm \"Status::Archived\" --body \"\\\"archived\\\".to_string()\" --paths src --apply
 
     Note: --auto-detect ignores --match-arm. Use one mode or the other.
 
@@ -1153,26 +1176,26 @@ NOTES:
         apply: bool,
     },
 
-    /// Remove fields, variants, methods, derives, match arms - from ALL usages (see: rs-hack remove --help)
+    /// Remove fields, variants, methods, derives, match arms - from ALL usages (see: yah hack remove --help)
     #[command(display_order = 4)]
     #[command(after_help = "EXAMPLES:
     # Remove struct field (from definition AND all literals)
-    rs-hack remove --name User --field-name email --paths src --apply
+    yah hack remove --name User --field-name email --paths src --apply
 
     # Remove enum variant field (use EnumName::VariantName syntax)
-    rs-hack remove --name View::Rectangle --field-name color --paths src --apply
+    yah hack remove --name View::Rectangle --field-name color --paths src --apply
 
     # Remove field from literals only (keep in definition)
-    rs-hack remove --name Config --field-name debug_mode --literal-only --paths src --apply
+    yah hack remove --name Config --field-name debug_mode --literal-only --paths src --apply
 
     # Remove enum variant
-    rs-hack remove --name Status --variant Draft --paths src --apply
+    yah hack remove --name Status --variant Draft --paths src --apply
 
     # Remove derive macro
-    rs-hack remove --name User --derive Clone --paths src --apply
+    yah hack remove --name User --derive Clone --paths src --apply
 
     # Remove impl method
-    rs-hack remove --name User --method get_email --paths src --apply
+    yah hack remove --name User --method get_email --paths src --apply
 
 AUTO-DETECTION:
     The command auto-detects what to remove based on which flag you provide:
@@ -1186,7 +1209,7 @@ AUTO-DETECTION:
 
 ENUM VARIANT FIELDS:
     To remove a field from an enum variant, use the EnumName::VariantName syntax:
-      rs-hack remove --name View::Rectangle --field-name color --paths src --apply
+      yah hack remove --name View::Rectangle --field-name color --paths src --apply
 
     This works on both the variant definition AND all enum variant literals.
     Use --literal-only to only remove from literals.
@@ -1265,20 +1288,20 @@ NOTES:
         apply: bool,
     },
 
-    /// Update fields, variants, match arms - modifies ALL usages (see: rs-hack update --help)
+    /// Update fields, variants, match arms - modifies ALL usages (see: yah hack update --help)
     #[command(display_order = 5)]
     #[command(after_help = "EXAMPLES:
     # Update struct field type/visibility
-    rs-hack update --name User --field \"pub email: String\" --paths src --apply
+    yah hack update --name User --field \"pub email: String\" --paths src --apply
 
     # Update enum variant
-    rs-hack update --name Status --variant \"Draft { created_at: u64 }\" --paths src --apply
+    yah hack update --name Status --variant \"Draft { created_at: u64 }\" --paths src --apply
 
     # Update struct field (change type)
-    rs-hack update --name Config --field \"timeout: u64\" --paths src --apply
+    yah hack update --name Config --field \"timeout: u64\" --paths src --apply
 
     # Update enum variant (add field)
-    rs-hack update --name Status --variant \"Active { user_id: u32 }\" --paths src --apply
+    yah hack update --name Status --variant \"Active { user_id: u32 }\" --paths src --apply
 
 AUTO-DETECTION:
     The command auto-detects what to update based on which flag you provide:
@@ -1371,7 +1394,7 @@ NOTES:
         apply: bool,
     },
 
-    /// Show history of rs-hack runs
+    /// Show history of yah runs
     History {
         /// Number of recent runs to show
         #[arg(short, long, default_value = "10")]
@@ -1445,22 +1468,22 @@ Definition-level nodes (9 types):
 
 EXAMPLES:
     # Comment out all unwrap() calls
-    rs-hack transform --paths src --node-type method-call --name unwrap --action comment --apply
+    yah hack transform --paths src --node-type method-call --name unwrap --action comment --apply
 
     # Remove all eprintln! debug statements
-    rs-hack transform --paths src --node-type macro-call --name eprintln --action remove --apply
+    yah hack transform --paths src --node-type macro-call --name eprintln --action remove --apply
 
     # Replace a specific function call
-    rs-hack transform --paths src --node-type function-call --name old_func --action replace --with new_func --apply
+    yah hack transform --paths src --node-type function-call --name old_func --action replace --with new_func --apply
 
     # Remove all struct literals containing a specific value
-    rs-hack transform --paths src --node-type struct-literal --content-filter \"[SHADOW RENDER]\" --action remove --apply
+    yah hack transform --paths src --node-type struct-literal --content-filter \"[SHADOW RENDER]\" --action remove --apply
 
     # Comment out all TODO match arms
-    rs-hack transform --paths src --node-type match-arm --content-filter \"todo!()\" --action comment --apply
+    yah hack transform --paths src --node-type match-arm --content-filter \"todo!()\" --action comment --apply
 
     # Preview changes before applying (default dry-run)
-    rs-hack transform --paths src --node-type method-call --name unwrap --action comment")]
+    yah hack transform --paths src --node-type method-call --name unwrap --action comment")]
     Transform {
         /// Path to Rust file(s) - supports multiple paths and glob patterns (e.g., "src/**/*.rs")
         #[arg(short, long, num_args = 1..)]
@@ -1492,12 +1515,12 @@ EXAMPLES:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Add documentation comment to an item - use 'rs-hack add' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack add --name <NAME> --node-type <TYPE> --doc-comment <TEXT>' instead
+    /// [DEPRECATED] Add documentation comment to an item - use 'yah hack add' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack add --name <NAME> --node-type <TYPE> --doc-comment <TEXT>' instead
 
 MIGRATION:
-    Old: rs-hack add-doc-comment --target-type struct --name User --doc-comment \"User model\"
-    New: rs-hack add --name User --node-type struct --doc-comment \"User model\" --paths src --apply")]
+    Old: yah hack add-doc-comment --target-type struct --name User --doc-comment \"User model\"
+    New: yah hack add --name User --node-type struct --doc-comment \"User model\" --paths src --apply")]
     AddDocComment {
         /// Path to Rust file(s) - supports multiple paths and glob patterns
         #[arg(short, long, num_args = 1..)]
@@ -1525,12 +1548,12 @@ MIGRATION:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Update existing documentation comment - use 'rs-hack update' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack update --name <NAME> --node-type <TYPE> --doc-comment <TEXT>' instead
+    /// [DEPRECATED] Update existing documentation comment - use 'yah hack update' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack update --name <NAME> --node-type <TYPE> --doc-comment <TEXT>' instead
 
 MIGRATION:
-    Old: rs-hack update-doc-comment --target-type struct --name User --doc-comment \"Updated user model\"
-    New: rs-hack update --name User --node-type struct --doc-comment \"Updated user model\" --paths src --apply")]
+    Old: yah hack update-doc-comment --target-type struct --name User --doc-comment \"Updated user model\"
+    New: yah hack update --name User --node-type struct --doc-comment \"Updated user model\" --paths src --apply")]
     UpdateDocComment {
         /// Path to Rust file(s) - supports multiple paths and glob patterns
         #[arg(short, long, num_args = 1..)]
@@ -1554,12 +1577,12 @@ MIGRATION:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Remove documentation comment from an item - use 'rs-hack remove' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack remove --name <NAME> --node-type <TYPE> --doc-comment' instead
+    /// [DEPRECATED] Remove documentation comment from an item - use 'yah hack remove' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack remove --name <NAME> --node-type <TYPE> --doc-comment' instead
 
 MIGRATION:
-    Old: rs-hack remove-doc-comment --target-type struct --name User
-    New: rs-hack remove --name User --node-type struct --doc-comment --paths src --apply")]
+    Old: yah hack remove-doc-comment --target-type struct --name User
+    New: yah hack remove --name User --node-type struct --doc-comment --paths src --apply")]
     RemoveDocComment {
         /// Path to Rust file(s) - supports multiple paths and glob patterns
         #[arg(short, long, num_args = 1..)]
@@ -1579,19 +1602,19 @@ MIGRATION:
     },
 
     #[command(hide = true)]
-    /// [DEPRECATED] Find all occurrences of a field across the codebase - use 'rs-hack find' instead
-    #[command(after_help = "⚠️  DEPRECATED: Use 'rs-hack find --field-name <FIELD>' instead
+    /// [DEPRECATED] Find all occurrences of a field across the codebase - use 'yah hack find' instead
+    #[command(after_help = "⚠️  DEPRECATED: Use 'yah hack find --field-name <FIELD>' instead
 
 MIGRATION:
-    Old: rs-hack find-field --field-name color
-    New: rs-hack find --field-name color --paths src
+    Old: yah hack find-field --field-name color
+    New: yah hack find --field-name color --paths src
 
 EXAMPLES:
     # Find all occurrences of a field
-    rs-hack find-field --paths src --field-name immediate_mode
+    yah hack find-field --paths src --field-name immediate_mode
 
     # Show summary only (don't list all literal occurrences)
-    rs-hack find-field --paths src --field-name debug_mode --summary
+    yah hack find-field --paths src --field-name debug_mode --summary
 
 WHAT IT DOES:
     This command searches for a field in three places:
@@ -1729,12 +1752,12 @@ enum ArchCommands {
 
 }
 
-/// Subcommands for `rs-hack board` — the hack-board kanban surface.
+/// Subcommands for `yah board` — the hack-board kanban surface.
 ///
 /// Everything here is board-facing: running the UI, installing slash
 /// commands, listing tickets, claiming IDs, writing summaries, and
 /// surfacing the SDLC ruleset. Kept out of the top-level namespace so
-/// that `rs-hack --help` stays focused on refactoring.
+/// that `yah --help` stays focused on refactoring.
 #[derive(Subcommand)]
 enum BoardCommands {
     /// Start the hack-board kanban server
@@ -1777,7 +1800,7 @@ enum BoardCommands {
     /// assumes, cleanup, see-also, child IDs (for parents/epics), and
     /// any duplicate-ID conflicts. Use `--prompt` for the full
     /// continuation-prompt form an agent would consume on pickup
-    /// (equivalent to `rs-hack board tickets --prompt <ID>`). Use
+    /// (equivalent to `yah board tickets --prompt <ID>`). Use
     /// `--format json` for the raw Ticket struct.
     ///
     /// Compound IDs like `R022-T1` are looked up directly.
@@ -1849,8 +1872,8 @@ enum BoardCommands {
     ///
     /// Two forms:
     ///
-    ///   rs-hack board claim --kind <K> --file <F> --title <T>   → create + claim
-    ///   rs-hack board claim <ID>                                → claim existing
+    ///   yah board claim --kind <K> --file <F> --title <T>   → create + claim
+    ///   yah board claim <ID>                                → claim existing
     ///
     /// Creating: scans source for the next free ID under a file lock so two
     /// agents running concurrently can't collide, writes the annotation block
@@ -1948,7 +1971,7 @@ enum BoardCommands {
     ///
     /// This is the "file an issue" verb — it creates the ID and annotation but
     /// leaves the work unassigned. No assignee, no handoff payload. When an
-    /// agent is ready to take it on, they run `rs-hack board claim <ID>` which
+    /// agent is ready to take it on, they run `yah board claim <ID>` which
     /// flips it into Active.
     ///
     /// Accepts the same ID/placement flags as `claim` (kind/file/title/phase/
@@ -2064,7 +2087,7 @@ enum BoardCommands {
     /// Allowed only when the ticket is in `review`, `done`, `handoff`, or
     /// `open`. Refuses `claimed` / `in-progress` (those must transition out
     /// of active first). The snapshot is preserved in the shard, so an
-    /// archived ticket is still inspectable via `rs-hack board show <ID>`
+    /// archived ticket is still inspectable via `yah board show <ID>`
     /// and unarchive-able by re-pasting the annotation block.
     ///
     /// This is the agent-facing path — equivalent to clicking the archive
@@ -2160,7 +2183,7 @@ enum BoardCommands {
     /// Print the hack-board SDLC ruleset (Rule01-Rule12 + Col01 column map).
     ///
     /// The same rules are embedded in every continuation prompt
-    /// (`rs-hack board tickets --prompt <ID>`). Running this command directly
+    /// (`yah board tickets --prompt <ID>`). Running this command directly
     /// is the quickest way for an agent to orient itself on how work flows
     /// through the board.
     Rules {
@@ -2181,7 +2204,7 @@ enum BoardCommands {
     /// archived items are excluded (not in flight). Epics are excluded by
     /// default — they coordinate relays, not carry work (Rule06).
     ///
-    /// Run this before `/refine` or `rs-hack board open --kind relay` so
+    /// Run this before `/refine` or `yah board open --kind relay` so
     /// you notice when someone is already working on the problem you were
     /// about to plan. If you see overlap: claim the existing relay, add
     /// your plan as a sub-ticket under it, or reference it in your own arch
@@ -2209,7 +2232,7 @@ enum BoardCommands {
     /// snapshot for orientation.
     Status {
         /// Optional ticket/relay ID — when given, dispatches to
-        /// `rs-hack board show <ID>` (whole-board status if omitted)
+        /// `yah board show <ID>` (whole-board status if omitted)
         id: Option<String>,
 
         /// Path to workspace root
@@ -2510,7 +2533,7 @@ fn show_target_hints(files: &[PathBuf], name: &str, expected_type: &str, paths: 
         eprintln!("No {} found named \"{}\"", expected_type, name);
         eprintln!();
         eprintln!("Hint: Run 'find' to discover what exists:");
-        eprintln!("  rs-hack find --paths {} --name {}",
+        eprintln!("  yah hack find --paths {} --name {}",
             paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(" "),
             name
         );
@@ -2539,7 +2562,7 @@ fn show_target_hints(files: &[PathBuf], name: &str, expected_type: &str, paths: 
 
         eprintln!();
         eprintln!("To see all matches, run:");
-        eprintln!("  rs-hack find --paths {} --name {}",
+        eprintln!("  yah hack find --paths {} --name {}",
             paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(" "),
             name
         );
@@ -2801,8 +2824,8 @@ fn main() -> Result<()> {
                     anyhow::bail!(
                         "Ambiguous target '{}': found both as a function and as an enum variant.\n\
                          Please disambiguate:\n\
-                         - For function: rs-hack rename --name {} --to {} --paths ... --apply\n\
-                         - For enum variant: rs-hack rename --name <EnumName>::{} --to {} --paths ... --apply\n\
+                         - For function: yah hack rename --name {} --to {} --paths ... --apply\n\
+                         - For enum variant: yah hack rename --name <EnumName>::{} --to {} --paths ... --apply\n\
                          \n\
                          Found in enums: {}",
                         name, name, to, name, to,
@@ -2846,7 +2869,7 @@ fn main() -> Result<()> {
                         anyhow::bail!(
                             "Variant '{}' found in multiple enums: {}\n\
                              Please specify which enum using :: syntax:\n\
-                             rs-hack rename --name <EnumName>::{} --to {} --paths ... --apply",
+                             yah hack rename --name <EnumName>::{} --to {} --paths ... --apply",
                             name, enum_candidates.join(", "), name, to
                         );
                     }
@@ -2855,7 +2878,7 @@ fn main() -> Result<()> {
                     eprintln!("No function or enum variant found named \"{}\"", name);
                     eprintln!();
                     eprintln!("Hint: Run 'find' to discover what exists:");
-                    eprintln!("  rs-hack find --paths {} --name {}",
+                    eprintln!("  yah hack find --paths {} --name {}",
                         paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(" "),
                         name
                     );
@@ -3002,7 +3025,7 @@ fn main() -> Result<()> {
                         if let FieldContext::StructDefinition { struct_name, field_type } = &loc.context {
                             println!("  - {}:{} in struct {} (type: {})",
                                 loc.file_path, loc.line, struct_name, field_type);
-                            println!("    Remove: rs-hack remove --name {} --field-name {} --paths {} --apply",
+                            println!("    Remove: yah hack remove --name {} --field-name {} --paths {} --apply",
                                 struct_name, field, loc.file_path);
                         }
                     }
@@ -3015,7 +3038,7 @@ fn main() -> Result<()> {
                         if let FieldContext::EnumVariantDefinition { enum_name, variant_name, field_type } = &loc.context {
                             println!("  - {}:{} in enum {}::{} (type: {})",
                                 loc.file_path, loc.line, enum_name, variant_name, field_type);
-                            println!("    Remove: rs-hack remove --name {}::{} --field-name {} --paths {} --apply",
+                            println!("    Remove: yah hack remove --name {}::{} --field-name {} --paths {} --apply",
                                 enum_name, variant_name, field, loc.file_path);
                         }
                     }
@@ -3042,7 +3065,7 @@ fn main() -> Result<()> {
                         for loc in locs {
                             println!("    - {}:{}", loc.file_path, loc.line);
                         }
-                        println!("    Remove from literals: rs-hack remove --name {} --field-name {} --literal-only --paths src --apply",
+                        println!("    Remove from literals: yah hack remove --name {} --field-name {} --literal-only --paths src --apply",
                             struct_name, field);
                     }
                     println!();
@@ -3150,7 +3173,7 @@ fn main() -> Result<()> {
 
                     eprintln!();
                     eprintln!("To see all matches, run without --node-type:");
-                    eprintln!("  rs-hack find --paths {} --name {}",
+                    eprintln!("  yah hack find --paths {} --name {}",
                         paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(" "),
                         name.as_ref().unwrap()
                     );
@@ -3199,7 +3222,7 @@ fn main() -> Result<()> {
                     eprintln!("  - In comments or strings");
                     eprintln!("  - Part of a qualified path (e.g., module::{})", search_name);
                     eprintln!();
-                    eprintln!("rs-hack's AST visitor cannot see inside macro expansions.");
+                    eprintln!("yah's AST visitor cannot see inside macro expansions.");
                     eprintln!("Try searching without --name to see all struct literals,");
                     eprintln!("or use --name with a different pattern (e.g., \"*::{}\").", search_name);
 
@@ -3310,7 +3333,7 @@ fn main() -> Result<()> {
 
                                         println!("\nTo find only these:");
                                         for (path, _) in paths.iter().take(3) {
-                                            println!("   rs-hack find --name \"{}\" --node-type struct-literal --paths ...", path);
+                                            println!("   yah hack find --name \"{}\" --node-type struct-literal --paths ...", path);
                                         }
                                         if paths.len() > 3 {
                                             println!("   (and {} more...)", paths.len() - 3);
@@ -3434,7 +3457,7 @@ fn main() -> Result<()> {
                     anyhow::bail!(
                         "Cannot combine --variant with --field-name/--field.\n\n\
                          Hint: To add a field to enum variant struct literals, use:\n  \
-                         rs-hack add --name \"{}::{}\" --field-name <FIELD> --field-value <VALUE> --kind struct --paths <PATHS>\n\n\
+                         yah hack add --name \"{}::{}\" --field-name <FIELD> --field-value <VALUE> --kind struct --paths <PATHS>\n\n\
                          Note: --variant is for adding a NEW variant to an enum, not for adding fields to existing variants.",
                         name.as_deref().unwrap_or("EnumName"),
                         variant.as_deref().unwrap_or("VariantName")
@@ -3786,7 +3809,7 @@ fn main() -> Result<()> {
             } else if let Some(method_name) = method {
                 // Removing impl method
                 // Note: We don't have RemoveImplMethod operation yet, so bail with helpful message
-                anyhow::bail!("Remove impl method is not yet implemented. Use the transform command to comment out methods:\n  rs-hack transform --paths src --node-type impl-method --name {} --action comment --apply", method_name);
+                anyhow::bail!("Remove impl method is not yet implemented. Use the transform command to comment out methods:\n  yah hack transform --paths src --node-type impl-method --name {} --action comment --apply", method_name);
             } else if let Some(derive_macro) = derive {
                 // Removing derive macro
                 // Note: We don't have RemoveDerive operation yet, so bail with helpful message
@@ -4097,14 +4120,14 @@ fn main() -> Result<()> {
                 for loc in &all_struct_defs {
                     if let FieldContext::StructDefinition { struct_name, .. } = &loc.context {
                         println!("  # Remove from struct definition AND all literals");
-                        println!("  rs-hack remove-struct-field --struct-name \"{}\" --field-name \"{}\" --paths src --apply", struct_name, field_name);
+                        println!("  yah hack remove-struct-field --struct-name \"{}\" --field-name \"{}\" --paths src --apply", struct_name, field_name);
                         println!();
                     }
                 }
                 for loc in &all_enum_variants {
                     if let FieldContext::EnumVariantDefinition { enum_name, variant_name, .. } = &loc.context {
                         println!("  # Remove from enum variant definition AND all literals");
-                        println!("  rs-hack remove-struct-field --struct-name \"{}::{}\" --field-name \"{}\" --paths src --apply", enum_name, variant_name, field_name);
+                        println!("  yah hack remove-struct-field --struct-name \"{}::{}\" --field-name \"{}\" --paths src --apply", enum_name, variant_name, field_name);
                         println!();
                     }
                 }
@@ -4263,7 +4286,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                 .unwrap_or_else(|_| path.clone());
 
             // Auto-pick port pair from workspace hash if not explicitly set.
-            // Mirrors the logic in hack-board/src/server.ts so `rs-hack board serve`
+            // Mirrors the logic in hack-board/src/server.ts so `yah board serve`
             // and `bun run src/server.ts` pick the same port for the same workspace.
             let auto_port = {
                 let s = workspace.to_string_lossy();
@@ -4276,7 +4299,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
             let http_port = port.unwrap_or(auto_port);
             let udp = udp_port.unwrap_or(http_port + 1);
 
-            // Find hack-board directory (shipped alongside rs-hack, or in the rs-hack source)
+            // Find hack-board directory (shipped alongside yah, or in the yah source)
             let hack_board_dir = find_hack_board_dir();
 
             match hack_board_dir {
@@ -4316,8 +4339,8 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                 }
                 None => {
                     eprintln!("Could not find hack-board directory.");
-                    eprintln!("Expected at: <rs-hack-source>/hack-board/");
-                    eprintln!("Make sure rs-hack was installed from source with the hack-board directory present.");
+                    eprintln!("Expected at: <yah-source>/hack-board/");
+                    eprintln!("Make sure yah was installed from source with the hack-board directory present.");
                     std::process::exit(1);
                 }
             }
@@ -4369,7 +4392,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
             if !suggestions.is_empty() {
                 eprintln!("Did you mean: {}", suggestions.join(", "));
             }
-            eprintln!("List all live tickets: `rs-hack board tickets`");
+            eprintln!("List all live tickets: `yah board tickets`");
             std::process::exit(1);
         }
 
@@ -4484,7 +4507,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                 if status.is_some() {
                     anyhow::bail!(
                         "`--status` is not valid when claiming an existing ticket; \
-                         use `rs-hack board move {} <column>` instead.",
+                         use `yah board move {} <column>` instead.",
                         existing_id
                     );
                 }
@@ -4501,7 +4524,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                 {
                     anyhow::bail!(
                         "`claim <ID>` only flips status and sets assignee. \
-                         Use `rs-hack board move {} active --handoff '...' --next '...'` \
+                         Use `yah board move {} active --handoff '...' --next '...'` \
                          to attach payload, or edit the annotation directly.",
                         existing_id
                     );
@@ -4526,7 +4549,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                 };
                 if status.is_some() {
                     eprintln!(
-                        "warning: `rs-hack board claim --status` is deprecated. \
+                        "warning: `yah board claim --status` is deprecated. \
                          Use `board open` (open column), bare `board claim` (active), \
                          or `board move <ID> <column>` (transition)."
                     );
@@ -4778,7 +4801,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                     print!("{}", header);
                     print!("{}", sdlc::format_markdown(&selected, false));
                     println!(
-                        "---\n\nFilter by situation: `rs-hack board rules --context pickup|finishing|new-work|archive|refactor`"
+                        "---\n\nFilter by situation: `yah board rules --context pickup|finishing|new-work|archive|refactor`"
                     );
                 }
             }
@@ -4823,7 +4846,7 @@ fn handle_worktrees(cmd: WorktreesCommands) -> Result<()> {
                         println!("# No siblings registered.");
                         println!();
                         println!(
-                            "Add one with: rs-hack board worktrees add <local-path | user@host:path>"
+                            "Add one with: yah board worktrees add <local-path | user@host:path>"
                         );
                     } else {
                         if !reg.siblings.is_empty() {
@@ -4922,7 +4945,7 @@ fn handle_init(path: &Path, force: bool) -> Result<()> {
     }
 
     // CLAUDE.md — append snippet if not already present; replace between
-    // rs-hack markers if --force is set.
+    // yah markers if --force is set.
     let claude_md = root.join("CLAUDE.md");
     let existing = std::fs::read_to_string(&claude_md).unwrap_or_default();
     let has_markers =
@@ -4963,7 +4986,7 @@ fn handle_init(path: &Path, force: bool) -> Result<()> {
     eprintln!();
     eprintln!("Done. {wrote} written, {skipped} skipped.");
     eprintln!();
-    eprintln!("Next: `rs-hack board serve` (auto-picks a port from the workspace path).");
+    eprintln!("Next: `yah board serve` (auto-picks a port from the workspace path).");
     Ok(())
 }
 
@@ -5084,7 +5107,7 @@ fn render_show_markdown(
 
     let _ = writeln!(
         o,
-        "---\n_For the full agent-pickup prompt: `rs-hack board show {} --prompt`_",
+        "---\n_For the full agent-pickup prompt: `yah board show {} --prompt`_",
         t.id
     );
 
@@ -5214,7 +5237,7 @@ fn handle_prompt(name: Option<&str>) -> Result<()> {
 
     match name {
         None => {
-            println!("Available prompts (run `rs-hack board prompt <name>`):");
+            println!("Available prompts (run `yah board prompt <name>`):");
             println!();
             for (n, _, desc) in prompts {
                 println!("  {:<8} — {}", n, desc);
@@ -5239,11 +5262,11 @@ fn handle_prompt(name: Option<&str>) -> Result<()> {
     }
 }
 
-/// Find the hack-board directory relative to the rs-hack binary or source.
+/// Find the hack-board directory relative to the yah binary or source.
 fn find_hack_board_dir() -> Option<PathBuf> {
     // Try relative to the binary (installed via cargo install)
     if let Ok(exe) = std::env::current_exe() {
-        // Binary is at target/release/rs-hack or ~/.cargo/bin/rs-hack
+        // Binary is at target/release/yah or ~/.cargo/bin/yah
         // hack-board would be alongside the source
         let candidates = [
             // Running from cargo run (target/debug/ or target/release/)
@@ -5258,7 +5281,7 @@ fn find_hack_board_dir() -> Option<PathBuf> {
         }
     }
 
-    // Try current directory (if running from rs-hack source)
+    // Try current directory (if running from yah source)
     let cwd = std::env::current_dir().ok()?;
     let cwd_candidate = cwd.join("hack-board");
     if cwd_candidate.join("src/server.ts").exists() {
@@ -5506,7 +5529,7 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
             if schema.is_empty() {
                 eprintln!("No architecture schema found in Cargo.toml");
                 eprintln!("Add [workspace.metadata.arch] section to configure.");
-                eprintln!("Run 'rs-hack arch init' for a template.");
+                eprintln!("Run 'yah arch init' for a template.");
                 return Ok(());
             }
 
@@ -5526,7 +5549,7 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
                     } else {
                         print_arch_init_template();
                         eprintln!("\n# To apply this to your Cargo.toml, run:");
-                        eprintln!("#   rs-hack arch init --apply");
+                        eprintln!("#   yah arch init --apply");
                     }
                 }
                 "example" => print_arch_example_annotations(),
@@ -5539,7 +5562,7 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
     Ok(())
 }
 
-// ── `rs-hack board claim` — atomic next-ID picker + annotation writer ────
+// ── `yah board claim` — atomic next-ID picker + annotation writer ────
 
 struct ClaimArgs {
     path: PathBuf,
@@ -5597,7 +5620,7 @@ impl IdLock {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     if start.elapsed() > std::time::Duration::from_secs(5) {
                         anyhow::bail!(
-                            "Another rs-hack process is holding {}; \
+                            "Another yah process is holding {}; \
                              waited 5s. Delete the lock file if stale.",
                             path.display()
                         );
@@ -5632,13 +5655,13 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
     }
     // Only .rs files are scanned by the extractor today — writing an
     // annotation to a non-Rust file silently drops the ticket off the board.
-    // See @yah:ticket(R001-T2) in rs-hack-arch/src/extract.rs for the tracked
+    // See @yah:ticket(R001-T2) in yah/src/arch/extract.rs for the tracked
     // fix (AnnotationTarget::File + per-language comment prefixes).
     match target.extension().and_then(|e| e.to_str()) {
         Some("rs") => {}
         Some(ext) => anyhow::bail!(
             "board claim only supports .rs files; .{} is not scanned by the extractor \
-             yet (see R001-T2 in rs-hack-arch/src/extract.rs). \
+             yet (see R001-T2 in yah/src/arch/extract.rs). \
              Anchor the ticket on a .rs file (use @arch:see(...) to point at the doc).",
             ext
         ),
@@ -5672,8 +5695,8 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
         anyhow::bail!(
             "{} requires a parent relay.\n\n\
              Pick one:\n  \
-             • Attach to an existing relay:   rs-hack board {} --kind {} --parent R<NNN> --file {} --title '...'\n  \
-             • Create a new relay first:      rs-hack board open --kind relay --file {} --title '...'   # prints the R-id\n\n\
+             • Attach to an existing relay:   yah board {} --kind {} --parent R<NNN> --file {} --title '...'\n  \
+             • Create a new relay first:      yah board open --kind relay --file {} --title '...'   # prints the R-id\n\n\
              Bare {}-numbers (T01/F01/B01) are no longer allocated — they collide with compound sub-ticket numbering and shard routing.",
             kind,
             if args.status.as_deref() == Some("open") { "open" } else { "claim" },
@@ -5829,7 +5852,7 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
     Ok(())
 }
 
-// ── `rs-hack board claim <ID>` — flip an Open ticket into Active ────────
+// ── `yah board claim <ID>` — flip an Open ticket into Active ────────
 
 fn current_agent_id() -> String {
     std::env::var("CLAUDE_AGENT")
@@ -5837,7 +5860,7 @@ fn current_agent_id() -> String {
         .unwrap_or_else(|_| "agent:claude".to_string())
 }
 
-// ── `rs-hack board inflight` — plan-time discovery view (Rule10) ────────────
+// ── `yah board inflight` — plan-time discovery view (Rule10) ────────────
 
 fn handle_inflight(path: &Path, format: &str, include_epics: bool) -> Result<()> {
     use arch::ticket::{TicketBoard, TicketStatus};
@@ -5900,7 +5923,7 @@ fn handle_inflight(path: &Path, format: &str, include_epics: bool) -> Result<()>
             println!("---");
             println!();
             println!(
-                "Scanning for overlap before `/refine` or `rs-hack board open --kind relay` \
+                "Scanning for overlap before `/refine` or `yah board open --kind relay` \
                  (Rule10). If your planned work matches an existing relay's purpose, claim it, \
                  open a sub-ticket under it (`--parent R<n>`), or reference it in your arch doc."
             );
@@ -5989,7 +6012,7 @@ fn handle_claim_existing(id: &str, path: &Path, assignee: &str) -> Result<()> {
 
     if ticket.status != TicketStatus::Open {
         anyhow::bail!(
-            "Ticket '{}' is in status '{}', not 'open'. Use `rs-hack board move {} active` \
+            "Ticket '{}' is in status '{}', not 'open'. Use `yah board move {} active` \
              to transition from handoff, or edit the annotation directly.",
             id,
             ticket_status_str(&ticket.status),
@@ -6033,7 +6056,7 @@ fn handle_claim_existing(id: &str, path: &Path, assignee: &str) -> Result<()> {
     Ok(())
 }
 
-// ── `rs-hack board move` — column transition + payload append ───────────
+// ── `yah board move` — column transition + payload append ───────────
 
 struct MoveArgs {
     id: String,
@@ -6277,7 +6300,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
             if arch::archive::lookup(&workspace, id).is_some() {
                 anyhow::anyhow!(
                     "Ticket '{}' is already archived (snapshot in .yah/events/). \
-                     Run `rs-hack board show {}` to see the last-known state.",
+                     Run `yah board show {}` to see the last-known state.",
                     id, id
                 )
             } else {
@@ -6289,7 +6312,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
     if from_status == "claimed" || from_status == "in-progress" {
         anyhow::bail!(
             "Cannot archive '{}' — ticket is {}. Move it to review or handoff first \
-             (`rs-hack board move {} review`). Archive is for terminal states only.",
+             (`yah board move {} review`). Archive is for terminal states only.",
             id, from_status, id
         );
     }
@@ -6391,7 +6414,7 @@ fn handle_archive(id: &str, path: &PathBuf) -> Result<()> {
         removed.len(),
         shard
     );
-    eprintln!("Inspect later: rs-hack board show {}", ticket.id);
+    eprintln!("Inspect later: yah board show {}", ticket.id);
     println!("{}", ticket.id);
     Ok(())
 }
@@ -6716,7 +6739,7 @@ fn apply_arch_init_template(path: &Path) -> Result<()> {
     // Append the template
     let template = r#"
 # Architecture Knowledge Graph Configuration
-# See: rs-hack arch --help
+# See: yah arch --help
 [workspace.metadata.arch]
 
 # Define architectural layers (customize for your project)
@@ -6753,7 +6776,7 @@ allowed = []
     eprintln!("Next steps:");
     eprintln!("  1. Edit the layers/roles to match your architecture");
     eprintln!("  2. Add @arch: annotations to your source files");
-    eprintln!("  3. Run 'rs-hack arch extract' to build the graph");
+    eprintln!("  3. Run 'yah arch extract' to build the graph");
     Ok(())
 }
 
@@ -6930,28 +6953,28 @@ fn print_operation_hints(op: &Operation) {
                 let enum_name = match_op.enum_name.as_deref().unwrap_or("ENUM");
                 eprintln!("\n💡 Hints for --auto-detect mode:");
                 eprintln!("   • The enum definition must be in the scanned files");
-                eprintln!("   • Try: rs-hack find --node-type enum --name {} --paths .", enum_name);
+                eprintln!("   • Try: yah hack find --node-type enum --name {} --paths .", enum_name);
                 eprintln!("   • If enum is in another crate, try: --paths . --paths ../other_crate/src");
                 eprintln!("   • For external enums, use --match-arm instead (no --auto-detect):");
-                eprintln!("     rs-hack add --match-arm \"{}::Variant\" --body \"todo!()\" --paths src", enum_name);
+                eprintln!("     yah hack add --match-arm \"{}::Variant\" --body \"todo!()\" --paths src", enum_name);
             } else {
                 eprintln!("\n💡 Hints for match arm addition:");
                 eprintln!("   • Make sure match expressions exist in the scanned files");
                 eprintln!("   • Pattern should be like: EnumName::Variant or EnumName::Variant {{ .. }}");
-                eprintln!("   • Try: rs-hack find --node-type match-arm --paths src");
+                eprintln!("   • Try: yah hack find --node-type match-arm --paths src");
             }
         }
         Operation::AddStructField(field_op) => {
             eprintln!("\n💡 Hints:");
-            eprintln!("   • Try: rs-hack find --node-type struct --name {} --paths .", field_op.struct_name);
+            eprintln!("   • Try: yah hack find --node-type struct --name {} --paths .", field_op.struct_name);
         }
         Operation::AddEnumVariant(variant_op) => {
             eprintln!("\n💡 Hints:");
-            eprintln!("   • Try: rs-hack find --node-type enum --name {} --paths .", variant_op.enum_name);
+            eprintln!("   • Try: yah hack find --node-type enum --name {} --paths .", variant_op.enum_name);
         }
         _ => {
             // Generic hint
-            eprintln!("\n💡 Hint: Use rs-hack find to verify targets exist in scanned files");
+            eprintln!("\n💡 Hint: Use yah hack find to verify targets exist in scanned files");
         }
     }
 }
@@ -7101,10 +7124,10 @@ fn execute_operation(
         // Extract the simple name from the first path for the suggestion
         if let Some((first_path, _)) = paths.first() {
             if let Some(simple_name) = first_path.split("::").last() {
-                println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
+                println!("   yah hack ... --name \"*::{}\" ...", simple_name);
                 println!("\nOr match specific paths:");
                 for (path, _) in paths.iter().take(3) {
-                    println!("   rs-hack ... --name \"{}\" ...", path);
+                    println!("   yah hack ... --name \"{}\" ...", path);
                 }
                 if paths.len() > 3 {
                     println!("   (and {} more...)", paths.len() - 3);
@@ -7306,7 +7329,7 @@ fn execute_operation_with_state(
             total_stats.print_summary();
         }
 
-        println!("\n📝 Run ID: {} (use 'rs-hack revert {}' to undo)", run_id, run_id);
+        println!("\n📝 Run ID: {} (use 'yah hack revert {}' to undo)", run_id, run_id);
     } else if !changes_made {
         println!("No changes made - target not found in any files");
         // Show the last error for context
@@ -7338,10 +7361,10 @@ fn execute_operation_with_state(
         // Extract the simple name from the first path for the suggestion
         if let Some((first_path, _)) = paths.first() {
             if let Some(simple_name) = first_path.split("::").last() {
-                println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
+                println!("   yah hack ... --name \"*::{}\" ...", simple_name);
                 println!("\nOr match specific paths:");
                 for (path, _) in paths.iter().take(3) {
-                    println!("   rs-hack ... --name \"{}\" ...", path);
+                    println!("   yah hack ... --name \"{}\" ...", path);
                 }
                 if paths.len() > 3 {
                     println!("   (and {} more...)", paths.len() - 3);
