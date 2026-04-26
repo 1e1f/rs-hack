@@ -1,0 +1,17 @@
+[package]
+name = "yah-kg-rust"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust language indexer for the yah knowledge graph"
+
+[dependencies]
+yah-kg = { path = "../yah-kg" }
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+quote = "1.0"
+
+[dev-dependencies]
+yah-kg-store = { path = "../yah-kg-store" }
