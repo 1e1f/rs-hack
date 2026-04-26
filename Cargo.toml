@@ -4,6 +4,7 @@ members = [
     "yah-kg",
     "yah-kg-store",
     "yah-kg-rust",
+    "yah-kg-ts",
 ]
 resolver = "2"
 

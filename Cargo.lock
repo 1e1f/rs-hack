@@ -713,6 +713,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex"
+version = "1.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1143,6 +1155,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0203df02a3b6dd63575cc1d6e609edc2181c9a11867a271b25cfd2abff3ec5ca"
+dependencies = [
+ "cc",
+ "regex",
+ "regex-syntax",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-language"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-typescript"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1448,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "yah-kg-rust"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1459,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "yah-kg-store"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "petgraph",
  "serde",
@@ -1469,4 +1509,15 @@ dependencies = [
  "walkdir",
  "yah-kg",
  "yah-kg-rust",
+]
+
+[[package]]
+name = "yah-kg-ts"
+version = "0.6.0"
+dependencies = [
+ "tempfile",
+ "tree-sitter",
+ "tree-sitter-typescript",
+ "yah-kg",
+ "yah-kg-store",
 ]
