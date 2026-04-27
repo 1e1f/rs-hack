@@ -153,6 +153,13 @@ impl Store {
         self.nodes.get(&id)
     }
 
+    /// Iterator over every node currently in the store. Order is
+    /// unspecified (HashMap iteration order). Used by the annotation
+    /// applier to find which nodes have docs to scan.
+    pub fn all_node_refs(&self) -> impl Iterator<Item = &NodeRef> {
+        self.nodes.values()
+    }
+
     pub fn node_full(&self, id: NodeId) -> Option<NodeFull> {
         let node = self.nodes.get(&id)?.clone();
         Some(NodeFull {

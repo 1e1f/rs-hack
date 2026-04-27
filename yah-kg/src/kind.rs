@@ -72,6 +72,12 @@ pub enum CommonKind {
     /// Whole-file entity (used by JSON/YAML/Koda where the file IS
     /// the addressable unit).
     Document,
+    /// Synthetic taxonomy node created by the annotation overlay
+    /// (`@yah:tag(...)`). Tag nodes have `synthetic = true`, a fixed
+    /// `file = "<tag>"` sentinel, and a stable id derived from the tag's
+    /// qualified name (e.g. `tag:layer:core`). They participate in the
+    /// graph through `EdgeKind::Tag` edges.
+    Tag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

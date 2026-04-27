@@ -8,6 +8,7 @@
 //! name, file) triple is unchanged. A rename invalidates the id, which is
 //! the correct behaviour: a rename is a remove+add at the graph level.
 
+use crate::anno::AnnotationRef;
 use crate::kind::{Lang, NodeKind};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
@@ -163,9 +164,11 @@ pub struct NodeFull {
     /// Free-form per-kind metadata.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub properties: BTreeMap<String, String>,
-    /// Annotation overlay references (resolved by `rs-hack-arch`).
+    /// Annotation overlay attached to this node by `yah-kg-anno`. Each
+    /// `AnnotationRef` is anchored back at the source line it came from
+    /// so tooling can point authors at the offending comment.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub annotations: Vec<String>,
+    pub annotations: Vec<AnnotationRef>,
 }
 
 #[cfg(test)]

@@ -1570,6 +1570,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "yah-kg-anno"
+version = "0.6.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 1.0.69",
+ "yah-kg",
+ "yah-kg-rust",
+ "yah-kg-store",
+ "yah-kg-ts",
+]
+
+[[package]]
 name = "yah-kg-daemon"
 version = "0.6.0"
 dependencies = [
@@ -1579,6 +1592,7 @@ dependencies = [
  "tokio",
  "tracing",
  "yah-kg",
+ "yah-kg-anno",
  "yah-kg-rust",
  "yah-kg-store",
  "yah-kg-ts",
