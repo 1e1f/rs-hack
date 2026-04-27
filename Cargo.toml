@@ -5,6 +5,7 @@ members = [
     "yah-kg-store",
     "yah-kg-rust",
     "yah-kg-ts",
+    "yah-kg-daemon",
 ]
 resolver = "2"
 

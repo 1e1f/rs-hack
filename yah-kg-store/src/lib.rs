@@ -24,4 +24,4 @@ pub mod walker;
 
 pub use sink::StoreSink;
 pub use store::{Store, StoreError};
-pub use walker::{walk_and_index, IndexerRegistry, WalkSummary};
+pub use walker::{reindex_file, walk_and_index, FileDelta, IndexerRegistry, WalkSummary};

@@ -1,0 +1,22 @@
+[package]
+name = "yah-kg-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime composition of the yah knowledge-graph: store + watcher + event bus, exposing the arch.* surface as in-process Rust calls"
+
+[dependencies]
+yah-kg = { path = "../yah-kg" }
+yah-kg-store = { path = "../yah-kg-store" }
+notify = "8.2"
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
+thiserror = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+yah-kg-rust = { path = "../yah-kg-rust" }
+yah-kg-ts = { path = "../yah-kg-ts" }
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time", "test-util"] }
