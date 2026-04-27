@@ -1,21 +1,28 @@
-//! @arch:layer(kg)
+//! @arch:layer(kg_store)
 //! @arch:role(graph)
 //!
 //! Directory walker that drives a registry of `LanguageIndexer`s.
 //!
-//! This is the daemon's Pass 1: walk the rig, emit `Directory` and `File`
-//! nodes with `Contains` edges, then dispatch each file to the matching
-//! indexer for Pass 2 (in-file structure). Indexers are pure; the walker
-//! owns the file I/O.
+//! Pass 1: walk the rig, emit `Directory` and `File` nodes with `Contains`
+//! edges; Pass 2: dispatch each file to the matching indexer for in-file
+//! structure. Indexers are pure; the walker owns the file I/O.
+//!
+//! Also exposes [`reindex_file`] for the daemon's incremental update path:
+//! snapshots a file's nodes, removes them, re-runs the walker on that one
+//! file, and returns a [`FileDelta`] describing what changed so the daemon
+//! can fan out `ArchEvent`s on its broadcast channel.
 
 use crate::sink::StoreSink;
 use crate::store::Store;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use yah_kg::edge::{EdgeId, EdgeKind, EdgeOut};
+use yah_kg::event::ChangedField;
 use yah_kg::ids::{NodeId, NodeRef, Span};
 use yah_kg::indexer::{IndexError, LanguageIndexer};
 use yah_kg::kind::{CommonKind, Lang, NodeKind};
+use yah_kg::rpc::Direction;
 
 /// Maps file extensions to the indexer that should handle them.
 pub struct IndexerRegistry {
@@ -61,6 +68,27 @@ pub struct WalkSummary {
     pub parse_errors: u32,
 }
 
+/// Result of an incremental single-file reindex. Field meanings match the
+/// `ArchEvent` payloads the daemon will emit for each.
+#[derive(Debug, Default, Clone)]
+pub struct FileDelta {
+    pub nodes_added: Vec<NodeRef>,
+    pub nodes_removed: Vec<NodeId>,
+    pub nodes_changed: Vec<(NodeId, Vec<ChangedField>)>,
+    pub edges_added: Vec<EdgeOut>,
+    pub edges_removed: Vec<EdgeId>,
+}
+
+impl FileDelta {
+    pub fn is_empty(&self) -> bool {
+        self.nodes_added.is_empty()
+            && self.nodes_removed.is_empty()
+            && self.nodes_changed.is_empty()
+            && self.edges_added.is_empty()
+            && self.edges_removed.is_empty()
+    }
+}
+
 /// Walk `root`, emit Directory/File nodes + Contains edges, dispatch each
 /// recognized file to its indexer. Symlinks are not followed; hidden
 /// directories (leading `.`) and `target/` are skipped.
@@ -94,35 +122,191 @@ pub fn walk_and_index(
         }
         summary.files_seen += 1;
 
-        let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
-            summary.files_skipped += 1;
-            continue;
-        };
-        let Some(indexer) = registry.for_extension(ext) else {
-            summary.files_skipped += 1;
-            continue;
-        };
-
-        let file_node = push_file(&rel, indexer.lang(), path, &root_canon, store);
-
-        let src = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(IndexError::Io(format!("{}: {}", path.display(), e)));
-            }
-        };
-
-        let mut sink = StoreSink::new(store);
-        match indexer.index_file(Path::new(&rel), &src, &mut sink) {
-            Ok(()) => summary.files_indexed += 1,
-            Err(_) => summary.parse_errors += 1,
+        match index_one_file(&rel, path, &root_canon, store, registry)? {
+            FileOutcome::Indexed => summary.files_indexed += 1,
+            FileOutcome::Skipped => summary.files_skipped += 1,
+            FileOutcome::ParseError => summary.parse_errors += 1,
         }
-
-        // Best-effort: link file → top-level items the indexer just produced
-        // is the indexer's job, not ours. We don't synthesize Contains here.
-        let _ = file_node;
     }
     Ok(summary)
+}
+
+/// Incremental reindex of one file at `file_rel` (relative to `rig_root`).
+///
+/// 1. Snapshots the before-state for the file (nodes + incident edges).
+/// 2. Removes those nodes (the store auto-cleans incident edges).
+/// 3. Re-runs the walker for that single file, restoring the parent
+///    directory chain and re-dispatching to the language indexer.
+/// 4. Diffs before/after and returns a [`FileDelta`].
+///
+/// If the file is missing from disk, the function still wipes the
+/// before-state and returns a delta with `nodes_removed` populated — that
+/// covers the file-deleted case.
+pub fn reindex_file(
+    rig_root: &Path,
+    file_rel: &str,
+    store: &mut Store,
+    registry: &IndexerRegistry,
+) -> Result<FileDelta, IndexError> {
+    let rig_canon = rig_root
+        .canonicalize()
+        .unwrap_or_else(|_| rig_root.to_path_buf());
+    let abs = rig_canon.join(file_rel);
+
+    // 1. Snapshot before-state.
+    let before_nodes: HashMap<NodeId, NodeRef> = store
+        .lookup(file_rel, None)
+        .into_iter()
+        .filter_map(|id| store.node_ref(id).map(|n| (id, n.clone())))
+        .collect();
+    let mut before_edges: HashMap<EdgeId, EdgeOut> = HashMap::new();
+    for id in before_nodes.keys() {
+        for e in store.neighbors(*id, Direction::Both, None) {
+            before_edges.insert(e.id, e);
+        }
+    }
+
+    // 2. Remove the file's nodes.
+    for id in before_nodes.keys() {
+        store.remove_node(*id);
+    }
+
+    // 3. Re-emit if the file still exists.
+    if abs.is_file() {
+        ensure_directory_chain(file_rel, &rig_canon, store);
+        let _ = index_one_file(file_rel, &abs, &rig_canon, store, registry)?;
+    }
+
+    // 4. Snapshot after-state and diff.
+    let after_nodes: HashMap<NodeId, NodeRef> = store
+        .lookup(file_rel, None)
+        .into_iter()
+        .filter_map(|id| store.node_ref(id).map(|n| (id, n.clone())))
+        .collect();
+    let mut after_edges: HashMap<EdgeId, EdgeOut> = HashMap::new();
+    for id in after_nodes.keys() {
+        for e in store.neighbors(*id, Direction::Both, None) {
+            after_edges.insert(e.id, e);
+        }
+    }
+
+    Ok(diff(&before_nodes, &after_nodes, &before_edges, &after_edges))
+}
+
+fn diff(
+    before_nodes: &HashMap<NodeId, NodeRef>,
+    after_nodes: &HashMap<NodeId, NodeRef>,
+    before_edges: &HashMap<EdgeId, EdgeOut>,
+    after_edges: &HashMap<EdgeId, EdgeOut>,
+) -> FileDelta {
+    let mut delta = FileDelta::default();
+
+    for (id, after) in after_nodes {
+        match before_nodes.get(id) {
+            None => delta.nodes_added.push(after.clone()),
+            Some(before) => {
+                let fields = changed_fields(before, after);
+                if !fields.is_empty() {
+                    delta.nodes_changed.push((*id, fields));
+                }
+            }
+        }
+    }
+    for id in before_nodes.keys() {
+        if !after_nodes.contains_key(id) {
+            delta.nodes_removed.push(*id);
+        }
+    }
+
+    for (id, edge) in after_edges {
+        if !before_edges.contains_key(id) {
+            delta.edges_added.push(edge.clone());
+        }
+    }
+    let after_ids: HashSet<EdgeId> = after_edges.keys().copied().collect();
+    for id in before_edges.keys() {
+        if !after_ids.contains(id) {
+            delta.edges_removed.push(*id);
+        }
+    }
+    delta
+}
+
+fn changed_fields(before: &NodeRef, after: &NodeRef) -> Vec<ChangedField> {
+    let mut fields = Vec::new();
+    if before.span != after.span {
+        fields.push(ChangedField::Span);
+    }
+    if before.label != after.label {
+        fields.push(ChangedField::Label);
+    }
+    if before.qualified != after.qualified {
+        fields.push(ChangedField::Qualified);
+    }
+    if before.file != after.file {
+        fields.push(ChangedField::File);
+    }
+    fields
+}
+
+enum FileOutcome {
+    Indexed,
+    Skipped,
+    ParseError,
+}
+
+fn index_one_file(
+    rel: &str,
+    abs: &Path,
+    root: &Path,
+    store: &mut Store,
+    registry: &IndexerRegistry,
+) -> Result<FileOutcome, IndexError> {
+    let Some(ext) = abs.extension().and_then(|s| s.to_str()) else {
+        return Ok(FileOutcome::Skipped);
+    };
+    let Some(indexer) = registry.for_extension(ext) else {
+        return Ok(FileOutcome::Skipped);
+    };
+
+    let _ = push_file(rel, indexer.lang(), abs, root, store);
+
+    let src = std::fs::read_to_string(abs)
+        .map_err(|e| IndexError::Io(format!("{}: {}", abs.display(), e)))?;
+
+    let mut sink = StoreSink::new(store);
+    match indexer.index_file(Path::new(rel), &src, &mut sink) {
+        Ok(()) => Ok(FileOutcome::Indexed),
+        Err(_) => Ok(FileOutcome::ParseError),
+    }
+}
+
+/// Walk up `file_rel`'s ancestor chain and re-emit any missing Directory
+/// nodes (idempotent — already-present nodes dedupe). Used by
+/// [`reindex_file`] to restore the parent edge after wiping the file's
+/// nodes.
+fn ensure_directory_chain(file_rel: &str, root: &Path, store: &mut Store) {
+    // Walk every ancestor of file_rel under root, emitting upward.
+    let mut parts: Vec<&str> = file_rel.split('/').collect();
+    parts.pop(); // drop the file basename
+    let mut acc = PathBuf::new();
+    let mut acc_rel = String::new();
+    push_root_directory(root, store);
+    for part in parts {
+        if !acc_rel.is_empty() {
+            acc_rel.push('/');
+        }
+        acc_rel.push_str(part);
+        acc.push(part);
+        let abs = root.join(&acc);
+        if abs.is_dir() {
+            push_directory(&acc_rel, &abs, root, store);
+        }
+    }
+}
+
+fn push_root_directory(root: &Path, store: &mut Store) {
+    push_directory("", root, root, store);
 }
 
 fn is_skipped(path: &Path, root: &Path) -> bool {
