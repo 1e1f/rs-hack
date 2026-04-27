@@ -7,8 +7,8 @@
 //! @yah:handoff("P1+P2+P3 landed. AnnotationTarget::File { path, anchor } variant added; line_extract walks ts/tsx/js/jsx/md/toml/yaml with per-language comment-prefix tables (TS: //, //!, ///, /**, /*, *; MD: empty prefix with code-fence skipping; TOML/YAML: #). Block grouping mirrors Rust's per-doc-block: contiguous comment-prefixed (or non-blank for MD) lines share an anchor. Wired into extract_from_workspace via extension dispatch. Tests: 10 new integration tests in rs-hack-arch/tests/non_rust_extract.rs (TS module block, // and /** */, MD with/without code fences, TOML/YAML, blank-line block break, File target id format, @arch on MD). Smoke verified: rs-hack board status / show R002-T1 surfaces with source ./hack-board/src/server.ts:1. P3 archive endpoint: hack-board/src/server.ts::stripHackAnnotations now dispatches via annotationStripRulesFor(filePath) — covers .rs/.ts/.tsx/.js/.jsx/.md/.toml/.yaml/.yml. Validated all rules with an inline bun smoke test (15/15 pass). Drive-by: dogfood test_hack_tickets_from_workspace was asserting on archived R001 — rewrote to bind to lex-first live ticket so it survives ID turnover.")
 //! @yah:cleanup("setHackStatus (drag-and-drop column move) at hack-board/src/server.ts:889 still uses Rust-only //! / /// regexes — TS/MD tickets will silently no-op when dragged between columns. Same per-extension dispatch pattern as stripHackAnnotations applies; refactor both to share annotationStripRulesFor.")
 //! @yah:cleanup("compute_workspace_hash now hashes non-Rust files too, so cached-graph invalidation should be correct — but no test covers that.")
-//! @yah:verify("cargo test -p rs-hack-arch")
-//! @yah:verify("rs-hack board show R002-T1 — surfaces with source ./hack-board/src/server.ts:1")
+//! @yah:verify("cargo test -p yah")
+//! @yah:verify("yah board show R002-T1 — surfaces with source ./hack-board/src/server.ts:1")
 //! @yah:verify("Smoke archive: bun run hack-board/src/server.ts in a test workspace, drag a .ts ticket to Review, click archive — should strip @yah: lines from the .ts file and append an `archived` event to .yah/events/<shard>.jsonl")
 //! @arch:see(architecture/ts-annotation-scanning.md)
 //!
@@ -600,9 +600,9 @@ mod tests {
         // because every `/` became `::`. The rightmost-boundary slice fixes it.
         assert_eq!(
             file_path_to_module(Path::new(
-                "/Users/leif/ss/rs-hack/rs-hack-arch/src/mcp.rs"
+                "/Users/leif/ss/yah/yah/src/arch/mcp.rs"
             )),
-            "mcp"
+            "arch::mcp"
         );
         assert_eq!(
             file_path_to_module(Path::new(

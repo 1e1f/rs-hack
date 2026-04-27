@@ -449,8 +449,8 @@ which a formal spec should either ratify or replace:
   watcher + event log replay.
 - UI: [`src/app.tsx`](src/app.tsx) — React frontend, built to
   `public/dist/app.js` via `bun build`.
-- Annotation parser + board model: [`../rs-hack-arch/src/ticket.rs`](../rs-hack-arch/src/ticket.rs).
-- `claim` command: [`../rs-hack/src/main.rs`](../rs-hack/src/main.rs)
+- Annotation parser + board model: [`../yah/src/arch/ticket.rs`](../yah/src/arch/ticket.rs).
+- `claim` command: [`../yah/src/main.rs`](../yah/src/main.rs)
   (search for `handle_claim` / `IdLock`).
-- Slash command templates: [`../templates/commands/`](../templates/commands/).
-- CLAUDE.md snippet: [`../templates/claude-md-hackboard.md`](../templates/claude-md-hackboard.md).
+- Slash command templates: [`../yah/templates/commands/`](../yah/templates/commands/).
+- CLAUDE.md snippet: [`../yah/templates/claude-md-hackboard.md`](../yah/templates/claude-md-hackboard.md).

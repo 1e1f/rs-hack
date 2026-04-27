@@ -1,22 +1,20 @@
+import { Icon } from "../shared/Glyph";
+import { SectionHeader } from "../shared/SectionHeader";
 import type { Session } from "../../types";
 
-interface SessionListProps {
-  sessions: {
-    relayId: string;
-    title: string;
-    status: Session["status"];
-    lastActive: number;
-    model: string;
-  }[];
-  activeRelayId: string | null;
+export interface SessionRow {
+  relayId: string;
+  title: string;
+  status: Session["status"];
+  lastActive: number;
+  model: string;
 }
 
-const STATUS_COLOR: Record<Session["status"], string> = {
-  streaming: "bg-blue pulse-dot",
-  waiting: "bg-yellow",
-  idle: "bg-text-muted",
-  error: "bg-red",
-};
+interface SessionListProps {
+  sessions: SessionRow[];
+  activeRelayId: string | null;
+  onSelect?: (relayId: string) => void;
+}
 
 function relativeTime(t: number): string {
   const diff = Date.now() - t;
@@ -29,48 +27,63 @@ function relativeTime(t: number): string {
   return `${d}d ago`;
 }
 
-export function SessionList({ sessions, activeRelayId }: SessionListProps) {
+export function SessionList({
+  sessions,
+  activeRelayId,
+  onSelect,
+}: SessionListProps) {
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col border-r border-border bg-surface">
-      <header className="flex h-9 items-center justify-between border-b border-border px-3">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          Sessions
-        </span>
-        <button
-          className="text-[11px] text-text-muted hover:text-text-dim"
-          title="New session"
-        >
-          +
-        </button>
-      </header>
-      <div className="flex-1 overflow-y-auto">
+    <aside className="flex w-[260px] shrink-0 flex-col border-r border-rule/60 bg-paper-2/50">
+      <div className="border-b border-rule/60 px-3.5 pt-3 pb-1.5">
+        <SectionHeader>Sessions</SectionHeader>
+        <label className="mt-1 flex items-center gap-1.5 rounded border border-rule/50 bg-vellum/60 px-2 py-1 focus-within:border-accent/60">
+          <Icon name="search" size={12} className="text-ink-3" />
+          <input
+            placeholder="filter sessions…"
+            className="flex-1 bg-transparent text-[12px] text-ink placeholder:text-ink-4 focus:outline-none"
+          />
+        </label>
+      </div>
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
         {sessions.map((s) => {
           const isActive = s.relayId === activeRelayId;
+          const streaming = s.status === "streaming";
           return (
             <button
               key={s.relayId}
-              className={`flex w-full flex-col gap-1 border-b border-border/50 px-3 py-2 text-left hover:bg-elevated ${
-                isActive ? "bg-elevated" : ""
+              onClick={() => onSelect?.(s.relayId)}
+              className={`flex flex-col rounded border px-2.5 py-2 text-left transition-colors ${
+                isActive
+                  ? "border-accent/70 bg-vellum shadow-[0_0_0_1px_color-mix(in_oklab,_var(--color-accent)_25%,_transparent)]"
+                  : "border-rule/50 bg-vellum/70 hover:border-rule"
               }`}
             >
-              <div className="flex items-center gap-2">
+              <div className="mb-0.5 flex items-center gap-1.5">
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${STATUS_COLOR[s.status]}`}
+                  className={`h-[7px] w-[7px] shrink-0 rounded-full ${
+                    streaming ? "bg-accent candle" : "bg-ink-4"
+                  }`}
                 />
-                <span className="font-mono text-[11px] text-text-dim">
+                <span className="font-mono text-[10.5px] text-ink-3">
                   {s.relayId}
                 </span>
-                <span className="ml-auto text-[10px] text-text-muted">
+                <span className="ml-auto text-[10.5px] text-ink-3">
                   {relativeTime(s.lastActive)}
                 </span>
               </div>
-              <div className="truncate text-[12px] text-text">{s.title}</div>
-              <div className="font-mono text-[10px] text-text-muted">
+              <div className="mb-0.5 truncate font-display text-[13px] leading-snug text-ink">
+                {s.title}
+              </div>
+              <div className="truncate font-mono text-[10.5px] text-ink-4">
                 {s.model}
               </div>
             </button>
           );
         })}
+        <button className="mt-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-display text-[12px] italic text-ink-3 hover:bg-vellum/60">
+          <Icon name="plus" size={11} />
+          start session on selected relay
+        </button>
       </div>
     </aside>
   );

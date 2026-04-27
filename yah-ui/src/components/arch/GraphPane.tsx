@@ -1,27 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import mermaid from "mermaid";
 import type { ArchEdge, ArchNode, ArchSubgraph, EdgeKind } from "../../types";
+import { NodeHoverCard } from "./NodeHoverCard";
+import { NodeActionMenu } from "./NodeActionMenu";
 
-mermaid.initialize({
-  startOnLoad: false,
-  theme: "base",
-  themeVariables: {
-    background: "var(--color-paper)",
-    primaryColor: "var(--color-vellum)",
-    primaryTextColor: "var(--color-ink)",
-    primaryBorderColor: "var(--color-rule)",
-    lineColor: "var(--color-ink-3)",
-    secondaryColor: "var(--color-paper-2)",
-    tertiaryColor: "var(--color-paper-3)",
-    fontFamily: "var(--font-display), serif",
-    fontSize: "12px",
-  },
-  flowchart: {
-    htmlLabels: true,
-    curve: "basis",
-  },
-  securityLevel: "loose",
-});
+/* Mermaid's color parser doesn't resolve `var(...)`, so theme values have to
+   be literal strings. Resolve from the live computed style each render so a
+   theme flip on [data-theme] re-themes the graph. */
+function cssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return v || fallback;
+}
+
+function initMermaid() {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "base",
+    themeVariables: {
+      background: cssVar("--color-paper", "#f5efe1"),
+      primaryColor: cssVar("--color-vellum", "#ede4cf"),
+      primaryTextColor: cssVar("--color-ink", "#2a1f12"),
+      primaryBorderColor: cssVar("--color-rule", "#b7a98a"),
+      lineColor: cssVar("--color-ink-3", "#6b5a3e"),
+      secondaryColor: cssVar("--color-paper-2", "#ebe2ca"),
+      tertiaryColor: cssVar("--color-paper-3", "#e2d8bd"),
+      fontFamily: "Charter, Georgia, serif",
+      fontSize: "12px",
+    },
+    flowchart: {
+      htmlLabels: true,
+      curve: "basis",
+    },
+    securityLevel: "loose",
+  });
+}
 
 const ARROW: Record<EdgeKind, string> = {
   depends_on: "-->",
@@ -32,23 +47,38 @@ const ARROW: Record<EdgeKind, string> = {
   implements: "-.->|impl|",
 };
 
-const EDGE_HUE: Record<EdgeKind, string> = {
-  depends_on: "var(--color-ink-3)",
-  message_flow: "var(--color-midnight)",
-  data_flow: "var(--color-forest)",
-  bridge: "var(--color-oxblood)",
-  context: "var(--color-brass)",
-  implements: "var(--color-plum)",
-};
+interface Palette {
+  vellum: string;
+  ink: string;
+  edgeHue: Record<EdgeKind, string>;
+  layerHue: Record<string, string>;
+}
 
-const LAYER_HUES: Record<string, string> = {
-  audio: "var(--color-midnight)",
-  dispatch: "var(--color-brass)",
-  io: "var(--color-forest)",
-  state: "var(--color-plum)",
-  core: "var(--color-oxblood)",
-  view: "var(--color-midnight)",
-};
+/* Resolve all CSS vars to literal strings before they hit mermaid's parser
+   (it rejects `var(...)` in classDef / linkStyle). Called per-render so a
+   theme flip on [data-theme] picks up the new palette. */
+function buildPalette(): Palette {
+  return {
+    vellum: cssVar("--color-vellum", "#ede4cf"),
+    ink: cssVar("--color-ink", "#2a1f12"),
+    edgeHue: {
+      depends_on: cssVar("--color-ink-3", "#6b5a3e"),
+      message_flow: cssVar("--color-midnight", "#1f3a5f"),
+      data_flow: cssVar("--color-forest", "#2f5b3a"),
+      bridge: cssVar("--color-oxblood", "#7a2a2a"),
+      context: cssVar("--color-brass", "#9c7a2a"),
+      implements: cssVar("--color-plum", "#5a2f5b"),
+    },
+    layerHue: {
+      audio: cssVar("--color-midnight", "#1f3a5f"),
+      dispatch: cssVar("--color-brass", "#9c7a2a"),
+      io: cssVar("--color-forest", "#2f5b3a"),
+      state: cssVar("--color-plum", "#5a2f5b"),
+      core: cssVar("--color-oxblood", "#7a2a2a"),
+      view: cssVar("--color-midnight", "#1f3a5f"),
+    },
+  };
+}
 
 function escapeHtml(s: string): string {
   return s
@@ -65,16 +95,20 @@ function nodeLabel(n: ArchNode): string {
   )}</span>${role ? `<span class='arch-node-role'>${escapeHtml(role)}</span>` : ""}</div>`;
 }
 
-function layerClassName(layer: string | undefined): string {
-  return layer && LAYER_HUES[layer] ? layer : "core";
+function layerClassName(layer: string | undefined, layerHue: Record<string, string>): string {
+  return layer && layerHue[layer] ? layer : "core";
 }
 
-function buildSource(graph: ArchSubgraph, enabled: Set<EdgeKind>): string {
+function buildSource(
+  graph: ArchSubgraph,
+  enabled: Set<EdgeKind>,
+  palette: Palette,
+): string {
   const lines: string[] = ["graph LR"];
 
   const byLayer = new Map<string, ArchNode[]>();
   for (const n of graph.nodes) {
-    const k = layerClassName(n.layer);
+    const k = layerClassName(n.layer, palette.layerHue);
     const arr = byLayer.get(k) ?? [];
     arr.push(n);
     byLayer.set(k, arr);
@@ -93,17 +127,17 @@ function buildSource(graph: ArchSubgraph, enabled: Set<EdgeKind>): string {
     lines.push(`  ${e.from} ${ARROW[e.kind]} ${e.to}`);
   });
 
-  for (const [layer, hue] of Object.entries(LAYER_HUES)) {
+  for (const [layer, hue] of Object.entries(palette.layerHue)) {
     lines.push(
-      `  classDef ${layer} fill:var(--color-vellum),stroke:${hue},stroke-width:1.4px,color:var(--color-ink);`,
+      `  classDef ${layer} fill:${palette.vellum},stroke:${hue},stroke-width:1.4px,color:${palette.ink};`,
     );
   }
   for (const n of graph.nodes) {
-    lines.push(`  class ${n.id} ${layerClassName(n.layer)};`);
+    lines.push(`  class ${n.id} ${layerClassName(n.layer, palette.layerHue)};`);
   }
 
   filtered.forEach((e, i) => {
-    lines.push(`  linkStyle ${i} stroke:${EDGE_HUE[e.kind]},stroke-width:1.4px;`);
+    lines.push(`  linkStyle ${i} stroke:${palette.edgeHue[e.kind]},stroke-width:1.4px;`);
   });
 
   return lines.join("\n");
@@ -113,24 +147,48 @@ interface GraphPaneProps {
   subgraph: ArchSubgraph;
   depth: number;
   enabledKinds: Set<EdgeKind>;
-  onNodeClick?: (nodeId: string) => void;
+  onReroot?: (nodeId: string) => void;
+  onJumpToFile?: (fileColon: string) => void;
+  onOpenInAgent?: (nodeId: string) => void;
   onNodeHover?: (nodeId: string | null) => void;
   onPinView?: () => void;
+}
+
+interface ActionMenuState {
+  node: ArchNode;
+  x: number;
+  y: number;
 }
 
 export function GraphPane({
   subgraph,
   enabledKinds,
-  onNodeClick,
+  onReroot,
+  onJumpToFile,
+  onOpenInAgent,
   onNodeHover,
   onPinView,
 }: GraphPaneProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [menu, setMenu] = useState<ActionMenuState | null>(null);
+  /* Bumped by a MutationObserver on [data-theme] so re-themes re-render. */
+  const [themeTick, setThemeTick] = useState(0);
+
+  useEffect(() => {
+    const obs = new MutationObserver(() => setThemeTick((t) => t + 1));
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const source = buildSource(subgraph, enabledKinds);
+    initMermaid();
+    const palette = buildPalette();
+    const source = buildSource(subgraph, enabledKinds, palette);
     const id = `arch-${Date.now()}`;
     mermaid
       .render(id, source)
@@ -162,7 +220,9 @@ export function GraphPane({
           node.style.cursor = "pointer";
           node.addEventListener("click", (ev) => {
             ev.stopPropagation();
-            onNodeClick?.(nodeId);
+            const archNode = subgraph.nodes.find((n) => n.id === nodeId);
+            if (!archNode) return;
+            setMenu({ node: archNode, x: ev.clientX, y: ev.clientY });
           });
           node.addEventListener("mouseenter", () => {
             setHovered(nodeId);
@@ -182,9 +242,9 @@ export function GraphPane({
     return () => {
       cancelled = true;
     };
-  }, [subgraph, enabledKinds, onNodeClick, onNodeHover]);
+  }, [subgraph, enabledKinds, onNodeHover, themeTick]);
 
-  const hoveredNode = subgraph.nodes.find((n) => n.id === hovered);
+  const hoveredNode = subgraph.nodes.find((n) => n.id === hovered) ?? null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col">
@@ -215,25 +275,17 @@ export function GraphPane({
       >
         <div ref={ref} className="flex justify-center p-6" />
       </div>
-      {hoveredNode && (
-        <aside className="absolute right-3 top-12 w-[280px] rounded border border-rule bg-vellum p-3 shadow-lg">
-          <div className="font-mono text-[11px] text-ink">
-            {hoveredNode.shortName}
-          </div>
-          {hoveredNode.layer && (
-            <div className="mt-1 text-[10px] text-ink-4">
-              layer: {hoveredNode.layer}
-            </div>
-          )}
-          {hoveredNode.doc && (
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
-              {hoveredNode.doc}
-            </p>
-          )}
-          <div className="mt-2 font-mono text-[10px] text-ink-4">
-            {hoveredNode.file}:{hoveredNode.line}
-          </div>
-        </aside>
+      <NodeHoverCard node={menu ? null : hoveredNode} />
+      {menu && (
+        <NodeActionMenu
+          node={menu.node}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          onJumpToSource={(n) => onJumpToFile?.(`${n.file}:${n.line}`)}
+          onReroot={(n) => onReroot?.(n.id)}
+          onOpenInAgent={(n) => onOpenInAgent?.(n.id)}
+        />
       )}
     </div>
   );

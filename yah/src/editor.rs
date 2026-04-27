@@ -4,7 +4,7 @@
 //! @arch:role(emit)
 //! @arch:note(Central engine: parses source, applies operations, emits modified code)
 //!
-//! The RustEditor is the core engine of rs-hack. It parses Rust source
+//! The RustEditor is the core engine of yah. It parses Rust source
 //! into a syn AST, applies refactoring operations (add/remove/rename/update),
 //! and emits modified code via surgical edits or prettyplease reformatting.
 
@@ -388,7 +388,7 @@ impl RustEditor {
             anyhow::bail!(
                 "Cannot update field in enum variant definition '{}'.\n\
                  To update fields in enum variant struct literals, use the transform command:\n\
-                 rs-hack transform --node-type struct-literal --name {} --action replace --with <new_pattern> --paths ... --apply",
+                 yah hack transform --node-type struct-literal --name {} --action replace --with <new_pattern> --paths ... --apply",
                 op.struct_name, op.struct_name
             );
         }

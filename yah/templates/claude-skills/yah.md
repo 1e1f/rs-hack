@@ -1,21 +1,21 @@
-# rs-hack: Claude Code Skill
+# yah: Claude Code Skill
 
-This skill teaches Claude Code how to use rs-hack for Rust refactoring.
+This skill teaches Claude Code how to use yah (formerly yah) for Rust refactoring.
 
-**Installation:** Copy this file to `.claude/skills/rs-hack.md` in your Rust project.
+**Installation:** Copy this file to `.claude/skills/yah.md` in your Rust project.
 
 ```bash
 mkdir -p .claude/skills
-curl -o .claude/skills/rs-hack.md \
-  https://raw.githubusercontent.com/1e1f/rs-hack/main/templates/claude-skills/rs-hack.md
+curl -o .claude/skills/yah.md \
+  https://raw.githubusercontent.com/1e1f/yah/main/templates/claude-skills/yah.md
 ```
 
-> **For Humans:** See [HUMAN.md](https://github.com/1e1f/rs-hack/blob/main/HUMAN.md)
-> **For Complete Docs:** See [README.md](https://github.com/1e1f/rs-hack/blob/main/README.md)
+> **For Humans:** See [HUMAN.md](https://github.com/1e1f/yah/blob/main/HUMAN.md)
+> **For Complete Docs:** See [README.md](https://github.com/1e1f/yah/blob/main/README.md)
 
 ---
 
-Use rs-hack for all Rust code transformations. It's type-safe and AST-aware—never use sed/awk/perl for Rust code.
+Use yah for all Rust code transformations. It's type-safe and AST-aware—never use sed/awk/perl for Rust code.
 
 ## Core Philosophy
 
@@ -24,7 +24,7 @@ Use rs-hack for all Rust code transformations. It's type-safe and AST-aware—ne
 2. Run command without `--apply` to see diff (or use `--format diff`)
 3. Apply changes with `--apply`
 4. Check with `cargo check` or `cargo test`
-5. Revert if needed: `rs-hack revert <run-id>`
+5. Revert if needed: `yah hack revert <run-id>`
 
 ## Command Patterns
 
@@ -34,24 +34,24 @@ Perfect for large-scale refactoring across many files:
 
 ```bash
 # Step 1: Check what exists
-rs-hack find --paths "src/**/*.rs" --node-type enum-usage \
+yah hack find --paths "src/**/*.rs" --node-type enum-usage \
   --name "EnumName::OldVariant" --format locations
 
 # Step 2: Preview changes (dry-run by default)
-rs-hack rename \
+yah hack rename \
   --paths "src/**/*.rs" \
   --name "EnumName::OldVariant" \
   --to NewVariant
 
 # Step 3: Apply
-rs-hack rename \
+yah hack rename \
   --paths "src/**/*.rs" \
   --name "EnumName::OldVariant" \
   --to NewVariant \
   --apply
 
 # Rename a function (includes trait methods in v0.5.1+)
-rs-hack rename \
+yah hack rename \
   --paths "src/**/*.rs" \
   --name old_function_name \
   --to new_function_name \
@@ -72,7 +72,7 @@ rs-hack rename \
 
 ```bash
 # Add to struct definition AND all literals (v0.5.1+)
-rs-hack add \
+yah hack add \
   --name StructName \
   --field-name "field_name" \
   --field-type "Type" \
@@ -82,7 +82,7 @@ rs-hack add \
   --apply
 
 # Add to literals only (field already exists in definition)
-rs-hack add \
+yah hack add \
   --name StructName \
   --field-name "field_name" \
   --field-value "default_value" \
@@ -91,7 +91,7 @@ rs-hack add \
   --apply
 
 # Add field to ENUM VARIANT struct literals (use Enum::Variant syntax)
-rs-hack add \
+yah hack add \
   --name "View::Grid" \
   --field-name "drag_clip_behavior" \
   --field-value "None" \
@@ -100,15 +100,15 @@ rs-hack add \
   --apply
 
 # ⚠️  IMPORTANT: --variant is for adding a NEW variant to an enum, NOT for adding fields!
-# WRONG:  rs-hack add --name View --variant Grid --field-name foo
-# RIGHT:  rs-hack add --name "View::Grid" --field-name foo --field-value bar --kind struct
+# WRONG:  yah hack add --name View --variant Grid --field-name foo
+# RIGHT:  yah hack add --name "View::Grid" --field-name foo --field-value bar --kind struct
 ```
 
 ### Transform: Generic Find & Modify
 
 ```bash
 # Comment out debug macros
-rs-hack transform \
+yah hack transform \
   --paths "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -117,7 +117,7 @@ rs-hack transform \
   --apply
 
 # Remove all .unwrap() calls
-rs-hack transform \
+yah hack transform \
   --paths "src/**/*.rs" \
   --node-type method-call \
   --name unwrap \
@@ -129,22 +129,22 @@ rs-hack transform \
 
 ```bash
 # Find all struct literals
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name StructName \
   --format snippets
 
 # Find all enum usages
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type enum-usage --name "Enum::Variant" \
   --format locations
 
 # Find all match arms
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type match-arm --name "Enum::Variant" \
   --format snippets
 
 # Discovery mode: omit --node-type to search ALL types (auto-grouped!)
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --name Rectangle \
   --format snippets
 ```
@@ -153,7 +153,7 @@ rs-hack find --paths "src/**/*.rs" \
 
 ```bash
 # Add specific arm
-rs-hack add \
+yah hack add \
   --paths src/handler.rs \
   --match-arm "Status::NewVariant" \
   --body "todo!()" \
@@ -161,7 +161,7 @@ rs-hack add \
   --apply
 
 # Auto-detect all missing variants
-rs-hack add \
+yah hack add \
   --paths src/handler.rs \
   --auto-detect \
   --enum-name Status \
@@ -174,13 +174,13 @@ rs-hack add \
 
 ```bash
 # View history
-rs-hack history --limit 10
+yah hack history --limit 10
 
 # Revert a change
-rs-hack revert <run-id>
+yah hack revert <run-id>
 
 # Force revert (even if files changed)
-rs-hack revert <run-id> --force
+yah hack revert <run-id> --force
 ```
 
 ## Common Workflows
@@ -192,18 +192,18 @@ rs-hack revert <run-id> --force
 # (This is what the tool was designed for!)
 
 # 1. Find current usage
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type enum-usage --name "IRValue::HashMapV2" \
   --format locations | wc -l
 
 # 2. Preview changes (dry-run by default)
-rs-hack rename \
+yah hack rename \
   --paths "src/**/*.rs" \
   --name "IRValue::HashMapV2" \
   --to HashMap
 
 # 3. Apply changes
-rs-hack rename \
+yah hack rename \
   --paths "src/**/*.rs" \
   --name "IRValue::HashMapV2" \
   --to HashMap \
@@ -219,12 +219,12 @@ cargo check
 # Add field to both definition and all initialization sites
 
 # 1. Find struct literals
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name IRCtx \
   --format locations
 
 # 2. Preview (uses v0.5.1 field API)
-rs-hack add \
+yah hack add \
   --paths "src/**/*.rs" \
   --name IRCtx \
   --field-name "return_type" \
@@ -233,7 +233,7 @@ rs-hack add \
   --kind struct
 
 # 3. Apply
-rs-hack add \
+yah hack add \
   --paths "src/**/*.rs" \
   --name IRCtx \
   --field-name "return_type" \
@@ -253,20 +253,20 @@ cargo check
 # The unified remove command does both automatically!
 
 # 1. Find where field is used
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type struct-literal --name Config \
   --content-filter "debug_mode" \
   --format locations
 
 # 2. Preview removal (removes from definition AND literals)
-rs-hack remove \
+yah hack remove \
   --paths "src/**/*.rs" \
   --name Config \
   --field-name debug_mode \
   --kind struct
 
 # 3. Apply
-rs-hack remove \
+yah hack remove \
   --paths "src/**/*.rs" \
   --name Config \
   --field-name debug_mode \
@@ -274,7 +274,7 @@ rs-hack remove \
   --apply
 
 # For enum variant fields, use EnumName::VariantName syntax:
-rs-hack remove \
+yah hack remove \
   --paths "src/**/*.rs" \
   --name "View::Rectangle" \
   --field-name immediate_mode \
@@ -286,13 +286,13 @@ rs-hack remove \
 
 ```bash
 # 1. Find debug macros
-rs-hack find --paths "src/**/*.rs" \
+yah hack find --paths "src/**/*.rs" \
   --node-type macro-call --name eprintln \
   --content-filter "[DEBUG]" \
   --format locations
 
 # 2. Preview commenting them out
-rs-hack transform \
+yah hack transform \
   --paths "src/**/*.rs" \
   --node-type macro-call --name eprintln \
   --content-filter "[DEBUG]" \
@@ -300,7 +300,7 @@ rs-hack transform \
   --format diff
 
 # 3. Apply
-rs-hack transform \
+yah hack transform \
   --paths "src/**/*.rs" \
   --node-type macro-call --name eprintln \
   --content-filter "[DEBUG]" \
@@ -308,9 +308,9 @@ rs-hack transform \
   --apply
 ```
 
-## When to Use rs-hack
+## When to Use yah
 
-✅ **DO use rs-hack for:**
+✅ **DO use yah for:**
 - Renaming enum variants or functions across multiple files (`rename`)
 - Adding fields to struct definitions and/or literals (`add --field-name --field-type --field-value`)
 - Adding fields to enum variant struct literals (`add --name "Enum::Variant" --field-name --field-value`)
@@ -320,7 +320,7 @@ rs-hack transform \
 - Any bulk AST-level transformation
 - Multi-file refactoring (glob patterns like `"src/**/*.rs"`)
 
-❌ **DON'T use rs-hack for:**
+❌ **DON'T use yah for:**
 - Single-line edits in one file → use Edit tool
 - Simple text replacements → use Edit tool
 - Non-Rust files
@@ -332,14 +332,14 @@ rs-hack transform \
 
 ```bash
 # ❌ WRONG - Trying to add field to enum variant using --variant
-rs-hack add --name "View" --variant "Grid" --field-name "foo" --field-value "bar" --paths src
+yah hack add --name "View" --variant "Grid" --field-name "foo" --field-value "bar" --paths src
 # Error: Cannot combine --variant with --field-name
 
 # ✅ RIGHT - Add a NEW variant to an enum definition
-rs-hack add --name "View" --variant "Grid { columns: u32, rows: u32 }" --paths src --apply
+yah hack add --name "View" --variant "Grid { columns: u32, rows: u32 }" --paths src --apply
 
 # ✅ RIGHT - Add field to existing enum variant struct literals
-rs-hack add --name "View::Grid" --field-name "foo" --field-value "bar" --kind struct --paths src --apply
+yah hack add --name "View::Grid" --field-name "foo" --field-value "bar" --kind struct --paths src --apply
 ```
 
 **Remember:**
@@ -352,17 +352,17 @@ rs-hack add --name "View::Grid" --field-name "foo" --field-value "bar" --kind st
 
 ```bash
 # You try this and only get partial matches:
-rs-hack add --name "TouchableProps" --field-name "on_long_press" \
+yah hack add --name "TouchableProps" --field-name "on_long_press" \
   --field-value "None" --kind struct --paths src
 
-# rs-hack shows a hint:
+# yah shows a hint:
 # ⚠️  Note: Some instances were not matched:
 # 💡 Hint: Found 6 struct literal(s) with fully qualified paths:
 #    crate::view::builder::TouchableProps (6 instances)
 # To match all, use: --name "*::TouchableProps"
 
 # ✅ FIX - Use wildcard to match all qualified paths
-rs-hack add --name "*::TouchableProps" --field-name "on_long_press" \
+yah hack add --name "*::TouchableProps" --field-name "on_long_press" \
   --field-value "None" --kind struct --paths src --apply
 ```
 
@@ -414,12 +414,12 @@ rs-hack add --name "*::TouchableProps" --field-name "on_long_press" \
 
 ## Best Practices
 
-1. **Always find first** - Know what you're changing with `rs-hack find`
+1. **Always find first** - Know what you're changing with `yah hack find`
 2. **Always dry-run** - Preview with `--format diff` before `--apply`
 3. **Use glob patterns** - Target multiple files: `"src/**/*.rs"`
 4. **Check after apply** - Run `cargo check` or tests
-5. **Save run IDs** - `rs-hack history` shows recent changes
-6. **Revert when needed** - `rs-hack revert <run-id>` is your safety net
+5. **Save run IDs** - `yah hack history` shows recent changes
+6. **Revert when needed** - `yah hack revert <run-id>` is your safety net
 
 ## Error Recovery
 
@@ -427,18 +427,18 @@ If something goes wrong:
 
 ```bash
 # Check what was done
-rs-hack history
+yah hack history
 
 # Revert the last change
-rs-hack revert <run-id>
+yah hack revert <run-id>
 
 # Force revert if files changed since
-rs-hack revert <run-id> --force
+yah hack revert <run-id> --force
 ```
 
 ## Remember
 
-**rs-hack is type-safe and AST-aware.** It will:
+**yah is type-safe and AST-aware.** It will:
 - ✅ Only rename actual Rust code structures
 - ✅ Preserve formatting and comments
 - ✅ Work across any number of files

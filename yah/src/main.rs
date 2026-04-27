@@ -28,7 +28,8 @@
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
 //! @yah:relay(R009, "yah-ui P3: Architecture (mermaid)")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:phase(P3)
 //! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
@@ -118,17 +119,31 @@
 //! @yah:verify("cd yah-ui && bun run build")
 //!
 //! @yah:ticket(R009-T3, "NodeHoverCard + NodeActionMenu + cross-tab nav (jumpToFile, openInAgent)")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:phase(P3)
 //! @yah:parent(R009)
+//! @yah:handoff("Extracted GraphPane's inline hover-aside into NodeHoverCard.tsx (presentational, accepts ArchNode | null; surfaces shortName/layer/roles/doc/file:line; suppressed while NodeActionMenu is open). Built NodeActionMenu.tsx as a fixed-position popover at clientX/clientY with click-outside + Escape close + viewport clamp; three items: Jump to source (hint shows basename:line), Re-root here, Open in agent. GraphPane's prop surface changed from a single onNodeClick to onReroot + onJumpToFile + onOpenInAgent (clicking a node now opens the menu instead of immediately re-rooting). Cross-tab nav contract (impl-guide §6) wired in App.tsx: lifted archRoot/archDepth state up from ArchView; jumpToFile parses path:line, derives a node-id from basename-sans-extension, switches to arch tab; openInAgent sets relayId to the target and switches to agent tab. ArchView is now controlled (rootId/onRootChange/depth/onDepthChange + the two cross-tab callbacks). bun run build green; typecheck shows only the 5 pre-existing serve.ts Bun/Node typedef errors (unrelated). Did NOT exercise the UI in a browser this turn — flag any visual regressions.")
+//! @yah:next("Visual sign-off: open localhost:5173, switch to Architecture tab. Hover a node → NodeHoverCard appears top-right with shortName/layer/roles/doc/file:line. Click a node → NodeActionMenu opens at the cursor; Escape and click-outside both dismiss. 'Jump to source' switches tab and re-roots; 'Re-root here' updates RootSelector; 'Open in agent' switches to Agent tab and sets relayId to the node id (mock has no node→relay map so the agent view will land on its no-session pane — expected for v1).")
+//! @yah:next("Edge cases not exercised: menu position when clicking a node near the bottom-right corner (clamp logic), hover card under dark theme, openInAgent/jumpToFile when the source backend is real (today they only rewire client state, no IPC).")
+//! @yah:next("Once R009-T1/T2/T3 are visually approved, archive each (strips @yah lines from yah/src/main.rs).")
+//! @yah:verify("cd yah-ui && bun run build")
+//! @yah:verify("cd yah-ui && bun run typecheck")
+//! @yah:gotcha("Two stale 'rs-hack board serve' processes (pids 34870 + 34952) are still running from a prior session — they only read legacy @hack: annotations so they show empty boards, but they touch yah/src/main.rs every scan and can race with Edit tools. The new ./target/release/yah board serve (pid 77862) is also running and is the authoritative one.")
 //!
 //! @yah:ticket(R010-T1, "AgentView shell: SessionList, SessionPane, SessionHeader, StatusStrip")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:phase(P4)
 //! @yah:parent(R010)
+//! @yah:handoff("Built AgentView shell on parchment tokens: SessionList (filter input + candle pulse on streaming sessions), SessionHeader (relay ID + serif title + status pill + StatusStrip + stop button), StatusStrip (model + tokens + current tool + last file, derived from session.events' most recent tool_use). SessionPane composes SessionHeader over a 820px-max body column over the existing PromptInput. Wired App.setRelayId through AgentView.onSelectRelay so clicking a session row updates the title bar selector too. Existing Message.tsx + PromptInput.tsx + ToolCall.tsx still use legacy bg-surface/text-text tokens — they render but visibly unstyled; T2/T3/T4 will replace them entirely.")
+//! @yah:next("T2: replace Message.tsx with UserMsg/AssistantMsg/ThinkingMsg + Avatar; AssistantMsg needs path:line linkification firing onJumpToFile (cross-tab nav contract from impl-guide §6)")
+//! @yah:verify("cd yah-ui && bun run typecheck   # only pre-existing serve.ts errors")
+//! @yah:verify("cd yah-ui && bun run dev  # click Agent tab; SessionList/Header/StatusStrip render in parchment; toggle theme to candlelight")
 //!
 //! @yah:ticket(R010-T2, "Message components: User, Assistant, Thinking, Avatar (path:line linkification)")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(in-progress)
 //! @yah:phase(P4)
 //! @yah:parent(R010)
 //!
@@ -143,12 +158,13 @@
 //! @yah:parent(R010)
 //!
 //! @yah:ticket(R011-T1, "Splash component + wayfarer illustrations wired to Board/Arch/Agent/Run empty states")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:phase(P5)
 //! @yah:parent(R011)
 //!
 //! @yah:relay(R012, "Stage 4: docs/help-text rs-hack→yah sweep")
-//! @yah:status(in-progress)
+//! @yah:status(review)
 //! @yah:assignee(agent:claude)
 //! @yah:handoff("Eliminating remaining literal 'rs-hack' string references in clap help text, doc-comments, templates, slash commands, and CLAUDE.md. Annotations + dir paths already migrated in Stages 1-3.")
 //! @yah:next("Hand-edit yah/src/main.rs (296 hits, mostly clap after_help / deprecated subcommand examples — pattern is mechanical: 'rs-hack <subcmd>' → 'yah hack <subcmd>')")
@@ -161,6 +177,20 @@
 //! @yah:verify("cargo run --quiet --bin yah -- board claim --help | grep -c rs-hack  # should be 0")
 //! @yah:gotcha("Do NOT touch RS_HACK_STATE_DIR env var (legacy fallback in state.rs:40) or the 'rs-hack' verify-line allowlist in arch/ticket.rs — these are intentional historical compatibility")
 //! @yah:gotcha("README.md (211 hits) is excluded by handoff; treat as separate decision")
+//! @yah:handoff("Stage 4 docs/help-text rs-hack→yah sweep: (1) yah/src/main.rs — clap after_help, deprecated subcommand examples, doc-comments, internal refs all use 'yah hack <cmd>' / 'yah board' / 'yah arch' / 'yah mcp' (2) all yah/src/**/*.rs files swept including arch/ticket.rs prompt strings + matching test asserts in lockstep (3) state.rs comments + RS_HACK_STATE_DIR fallback preserved (4) yah/integration_test.sh updated incl. YAH_STATE_DIR canonical env var (5) templates/commands/{comment,handoff,refine}.md + templates/claude-md-hackboard.md updated; .claude/commands/ synced from templates (6) templates/claude-skills/rs-hack.md tool-name refs updated (file rename deferred — see cleanup) (7) CLAUDE.md Rule #1/#2 + injected hackboard snippet refreshed. Build clean (only pre-existing warnings); cargo test -p yah --lib: 147 passed; cargo test -p yah --test arch_dogfood: 26 passed; help-text spot-checks return 0 rs-hack hits.")
+//! @yah:next("Human verifies: cargo build -p yah && cargo test -p yah && yah board claim --help | grep -c rs-hack (should be 0)")
+//! @yah:next("Decide on README.md (211 hits, deferred per Stage 4 brief): rewrite for yah, or split umbrella README + yah/README.md")
+//! @yah:next("Decide on hack-board/ directory cohabitation strategy (Stage 6) — drives whether marker constants migrate")
+//! @yah:verify("cargo build -p yah")
+//! @yah:verify("cargo test -p yah --lib")
+//! @yah:verify("cargo test -p yah --test arch_dogfood")
+//! @yah:verify("./target/debug/yah board claim --help 2>&1 | grep -c 'rs-hack'  # expect 0")
+//! @yah:cleanup("yah/src/main.rs:4920-4921 — CLAUDE_MD_MARKER_START/END constants still use '<!-- rs-hack:hack-board:start/end -->'. External ABI: existing user CLAUDE.md files would lose re-recognition if changed. Migration story: support both legacy + new markers in detect, write new markers on init/--force, drop legacy after a release.")
+//! @yah:cleanup("templates/claude-skills/rs-hack.md filename + curl install URL (lines 9-10) still reference rs-hack. Tool-name references updated. Rename to yah.md when GitHub repo rename happens (per user note: rs-hack repo keeps @hack until hard switch).")
+//! @yah:cleanup("yah/src/arch/extract.rs:7 — historical R001-T2 ticket handoff prose still contains rs-hack-arch references describing past work. Verify lines updated (10-11). Prose is archeology; left untouched.")
+//! @yah:cleanup("yah/src/main.rs:4317-4318 — both YAH_BIN and RS_HACK_BIN env vars are set when launching hack-board's bun process. Drop RS_HACK_BIN once hack-board's TS reads YAH_BIN exclusively.")
+//! @yah:gotcha("yah/src/main.rs:116 contains a pre-existing gotcha about a stale rs-hack v0.5.4 board server racing with edits. Literal 'rs-hack' references in that gotcha describe the legacy binary and are intentional.")
+//! @yah:gotcha("yah/src/arch/ticket.rs:1137 COMMANDS allowlist still includes 'rs-hack' and 'rshack' for backward-compat with old @yah:verify(...) lines. Don't remove without auditing existing verify lines in source.")
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -4910,11 +4940,11 @@ fn parse_sibling_target(s: &str) -> Result<worktrees::Sibling> {
 
 // ── Onboarding templates (embedded at compile time) ─────────────────────
 
-const TPL_COMMENT: &str = include_str!("../../templates/commands/comment.md");
-const TPL_HANDOFF: &str = include_str!("../../templates/commands/handoff.md");
-const TPL_REFINE: &str = include_str!("../../templates/commands/refine.md");
+const TPL_COMMENT: &str = include_str!("../templates/commands/comment.md");
+const TPL_HANDOFF: &str = include_str!("../templates/commands/handoff.md");
+const TPL_REFINE: &str = include_str!("../templates/commands/refine.md");
 const TPL_CLAUDE_MD_SNIPPET: &str =
-    include_str!("../../templates/claude-md-hackboard.md");
+    include_str!("../templates/claude-md-hackboard.md");
 
 const CLAUDE_MD_MARKER_START: &str = "<!-- rs-hack:hack-board:start -->";
 const CLAUDE_MD_MARKER_END: &str = "<!-- rs-hack:hack-board:end -->";

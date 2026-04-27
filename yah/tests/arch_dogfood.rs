@@ -1,4 +1,4 @@
-//! Dogfood integration test: runs rs-hack-arch on the rs-hack workspace itself.
+//! Dogfood integration test: runs yah arch on the yah workspace itself.
 //!
 //! This proves the annotation extraction, graph building, query, schema loading,
 //! and validation pipeline all work end-to-end on real annotated source code.

@@ -3,7 +3,7 @@
 //! @arch:note(Run IDs, backup nodes, and revert history enable safe undo)
 //!
 //! State management: tracks run history with unique IDs, stores
-//! backup nodes for revert, and manages the .rs-hack state directory.
+//! backup nodes for revert, and manages the .yah state directory.
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc, Duration};
@@ -110,7 +110,7 @@ impl RunsIndex {
         let index: RunsIndex = serde_json::from_str(&content)
             .map_err(|e| {
                 if e.to_string().contains("missing field") {
-                    eprintln!("⚠️  Incompatible state format detected from previous rs-hack version.");
+                    eprintln!("⚠️  Incompatible state format detected from previous yah version.");
                     eprintln!("   The state directory will be reset.");
                     eprintln!("   Location: {}", state_dir.display());
                 }

@@ -1,34 +1,38 @@
 import { SessionList } from "./SessionList";
 import { SessionPane } from "./SessionPane";
+import { Splash } from "../shared/Splash";
 import { mockSession, mockSessionList } from "../../mock";
 
 interface AgentViewProps {
   relayId: string | null;
+  onSelectRelay?: (relayId: string) => void;
 }
 
-export function AgentView({ relayId }: AgentViewProps) {
+export function AgentView({ relayId, onSelectRelay }: AgentViewProps) {
   const activeRow = mockSessionList.find((s) => s.relayId === relayId);
 
   return (
-    <div className="flex h-full">
-      <SessionList sessions={mockSessionList} activeRelayId={relayId} />
+    <div className="flex h-full min-h-0">
+      <SessionList
+        sessions={mockSessionList}
+        activeRelayId={relayId}
+        onSelect={onSelectRelay}
+      />
       {relayId && activeRow ? (
-        <SessionPane session={mockSession} />
+        <SessionPane session={mockSession} title={activeRow.title} />
       ) : (
-        <div className="flex flex-1 items-center justify-center">
-          <div className="max-w-sm text-center">
-            <div className="mb-3 text-text-muted">no session</div>
-            <p className="text-[12px] leading-relaxed text-text-dim">
-              {relayId
-                ? `No active session for ${relayId}. Start one to begin.`
-                : "Select a relay to view or start its agent session."}
-            </p>
-            {relayId && (
-              <button className="mt-4 rounded border border-border bg-elevated px-3 py-1.5 text-[12px] text-text hover:border-blue/40 hover:bg-blue/10">
-                Start agent on {relayId}
-              </button>
-            )}
-          </div>
+        <div className="flex flex-1 items-center justify-center bg-paper/90">
+          <Splash
+            variant="lantern"
+            caption={
+              relayId ? `No agent has visited ${relayId} yet` : "No relay selected"
+            }
+            sub={
+              relayId
+                ? `Start a session on ${relayId} to begin the conversation. The agent picks up the relay's @yah:next steps and works from there.`
+                : "Pick a relay from the rail or the title-bar selector to view its agent session."
+            }
+          />
         </div>
       )}
     </div>

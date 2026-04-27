@@ -78,10 +78,10 @@ impl Server {
                 "tools": {}
             },
             "serverInfo": {
-                "name": "rs-hack-mcp",
+                "name": "yah-mcp",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "rs-hack provides AST-aware refactoring tools for Rust code.\n\n\
+            "instructions": "yah provides AST-aware refactoring tools for Rust code.\n\n\
                 Key principles:\n\
                 - All operations are DRY-RUN by default - use apply=true to make actual changes\n\
                 - Operations are idempotent - safe to run multiple times\n\

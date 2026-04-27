@@ -5,10 +5,25 @@ import { ALL_EDGE_KINDS } from "./constants";
 import type { PinnedView } from "./PinnedViews";
 import { mockArchSubgraph } from "../../mock";
 import type { EdgeKind } from "../../types";
+import { Splash } from "../shared/Splash";
 
-export function ArchView() {
-  const [rootId, setRootId] = useState<string>(mockArchSubgraph.rootId);
-  const [depth, setDepth] = useState<number>(2);
+interface ArchViewProps {
+  rootId: string;
+  onRootChange: (id: string) => void;
+  depth: number;
+  onDepthChange: (d: number) => void;
+  onJumpToFile?: (fileColon: string) => void;
+  onOpenInAgent?: (target: string) => void;
+}
+
+export function ArchView({
+  rootId,
+  onRootChange,
+  depth,
+  onDepthChange,
+  onJumpToFile,
+  onOpenInAgent,
+}: ArchViewProps) {
   const [enabledKinds, setEnabledKinds] = useState<Set<EdgeKind>>(
     new Set(ALL_EDGE_KINDS),
   );
@@ -39,10 +54,13 @@ export function ArchView() {
     });
   }, [rootId, depth]);
 
-  const selectPin = useCallback((p: PinnedView) => {
-    setRootId(p.id);
-    setDepth(p.depth);
-  }, []);
+  const selectPin = useCallback(
+    (p: PinnedView) => {
+      onRootChange(p.id);
+      onDepthChange(p.depth);
+    },
+    [onRootChange, onDepthChange],
+  );
 
   const removePin = useCallback((p: PinnedView) => {
     setPinned((prev) =>
@@ -54,9 +72,9 @@ export function ArchView() {
     <div className="flex h-full">
       <ArchToolbar
         rootId={rootId}
-        onRootChange={setRootId}
+        onRootChange={onRootChange}
         depth={depth}
-        onDepthChange={setDepth}
+        onDepthChange={onDepthChange}
         enabledKinds={enabledKinds}
         onToggleKind={toggleKind}
         pinned={pinned}
@@ -66,13 +84,25 @@ export function ArchView() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <GraphPane
-          subgraph={mockArchSubgraph}
-          depth={depth}
-          enabledKinds={enabledKinds}
-          onNodeClick={(id) => setRootId(id)}
-          onPinView={pinCurrent}
-        />
+        {mockArchSubgraph.nodes.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center">
+            <Splash
+              variant="scroll"
+              caption="Map of the realm not yet drawn"
+              sub="No architecture annotations were found for this rig. Add @arch:layer / @arch:role doc-comments to surface modules here."
+            />
+          </div>
+        ) : (
+          <GraphPane
+            subgraph={mockArchSubgraph}
+            depth={depth}
+            enabledKinds={enabledKinds}
+            onReroot={onRootChange}
+            onJumpToFile={onJumpToFile}
+            onOpenInAgent={onOpenInAgent}
+            onPinView={pinCurrent}
+          />
+        )}
       </div>
     </div>
   );

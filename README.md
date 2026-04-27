@@ -1,4 +1,4 @@
-# rs-hack
+# yah
 
 Stop using sed on Rust code 🦀
 
@@ -32,9 +32,9 @@ Three levels of documentation for different needs:
 - One-liner examples for every command
 - Perfect when you know what you want, just need the flags
 
-🤖 **[templates/claude-skills/rs-hack.md](templates/claude-skills/rs-hack.md)** - Claude Code skill
+🤖 **[yah/templates/claude-skills/yah.md](yah/templates/claude-skills/yah.md)** - Claude Code skill
 - Complete workflows with best practices
-- Teaches Claude Code how to use rs-hack effectively
+- Teaches Claude Code how to use yah effectively
 - Copy to your project's `.claude/skills/` directory
 
 📚 **[README.md](README.md)** - You are here
@@ -44,18 +44,17 @@ Three levels of documentation for different needs:
 
 ## Beyond refactoring
 
-The `rs-hack` binary ships three domains. The refactoring tool above is the
+The `yah` binary ships three domains. The refactoring tool above is the
 top-level one. Two subcommands extend it with source-embedded metadata:
 
-- **`rs-hack arch …`** — Architecture knowledge graph built from
+- **`yah arch …`** — Architecture knowledge graph built from
   `@arch:…` doc-comment annotations. Query layers/roles, trace paths,
-  validate architecture rules encoded in `Cargo.toml` metadata. Backed
-  by the `rs-hack-arch` crate.
-- **`rs-hack board …`** — [hack-board](hack-board/README.md): a
+  validate architecture rules encoded in `Cargo.toml` metadata.
+- **`yah board …`** — [hack-board](hack-board/README.md): a
   source-embedded kanban for AI agents. Tickets, relays, and epics live
   as `@yah:…` annotations in source. Includes a live web UI
-  (`rs-hack board serve`), atomic ID allocation (`rs-hack board claim`),
-  and an SDLC ruleset (`rs-hack board rules`). See
+  (`yah board serve`), atomic ID allocation (`yah board claim`),
+  and an SDLC ruleset (`yah board rules`). See
   [hack-board/README.md](hack-board/README.md) for the full model.
 
 Both subcommands read from source, so board/arch state is branch-scoped,
@@ -63,44 +62,26 @@ diffable, and PR-reviewable. There's no separate database.
 
 ## Installation
 
-This project is organized as a Cargo workspace with four crates plus a
-TypeScript/Bun app:
+`yah` is a single Cargo workspace member that publishes one crate with four
+binaries:
 
-- **rs-hack** — The main CLI tool (refactoring + `arch` + `board` subcommands)
-- **rshack** — Convenient alias (no hyphens!) — same binary, easier to type
-- **rs-hack-mcp** — MCP server for AI agent integration (Claude Desktop, etc.)
-- **rs-hack-arch** — Library crate backing `rs-hack arch …` and `rs-hack board …`
-- **hack-board/** — Bun + React web UI served by `rs-hack board serve`
+- **`yah`** — main CLI (refactoring + `arch` + `board` + `mcp` subcommands)
+- **`yahh`** — short alias for `yah hack …` (refactoring)
+- **`yahb`** — short alias for `yah board …` (kanban / tickets)
+- **`yaha`** — short alias for `yah arch …` (architecture graph)
 
-### CLI Tool
-
-From crates.io (choose one):
-```bash
-cargo install rs-hack    # Full name
-cargo install rshack     # Alias (no hyphens!)
-```
-
-Both install the same tool - `rshack` is just easier to type!
-
-From source:
-```bash
-git clone https://github.com/1e1f/rs-hack
-cd rs-hack
-cargo install --path rs-hack  # or --path rshack
-```
-
-### MCP Server (for AI agents)
+The MCP server for AI agents is reachable as `yah mcp` (stdio JSON-RPC).
 
 From crates.io:
 ```bash
-cargo install rs-hack-mcp
+cargo install yah
 ```
 
 From source:
 ```bash
-git clone https://github.com/1e1f/rs-hack
-cd rs-hack
-cargo install --path rs-hack-mcp
+git clone https://github.com/1e1f/yah
+cd yah
+cargo install --path yah
 ```
 
 Binaries will be installed to `~/.cargo/bin/`.
@@ -116,7 +97,7 @@ Binaries will be installed to `~/.cargo/bin/`.
    - Works across `add`, `remove`, and `find` commands
    - Example:
      ```
-     $ rs-hack remove --name "TouchableProps" --field-name "on_tap" --literal-only --paths src
+     $ yah hack remove --name "TouchableProps" --field-name "on_tap" --literal-only --paths src
 
      ⚠️  Note: Some instances were not matched:
 
@@ -124,14 +105,14 @@ Binaries will be installed to `~/.cargo/bin/`.
         crate::view::builder::TouchableProps (6 instances)
 
      To match all of these, use:
-        rs-hack ... --name "*::TouchableProps" ...
+        yah ... --name "*::TouchableProps" ...
      ```
 
 2. **Literal-Only Operations on Imported Structs** - Works seamlessly with imported types
    - No longer requires struct definitions to be in the file
    - Perfect for adding fields to struct literals from external crates
    - Automatically skips definition lookup when using `--field-value` without `--field-type`
-   - Example: `rs-hack add --name "TouchableProps" --field-name "on_long_press" --field-value "None" --paths src --apply`
+   - Example: `yah hack add --name "TouchableProps" --field-name "on_long_press" --field-value "None" --paths src --apply`
 
 ## What's New in 0.5.1
 
@@ -146,12 +127,12 @@ Binaries will be installed to `~/.cargo/bin/`.
 2. **Enum Variant Struct Literal Support** - Operations on `View::Grid { ... }` style patterns
    - `--kind struct` now includes enum variant struct literals
    - Automatic literal-only mode for `::` targets
-   - Example: `rs-hack add --name View::Grid --field-name layer --field-value None --kind struct --apply`
+   - Example: `yah hack add --name View::Grid --field-name layer --field-value None --kind struct --apply`
 
 3. **Trait Method Support** - Complete function coverage
    - `--kind function` now includes trait method definitions
    - Rename works on trait methods, impl methods, and standalone functions
-   - Example: `rs-hack rename --kind function --name immediate_mode --to impulse_mode --apply`
+   - Example: `yah hack rename --kind function --name immediate_mode --to impulse_mode --apply`
 
 4. **100% Formatting Preservation** - Surgical editing everywhere
    - Struct literal add/remove uses surgical editing (no more prettyplease!)
@@ -160,7 +141,7 @@ Binaries will be installed to `~/.cargo/bin/`.
 
 5. **Full Revert Support** - All operations are now revertible
    - Struct-literal operations fully supported
-   - `rs-hack revert <run-id>` works for all commands
+   - `yah hack revert <run-id>` works for all commands
    - Preserves formatting on revert
 
 6. **Better UX** - Improved error messages and result limiting
@@ -179,38 +160,38 @@ Binaries will be installed to `~/.cargo/bin/`.
 # v0.5.1: Enhanced field operations + formatting preservation
 
 # NEW: Unified field API with explicit flags
-rs-hack add --name User --field-name email --field-type String --paths src --apply
+yah hack add --name User --field-name email --field-type String --paths src --apply
 
 # Add field to enum variant struct literals
-rs-hack add --name View::Grid --field-name gap --field-value "Some((0.0, 0.0))" --kind struct --paths src --apply
+yah hack add --name View::Grid --field-name gap --field-value "Some((0.0, 0.0))" --kind struct --paths src --apply
 
 # Add variant to enum (auto-detects it's an enum)
-rs-hack add --name Status --variant "Archived" --paths src --apply
+yah hack add --name Status --variant "Archived" --paths src --apply
 
 # Rename enum variant across entire codebase (preserves formatting!)
-rs-hack rename --name Status::Draft --to Pending --paths src --apply
+yah hack rename --name Status::Draft --to Pending --paths src --apply
 
 # Discover what exists (new discovery workflow)
-rs-hack find --name Rectangle --paths src
+yah hack find --name Rectangle --paths src
 # Shows: struct definitions, struct literals, identifiers, etc. (grouped by type)
 
 # NEW: Limit results (no need for | head)
-rs-hack find --name unwrap --paths src --limit 20
+yah hack find --name unwrap --paths src --limit 20
 
 # NEW: Find all uses of a field
-rs-hack find --field-name debug_mode --paths src
+yah hack find --field-name debug_mode --paths src
 
 # Then operate on what you found (using same --name syntax)
-rs-hack add --name Rectangle --field "color: String" --paths src --apply
+yah hack add --name Rectangle --field "color: String" --paths src --apply
 
 # Use --kind for semantic grouping (struct = struct + struct-literal)
-rs-hack find --kind struct --name Config --paths src
+yah hack find --kind struct --name Config --paths src
 
 # Use --node-type for granular control (only struct definitions)
-rs-hack find --node-type struct --name Config --paths src
+yah hack find --node-type struct --name Config --paths src
 
 # Transform: Generic find-and-modify for any AST node
-rs-hack transform \
+yah hack transform \
   --paths "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -246,10 +227,10 @@ rs-hack transform \
 **Discovery Workflow:**
 ```bash
 # 1. Find what exists (omit --node-type to search everything)
-rs-hack find --name Rectangle --paths src
+yah hack find --name Rectangle --paths src
 
 # 2. Operate on it (same --name syntax)
-rs-hack add --name Rectangle --field "color: String" --paths src --apply
+yah hack add --name Rectangle --field "color: String" --paths src --apply
 ```
 
 **Benefits:**
@@ -260,23 +241,23 @@ rs-hack add --name Rectangle --field "color: String" --paths src --apply
 
 ## hack-board — source-embedded kanban
 
-rs-hack also ships a lightweight kanban board for coordinating work across
+yah also ships a lightweight kanban board for coordinating work across
 agents. Tickets and relays live as `@yah:` doc-comment annotations in Rust
 source — no separate issue tracker, no sync problem. See
 [hack-board/README.md](hack-board/README.md) for the full model.
 
 ```bash
-rs-hack board serve            # start the kanban UI (port auto-picked per workspace)
-rs-hack board init             # install /handoff, /refine, /comment slash commands
-rs-hack board status           # one-shot snapshot for planning (counts, active, handoffs, smell)
-rs-hack board tickets          # full per-ticket dump (filters: --status, --assignee, --epics)
-rs-hack board tickets --prompt R001   # continuation prompt with embedded SDLC playbook
-rs-hack board claim --kind relay --file src/mod.rs --title "…"  # atomic ID + annotation writer
-rs-hack board rules [--context pickup|finishing|new-work|archive|refactor]   # SDLC ruleset
+yah board serve            # start the kanban UI (port auto-picked per workspace)
+yah board init             # install /handoff, /refine, /comment slash commands
+yah board status           # one-shot snapshot for planning (counts, active, handoffs, smell)
+yah board tickets          # full per-ticket dump (filters: --status, --assignee, --epics)
+yah board tickets --prompt R001   # continuation prompt with embedded SDLC playbook
+yah board claim --kind relay --file src/mod.rs --title "…"  # atomic ID + annotation writer
+yah board rules [--context pickup|finishing|new-work|archive|refactor]   # SDLC ruleset
 ```
 
 The SDLC rules (Rule01–Rule12 + Col01) are canonical in
-[`rs-hack-arch/src/sdlc.rs`](rs-hack-arch/src/sdlc.rs) and embedded in every
+[`yah/src/arch/sdlc.rs`](yah/src/arch/sdlc.rs) and embedded in every
 pickup prompt — an agent picking up a ticket via `--prompt` sees the
 playbook inline, so the right status/column moves happen before work starts.
 
@@ -329,12 +310,12 @@ All commands now support glob patterns for targeting multiple files:
 
 ```bash
 # Add derives to all structs in src directory
-rs-hack add-derive --path "src/**/*.rs" \
+yah hack add-derive --path "src/**/*.rs" \
   --target-type struct --name User \
   --derives "Clone,Debug" --apply
 
 # Add match arms across multiple handler files
-rs-hack add-match-arm --path "src/handlers/*.rs" \
+yah hack add-match-arm --path "src/handlers/*.rs" \
   --auto-detect \
   --enum-name Status \
   --body "todo!()" \
@@ -357,7 +338,7 @@ Filter which structs/enums to modify based on their traits or attributes:
 
 ```bash
 # Add field only to structs that derive Clone
-rs-hack add-struct-field \
+yah hack add-struct-field \
   --path "src/**/*.rs" \
   --struct-name Config \
   --field "version: u32" \
@@ -365,7 +346,7 @@ rs-hack add-struct-field \
   --apply
 
 # Add Serialize to all types that already derive Clone OR Debug
-rs-hack add-derive \
+yah hack add-derive \
   --path "src/**/*.rs" \
   --target-type struct \
   --name User \
@@ -374,7 +355,7 @@ rs-hack add-derive \
   --apply
 
 # Update field only in Debug-enabled structs
-rs-hack update-struct-field \
+yah hack update-struct-field \
   --path "src/**/*.rs" \
   --struct-name Config \
   --field "port: u32" \
@@ -382,7 +363,7 @@ rs-hack update-struct-field \
   --apply
 
 # Remove variant only from enums with Clone
-rs-hack remove-enum-variant \
+yah hack remove-enum-variant \
   --path "src/**/*.rs" \
   --enum-name Status \
   --variant-name Deprecated \
@@ -410,33 +391,33 @@ rs-hack remove-enum-variant \
 
 ```bash
 # Add field to struct (auto-detects it's a struct)
-rs-hack add --name User --field "email: String" --paths src --apply
+yah hack add --name User --field "email: String" --paths src --apply
 
 # Add field with position control
-rs-hack add --name Config --field "timeout_ms: u64" \
+yah hack add --name Config --field "timeout_ms: u64" \
   --position "after:port" --paths src --apply
 
 # Add field to BOTH definition AND all literals
-rs-hack add --name IRCtx --field "return_type: Option<Type>" \
+yah hack add --name IRCtx --field "return_type: Option<Type>" \
   --position "after:current_function_frame" \
   --literal-default "None" --paths "src/**/*.rs" --apply
 
 # Add enum variant (auto-detects it's an enum)
-rs-hack add --name Status --variant "Archived" --paths src --apply
+yah hack add --name Status --variant "Archived" --paths src --apply
 
 # Add derive macro (auto-detects target type)
-rs-hack add --name User --derive "Clone,Debug,Serialize" --paths src --apply
+yah hack add --name User --derive "Clone,Debug,Serialize" --paths src --apply
 
 # Add method to impl block
-rs-hack add --name User \
+yah hack add --name User \
   --method 'pub fn get_id(&self) -> u64 { self.id }' \
   --paths src --apply
 
 # Add use statement
-rs-hack add --use "serde::Serialize" --paths src --apply
+yah hack add --use "serde::Serialize" --paths src --apply
 
 # Add documentation comment (requires --node-type or --kind)
-rs-hack add --name User --node-type struct \
+yah hack add --name User --node-type struct \
   --doc-comment "Represents a user in the system" --paths src --apply
 ```
 
@@ -444,37 +425,37 @@ rs-hack add --name User --node-type struct \
 
 ```bash
 # Remove struct field (auto-detects it's a struct)
-rs-hack remove --name User --field-name email --paths src --apply
+yah hack remove --name User --field-name email --paths src --apply
 
 # Remove enum variant field (from variant definition AND all literals)
-rs-hack remove --name View::Rectangle --field-name color --paths src --apply
+yah hack remove --name View::Rectangle --field-name color --paths src --apply
 
 # Remove enum variant field (literals only)
-rs-hack remove --name View::Rectangle --field-name color \
+yah hack remove --name View::Rectangle --field-name color \
   --literal-only --paths src --apply
 
 # Remove enum variant
-rs-hack remove --name Status --variant Draft --paths src --apply
+yah hack remove --name Status --variant Draft --paths src --apply
 
 # Remove derive
-rs-hack remove --name User --derive Clone --paths src --apply
+yah hack remove --name User --derive Clone --paths src --apply
 ```
 
 #### Update Operations
 
 ```bash
 # Update struct field visibility
-rs-hack update --name User --field "pub email: String" --paths src --apply
+yah hack update --name User --field "pub email: String" --paths src --apply
 
 # Update struct field type
-rs-hack update --name User --field "id: i64" --paths src --apply
+yah hack update --name User --field "id: i64" --paths src --apply
 
 # Update enum variant
-rs-hack update --name Status \
+yah hack update --name Status \
   --variant "Draft { created_at: u64 }" --paths src --apply
 
 # Update match arm
-rs-hack update --name Status --match-arm "Status::Draft" \
+yah hack update --name Status --match-arm "Status::Draft" \
   --body '"pending".to_string()' --paths src --apply
 ```
 
@@ -482,17 +463,17 @@ rs-hack update --name Status --match-arm "Status::Draft" \
 
 ```bash
 # Rename enum variant across entire codebase
-rs-hack rename --name Status::Draft --to Pending --paths "src/**/*.rs" --apply
+yah hack rename --name Status::Draft --to Pending --paths "src/**/*.rs" --apply
 
 # Rename function across entire codebase
-rs-hack rename --name process_v2 --to process --paths "src/**/*.rs" --apply
+yah hack rename --name process_v2 --to process --paths "src/**/*.rs" --apply
 
 # Validate rename (check for remaining references)
-rs-hack rename --name Status::Draft --to Pending \
+yah hack rename --name Status::Draft --to Pending \
   --validate --paths "src/**/*.rs"
 
 # Use --kind for disambiguation
-rs-hack rename --name handle_error --to process_error \
+yah hack rename --name handle_error --to process_error \
   --kind function --paths src --apply
 ```
 
@@ -500,20 +481,20 @@ rs-hack rename --name handle_error --to process_error \
 
 ```bash
 # Discover what exists (searches ALL types, auto-grouped)
-rs-hack find --name Rectangle --paths src
+yah hack find --name Rectangle --paths src
 
 # Use --kind for semantic grouping
-rs-hack find --kind struct --name Config --paths src  # Both definitions and literals
+yah hack find --kind struct --name Config --paths src  # Both definitions and literals
 
 # Use --node-type for granular control
-rs-hack find --node-type struct --name Config --paths src  # Only definitions
+yah hack find --node-type struct --name Config --paths src  # Only definitions
 
 # Find with variant filtering
-rs-hack find --kind enum --variant Rectangle --paths src
-rs-hack find --name View::Rectangle --paths src  # Same using :: syntax
+yah hack find --kind enum --variant Rectangle --paths src
+yah hack find --name View::Rectangle --paths src  # Same using :: syntax
 
 # Find with content filtering
-rs-hack find --node-type macro-call --name eprintln \
+yah hack find --node-type macro-call --name eprintln \
   --content-filter "[DEBUG]" --paths src
 ```
 
@@ -524,8 +505,8 @@ The following commands still work but are deprecated in favor of unified command
 #### Struct Operations (Legacy - use `add/remove/update` instead)
 
 ```bash
-# DEPRECATED: Use rs-hack add --name User --field "email: String"
-rs-hack add-struct-field \
+# DEPRECATED: Use yah hack add --name User --field "email: String"
+yah hack add-struct-field \
   --path src/models.rs \
   --struct-name User \
   --field "email: String" \
@@ -538,7 +519,7 @@ rs-hack add-struct-field \
 ```bash
 # Common case: field already exists in definition, just add to all literals
 # Simply omit the type (:Type) and provide --literal-default
-rs-hack add-struct-field \
+yah hack add-struct-field \
   --path "src/**/*.rs" \
   --struct-name IRCtx \
   --field "return_type" \
@@ -610,14 +591,14 @@ The pattern matching prevents accidental modification of enum variants when you 
 #### Update Field
 ```bash
 # Change field visibility
-rs-hack update-struct-field \
+yah hack update-struct-field \
   --path src/models.rs \
   --struct-name User \
   --field "pub email: String" \
   --apply
 
 # Change field type
-rs-hack update-struct-field \
+yah hack update-struct-field \
   --path src/models.rs \
   --struct-name User \
   --field "id: i64" \
@@ -626,7 +607,7 @@ rs-hack update-struct-field \
 
 #### Remove Field
 ```bash
-rs-hack remove-struct-field \
+yah hack remove-struct-field \
   --path src/models.rs \
   --struct-name User \
   --field-name deprecated_field \
@@ -638,14 +619,14 @@ rs-hack remove-struct-field \
 #### Add Variant
 ```bash
 # Add simple variant (idempotent)
-rs-hack add-enum-variant \
+yah hack add-enum-variant \
   --path src/types.rs \
   --enum-name Status \
   --variant "Pending" \
   --apply
 
 # Add variant with data
-rs-hack add-enum-variant \
+yah hack add-enum-variant \
   --path src/types.rs \
   --enum-name Message \
   --variant "Error { code: i32, msg: String }" \
@@ -654,7 +635,7 @@ rs-hack add-enum-variant \
 
 #### Update Variant
 ```bash
-rs-hack update-enum-variant \
+yah hack update-enum-variant \
   --path src/types.rs \
   --enum-name Status \
   --variant "Draft { created_at: u64 }" \
@@ -663,7 +644,7 @@ rs-hack update-enum-variant \
 
 #### Remove Variant
 ```bash
-rs-hack remove-enum-variant \
+yah hack remove-enum-variant \
   --path src/types.rs \
   --enum-name Status \
   --variant-name Deprecated \
@@ -676,7 +657,7 @@ Rename an enum variant across the entire codebase in a type-safe, AST-aware mann
 
 ```bash
 # Rename across all files in src directory
-rs-hack rename-enum-variant \
+yah hack rename-enum-variant \
   --paths "src/**/*.rs" \
   --enum-name IRValue \
   --old-variant HashMapV2 \
@@ -684,7 +665,7 @@ rs-hack rename-enum-variant \
   --apply
 
 # Dry-run with diff preview
-rs-hack rename-enum-variant \
+yah hack rename-enum-variant \
   --paths "src/**/*.rs" \
   --enum-name Status \
   --old-variant Draft \
@@ -692,7 +673,7 @@ rs-hack rename-enum-variant \
   --format diff
 
 # Summary format (shows only changed lines) ⭐ NEW Sprint 2
-rs-hack rename-enum-variant \
+yah hack rename-enum-variant \
   --paths "src/**/*.rs" \
   --enum-name Status \
   --old-variant Draft \
@@ -700,7 +681,7 @@ rs-hack rename-enum-variant \
   --format summary
 
 # Validate mode: check for remaining references ⭐ NEW Sprint 2
-rs-hack rename-enum-variant \
+yah hack rename-enum-variant \
   --paths "src/**/*.rs" \
   --enum-name Status \
   --old-variant Draft \
@@ -708,7 +689,7 @@ rs-hack rename-enum-variant \
   --validate
 
 # Batch rename multiple variants (using batch command)
-cat <<EOF | rs-hack batch --apply
+cat <<EOF | yah hack batch --apply
 {
   "base_path": "src/",
   "operations": [
@@ -762,7 +743,7 @@ The original motivation for this command was renaming `IRValue::HashMapV2` → `
 #### Add Match Arm
 ```bash
 # Add match arm (idempotent)
-rs-hack add-match-arm \
+yah hack add-match-arm \
   --path src/handler.rs \
   --pattern "Status::Archived" \
   --body '"archived".to_string()' \
@@ -770,7 +751,7 @@ rs-hack add-match-arm \
   --apply
 
 # Auto-detect missing variants and add them all
-rs-hack add-match-arm \
+yah hack add-match-arm \
   --path src/handler.rs \
   --auto-detect \
   --enum-name Status \
@@ -786,7 +767,7 @@ rs-hack add-match-arm \
 
 #### Update Match Arm
 ```bash
-rs-hack update-match-arm \
+yah hack update-match-arm \
   --path src/handler.rs \
   --pattern "Status::Draft" \
   --body '"pending".to_string()' \
@@ -796,7 +777,7 @@ rs-hack update-match-arm \
 
 #### Remove Match Arm
 ```bash
-rs-hack remove-match-arm \
+yah hack remove-match-arm \
   --path src/handler.rs \
   --pattern "Status::Deleted" \
   --function handle_status \
@@ -809,7 +790,7 @@ rs-hack remove-match-arm \
 
 ```bash
 # Add derive macros (idempotent)
-rs-hack add-derive \
+yah hack add-derive \
   --path src/models.rs \
   --target-type struct \
   --name User \
@@ -817,7 +798,7 @@ rs-hack add-derive \
   --apply
 
 # Works with enums too
-rs-hack add-derive \
+yah hack add-derive \
   --path src/types.rs \
   --target-type enum \
   --name Status \
@@ -829,14 +810,14 @@ rs-hack add-derive \
 
 ```bash
 # Add method to impl block
-rs-hack add-impl-method \
+yah hack add-impl-method \
   --path src/user.rs \
   --target User \
   --method 'pub fn get_id(&self) -> u64 { self.id }' \
   --apply
 
 # With position control
-rs-hack add-impl-method \
+yah hack add-impl-method \
   --path src/user.rs \
   --target User \
   --method 'pub fn get_name(&self) -> &str { &self.name }' \
@@ -848,13 +829,13 @@ rs-hack add-impl-method \
 
 ```bash
 # Add use statement (idempotent)
-rs-hack add-use \
+yah hack add-use \
   --path src/lib.rs \
   --use-path "serde::Serialize" \
   --apply
 
 # Position control
-rs-hack add-use \
+yah hack add-use \
   --path src/lib.rs \
   --use-path "std::fmt::Display" \
   --position "after:collections" \
@@ -867,13 +848,13 @@ Locate definitions (structs, enums, functions) in a single file:
 
 ```bash
 # Find struct definition location
-rs-hack find \
+yah hack find \
   --path src/models.rs \
   --node-type struct \
   --name User
 
 # Find enum definition
-rs-hack find \
+yah hack find \
   --path src/types.rs \
   --node-type enum \
   --name Status
@@ -893,7 +874,7 @@ List and view AST nodes (struct literals, etc.) across multiple files with glob 
 
 ```bash
 # List all Shadow struct initializations
-rs-hack find \
+yah hack find \
   --path "tests/shadow_*.rs" \
   --node-type struct-literal \
   --name Shadow \
@@ -907,7 +888,7 @@ rs-hack find \
 # Shadow { offset: Vec2::ZERO, blur: 0.0, color: Color32::WHITE, }
 
 # Get locations only (like grep -n but AST-aware)
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type struct-literal \
   --name Config \
@@ -919,20 +900,20 @@ rs-hack find \
 # src/main.rs:10:21
 
 # Get structured JSON output
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type struct-literal \
   --name User \
   --format json
 
 # List ALL struct literals (no name filter)
-rs-hack find \
+yah hack find \
   --path "src/models.rs" \
   --node-type struct-literal \
   --format snippets
 
 # Find match arms for specific enum variant (better than grep!)
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type match-arm \
   --name "Operator::AssertSome" \
@@ -946,13 +927,13 @@ rs-hack find \
 # Operator::AssertSome => self.unwrap_or_panic(value),
 
 # Find ALL match arms in a file
-rs-hack find \
+yah hack find \
   --path "src/handler.rs" \
   --node-type match-arm \
   --format locations
 
 # Find enum variant usages (better than grep!)
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type enum-usage \
   --name "Operator::PropagateError" \
@@ -966,14 +947,14 @@ rs-hack find \
 # Operator::PropagateError
 
 # Find ALL usages of any Operator variant
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type enum-usage \
   --name "Operator::" \
   --format locations | wc -l
 
 # Find all calls to a specific function
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type function-call \
   --name "handle_error" \
@@ -987,21 +968,21 @@ rs-hack find \
 # handle_error(err)
 
 # Find all .unwrap() calls (great for auditing!)
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type method-call \
   --name "unwrap" \
   --format locations
 
 # Find all references to a variable/identifier
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type identifier \
   --name "config" \
   --format snippets
 
 # Find all usages of a type
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type type-ref \
   --name "Vec" \
@@ -1015,14 +996,14 @@ rs-hack find \
 # Vec<i32>
 
 # Find all eprintln! macros (NEW!)
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name "eprintln" \
   --format snippets
 
 # Find eprintln! macros with specific content (NEW!)
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name "eprintln" \
@@ -1036,7 +1017,7 @@ When exploring unfamiliar code, you often don't know what node-type something is
 
 ```bash
 # Find "Rectangle" anywhere - don't know if it's a struct, enum variant, or what?
-rs-hack find --path "src/**/*.rs" --name Rectangle
+yah hack find --path "src/**/*.rs" --name Rectangle
 
 # Output (auto-grouped by type):
 # Found "Rectangle" in 3 contexts:
@@ -1061,7 +1042,7 @@ rs-hack find --path "src/**/*.rs" --name Rectangle
 **Hints System:** If a specific search finds nothing, but matches exist in other node types, you'll get helpful hints:
 
 ```bash
-$ rs-hack find --path src --node-type struct --name Rectangle
+$ yah hack find --path src --node-type struct --name Rectangle
 No struct found named "Rectangle"
 
 Hint: Found "Rectangle" in other contexts:
@@ -1069,7 +1050,7 @@ Hint: Found "Rectangle" in other contexts:
   - struct-literal (2 matches): src/main.rs:15:12
 
 To see all matches, run without --node-type:
-  rs-hack find --paths src --name Rectangle
+  yah hack find --paths src --name Rectangle
 ```
 
 ### NEW: Enum Variant Filtering (v0.5.0+)
@@ -1078,7 +1059,7 @@ Four flexible ways to filter enum variants:
 
 ```bash
 # 1. Find ANY enum with a Rectangle variant
-rs-hack find --path "src/**/*.rs" --node-type enum --variant Rectangle
+yah hack find --path "src/**/*.rs" --node-type enum --variant Rectangle
 
 # Output:
 # // src/view.rs:3:0 - View
@@ -1094,13 +1075,13 @@ rs-hack find --path "src/**/*.rs" --node-type enum --variant Rectangle
 # }
 
 # 2. Find specific enum + variant
-rs-hack find --path "src/**/*.rs" --node-type enum --name View --variant Rectangle
+yah hack find --path "src/**/*.rs" --node-type enum --name View --variant Rectangle
 
 # 3. Same using :: syntax (more concise)
-rs-hack find --path "src/**/*.rs" --node-type enum --name View::Rectangle
+yah hack find --path "src/**/*.rs" --node-type enum --name View::Rectangle
 
 # 4. Wildcard: any enum with Rectangle variant (same as #1, different syntax)
-rs-hack find --path "src/**/*.rs" --node-type enum --name "*::Rectangle"
+yah hack find --path "src/**/*.rs" --node-type enum --name "*::Rectangle"
 ```
 
 **Supported Node Types:**
@@ -1140,7 +1121,7 @@ The `transform` command provides a generic way to find and modify any AST nodes.
 
 ```bash
 # Comment out all eprintln! macros containing "[SHADOW RENDER]"
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1149,7 +1130,7 @@ rs-hack transform \
   --apply
 
 # Remove all .unwrap() calls in renderer code
-rs-hack transform \
+yah hack transform \
   --path "src/renderer/**/*.rs" \
   --node-type method-call \
   --name unwrap \
@@ -1157,7 +1138,7 @@ rs-hack transform \
   --apply
 
 # Comment out all todo!() macros
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name todo \
@@ -1165,7 +1146,7 @@ rs-hack transform \
   --apply
 
 # Replace specific function calls
-rs-hack transform \
+yah hack transform \
   --path "src/handlers/*.rs" \
   --node-type function-call \
   --name old_handler \
@@ -1208,7 +1189,7 @@ Works with all node types from `inspect`:
 
 **Combined Filters**: Use both for precise targeting
 ```bash
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1222,7 +1203,7 @@ rs-hack transform \
 **Clean up debug logs:**
 ```bash
 # Comment out all debug eprintln! statements
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1234,7 +1215,7 @@ rs-hack transform \
 **Remove dangerous unwrap calls:**
 ```bash
 # Remove all .unwrap() calls (review first!)
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type method-call \
   --name unwrap \
@@ -1245,7 +1226,7 @@ rs-hack transform \
 **Migrate from old to new API:**
 ```bash
 # Replace old function calls
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type function-call \
   --name legacy_init \
@@ -1257,14 +1238,14 @@ rs-hack transform \
 **Workflow**: Use `inspect` first to see what matches, then `transform` to modify:
 ```bash
 # 1. See what will be affected
-rs-hack find \
+yah hack find \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
   --content-filter "[SHADOW RENDER]"
 
 # 2. Apply transformation (dry-run first!)
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1272,7 +1253,7 @@ rs-hack transform \
   --action comment
 
 # 3. Apply for real
-rs-hack transform \
+yah hack transform \
   --path "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1344,11 +1325,11 @@ Run batch:
 
 ```bash
 # Auto-detects format from file extension
-rs-hack batch --spec migrations.yaml --apply
-rs-hack batch --spec migrations.json --apply
+yah hack batch --spec migrations.yaml --apply
+yah hack batch --spec migrations.json --apply
 
 # With exclude patterns ⭐ NEW in Sprint 3
-rs-hack batch --spec migrations.yaml --exclude "**/tests/**" --exclude "**/deprecated/**" --apply
+yah hack batch --spec migrations.yaml --exclude "**/tests/**" --exclude "**/deprecated/**" --apply
 ```
 
 ## Exclude Patterns ⭐ NEW in Sprint 3
@@ -1357,7 +1338,7 @@ Skip certain paths during operations using glob patterns:
 
 ```bash
 # Exclude test fixtures and deprecated code
-rs-hack rename-enum-variant \
+yah hack rename-enum-variant \
   --paths "src/**/*.rs" \
   --enum-name Status \
   --old-variant Draft \
@@ -1367,7 +1348,7 @@ rs-hack rename-enum-variant \
   --apply
 
 # Exclude multiple patterns (use --exclude multiple times)
-rs-hack add-struct-field \
+yah hack add-struct-field \
   --paths "**/*.rs" \
   --struct-name User \
   --field "verified: bool" \
@@ -1377,7 +1358,7 @@ rs-hack add-struct-field \
   --apply
 
 # Works with any command that accepts --paths
-rs-hack transform \
+yah hack transform \
   --paths "src/**/*.rs" \
   --node-type macro-call \
   --name eprintln \
@@ -1403,7 +1384,7 @@ Add, update, or remove documentation comments systematically:
 
 ```bash
 # Add documentation to items
-rs-hack add-doc-comment \
+yah hack add-doc-comment \
   --paths "src/**/*.rs" \
   --target-type struct \
   --name User \
@@ -1411,7 +1392,7 @@ rs-hack add-doc-comment \
   --apply
 
 # Update existing documentation
-rs-hack update-doc-comment \
+yah hack update-doc-comment \
   --paths "src/**/*.rs" \
   --target-type function \
   --name process_user \
@@ -1419,7 +1400,7 @@ rs-hack update-doc-comment \
   --apply
 
 # Remove documentation
-rs-hack remove-doc-comment \
+yah hack remove-doc-comment \
   --paths "src/**/*.rs" \
   --target-type enum \
   --name Status \
@@ -1436,7 +1417,7 @@ Generate git-compatible patches for review before applying:
 
 ```bash
 # Generate diff for review
-rs-hack add-struct-field \
+yah hack add-struct-field \
   --path src/user.rs \
   --struct-name User \
   --field "age: u32" \
@@ -1453,24 +1434,24 @@ rs-hack add-struct-field \
 #  }
 
 # Save to patch file
-rs-hack add-struct-field ... --format diff > changes.patch
+yah hack add-struct-field ... --format diff > changes.patch
 
 # Apply with git
 git apply changes.patch
 
 # Or apply AND show diff
-rs-hack add-struct-field ... --format diff --apply
+yah hack add-struct-field ... --format diff --apply
 ```
 
 Perfect for AI-generated changes that need human review!
 
 ## State Storage and Revert System
 
-rs-hack includes a powerful state tracking and revert system that allows you to safely experiment with changes and undo them if needed. This is especially useful for AI agents that want to try different approaches.
+yah includes a powerful state tracking and revert system that allows you to safely experiment with changes and undo them if needed. This is especially useful for AI agents that want to try different approaches.
 
 ### How It Works
 
-Every time you run a command with `--apply`, rs-hack:
+Every time you run a command with `--apply`, yah:
 1. Generates a unique run ID (7 characters, like git)
 2. Backs up **only the AST nodes being modified** (not entire files)
 3. Computes checksums for integrity verification
@@ -1481,10 +1462,10 @@ Every time you run a command with `--apply`, rs-hack:
 #### View History
 ```bash
 # Show last 10 runs
-rs-hack history
+yah hack history
 
 # Show last 50 runs
-rs-hack history --limit 50
+yah hack history --limit 50
 
 # Example output:
 # Recent runs (showing up to 10):
@@ -1497,45 +1478,45 @@ rs-hack history --limit 50
 #### Revert Changes
 ```bash
 # Revert a specific run
-rs-hack revert a05a626
+yah hack revert a05a626
 
 # Force revert even if files have changed since
-rs-hack revert a05a626 --force
+yah hack revert a05a626 --force
 ```
 
 #### Clean Old State
 ```bash
 # Clean runs older than 30 days (default)
-rs-hack clean
+yah hack clean
 
 # Keep only last 7 days
-rs-hack clean --keep-days 7
+yah hack clean --keep-days 7
 ```
 
 ### State Directory
 
-rs-hack stores state in different locations based on your needs:
+yah stores state in different locations based on your needs:
 
 **Priority order:**
-1. **Custom directory** (via `RS_HACK_STATE_DIR` environment variable) - highest priority
-2. **Local state** (via `--local-state` flag) - uses `./.rs-hack` in current directory
-3. **Global default** - uses system data directory (`~/.rs-hack` on Unix-like systems)
+1. **Custom directory** (via `YAH_STATE_DIR` environment variable) - highest priority
+2. **Local state** (via `--local-state` flag) - uses `./.yah` in current directory
+3. **Global default** - uses system data directory (`~/.yah` on Unix-like systems)
 
 #### Using Environment Variable (Recommended for Testing)
 
 ```bash
 # Set custom state directory
-export RS_HACK_STATE_DIR=/tmp/my-test-state
-rs-hack add-struct-field --path src/lib.rs --struct-name User --field "age: u32" --apply
+export YAH_STATE_DIR=/tmp/my-test-state
+yah hack add-struct-field --path src/lib.rs --struct-name User --field "age: u32" --apply
 
 # View history from custom state
-RS_HACK_STATE_DIR=/tmp/my-test-state rs-hack history
+YAH_STATE_DIR=/tmp/my-test-state yah hack history
 
 # Revert using custom state
-RS_HACK_STATE_DIR=/tmp/my-test-state rs-hack revert a05a626
+YAH_STATE_DIR=/tmp/my-test-state yah hack revert a05a626
 
 # Perfect for CI/CD or isolated testing
-RS_HACK_STATE_DIR=/path/to/ci/state rs-hack batch --spec migrations.json --apply
+YAH_STATE_DIR=/path/to/ci/state yah hack batch --spec migrations.json --apply
 ```
 
 **Note:** The environment variable takes precedence over `--local-state`, allowing you to override state location for testing without changing commands.
@@ -1543,23 +1524,23 @@ RS_HACK_STATE_DIR=/path/to/ci/state rs-hack batch --spec migrations.json --apply
 #### Using Local State Flag
 
 ```bash
-# Use ./.rs-hack directory for state storage
-rs-hack --local-state add-struct-field --path src/lib.rs --struct-name User --field "age: u32" --apply
+# Use ./.yah directory for state storage
+yah --local-state add-struct-field --path src/lib.rs --struct-name User --field "age: u32" --apply
 
 # View history from local state
-rs-hack --local-state history
+yah --local-state history
 
 # Revert using local state
-rs-hack --local-state revert a05a626
+yah --local-state revert a05a626
 ```
 
 #### Using Global State (Default)
 
 ```bash
-# No flag needed - uses ~/.rs-hack by default
-rs-hack add-struct-field --path src/lib.rs --struct-name User --field "age: u32" --apply
-rs-hack history
-rs-hack revert a05a626
+# No flag needed - uses ~/.yah by default
+yah hack add-struct-field --path src/lib.rs --struct-name User --field "age: u32" --apply
+yah hack history
+yah hack revert a05a626
 ```
 
 ### Safety Features
@@ -1574,18 +1555,18 @@ rs-hack revert a05a626
 
 ```bash
 # AI tries adding a field
-rs-hack add-struct-field --path src/user.rs --struct-name User --field "email: String" --apply
+yah hack add-struct-field --path src/user.rs --struct-name User --field "email: String" --apply
 # Output: Run ID: a05a626
 
 # AI runs tests - they fail!
 cargo test  # FAIL
 
 # AI reverts the change
-rs-hack revert a05a626
+yah hack revert a05a626
 # Output: ✓ Run a05a626 reverted successfully
 
 # AI tries a different approach
-rs-hack add-struct-field --path src/user.rs --struct-name User --field "email: Option<String>" --apply
+yah hack add-struct-field --path src/user.rs --struct-name User --field "email: Option<String>" --apply
 # Output: Run ID: b12c789
 
 # Tests pass!
@@ -1602,7 +1583,7 @@ cargo test  # PASS
 ### Storage Format
 
 ```
-~/.rs-hack/
+~/.yah/
   runs.json              # Index of all runs
   a05a626.json           # Metadata for run a05a626
   a05a626/               # Backup directory
@@ -1614,39 +1595,39 @@ cargo test  # PASS
 
 ## Claude Code Integration
 
-rs-hack works seamlessly with [Claude Code](https://claude.com/code) via the Bash tool—no additional setup required!
+yah works seamlessly with [Claude Code](https://claude.com/code) via the Bash tool—no additional setup required!
 
 ### Quick Setup
 
-1. **Install rs-hack:**
+1. **Install yah:**
    ```bash
-   cargo install rs-hack
+   cargo install yah
    ```
 
 2. **(Optional) Add skill for guided usage:**
 
-   Create `.claude/skills/rs-hack.md` in your project:
+   Create `.claude/skills/yah.md` in your project:
    ```bash
    mkdir -p .claude/skills
-   curl -o .claude/skills/rs-hack.md \
-     https://raw.githubusercontent.com/1e1f/rs-hack/main/templates/claude-skills/rs-hack.md
+   curl -o .claude/skills/yah.md \
+     https://raw.githubusercontent.com/1e1f/yah/main/yah/templates/claude-skills/yah.md
    ```
 
-   Or copy from this repo's `templates/claude-skills/rs-hack.md`
+   Or copy from this repo's `yah/templates/claude-skills/yah.md`
 
 ### How It Works
 
-Claude can use rs-hack directly through bash commands:
+Claude can use yah directly through bash commands:
 
 ```
 User: "Rename the enum variant IRValue::HashMapV2 to HashMap across all files"
 
-Claude: I'll use rs-hack to safely rename that enum variant.
+Claude: I'll use yah to safely rename that enum variant.
 
-*Runs: rs-hack find to find usages*
-*Runs: rs-hack rename-enum-variant with --format diff to preview*
+*Runs: yah hack find to find usages*
+*Runs: yah hack rename-enum-variant with --format diff to preview*
 *Shows you the diff*
-*Runs: rs-hack rename-enum-variant --apply*
+*Runs: yah hack rename-enum-variant --apply*
 *Verifies with: cargo check*
 
 ✓ Renamed HashMapV2 → HashMap in 23 files
@@ -1668,10 +1649,10 @@ Claude: I'll use rs-hack to safely rename that enum variant.
 User: "Add a return_type field to all IRCtx struct literals"
 
 Claude:
-1. Inspects struct literals: rs-hack find --node-type struct-literal --name IRCtx
-2. Previews changes: rs-hack add-struct-field ... --format diff
+1. Inspects struct literals: yah hack find --node-type struct-literal --name IRCtx
+2. Previews changes: yah hack add-struct-field ... --format diff
 3. Shows you the diff for approval
-4. Applies: rs-hack add-struct-field ... --apply
+4. Applies: yah hack add-struct-field ... --apply
 5. Verifies: cargo check
 6. Reports: ✓ Added field to 15 struct literals across 8 files
 ```
@@ -1681,9 +1662,9 @@ Claude:
 User: "Comment out all eprintln! macros with [DEBUG] in them"
 
 Claude:
-1. Finds matches: rs-hack find --node-type macro-call --name eprintln --content-filter "[DEBUG]"
-2. Previews: rs-hack transform ... --action comment --format diff
-3. Applies: rs-hack transform ... --action comment --apply
+1. Finds matches: yah hack find --node-type macro-call --name eprintln --content-filter "[DEBUG]"
+2. Previews: yah hack transform ... --action comment --format diff
+3. Applies: yah hack transform ... --action comment --apply
 4. Reports: ✓ Commented out 42 debug statements
 ```
 
@@ -1692,11 +1673,11 @@ Claude:
 User: "Try adding Clone to all structs and see if tests pass"
 
 Claude:
-1. Applies: rs-hack add-derive ... --apply
+1. Applies: yah hack add-derive ... --apply
    (saves run ID: a05a626)
 2. Tests: cargo test
    (tests fail!)
-3. Reverts: rs-hack revert a05a626
+3. Reverts: yah hack revert a05a626
 4. Reports: Reverted changes, tests were incompatible
 ```
 
@@ -1710,7 +1691,7 @@ Claude:
 
 ### Without Skill File
 
-Claude can still use rs-hack effectively by reading the `--help` output, but the skill provides:
+Claude can still use yah effectively by reading the `--help` output, but the skill provides:
 - Pre-learned command patterns
 - Workflow best practices
 - Common use case examples
@@ -1732,7 +1713,7 @@ Claude can still use rs-hack effectively by reading the `--help` output, but the
 - **Fail-fast**: Returns errors clearly, doesn't corrupt code
 - **Dry-run default**: Must explicitly `--apply` to modify files
 
-## Real-World Example: rs-hack vs perl/sed
+## Real-World Example: yah vs perl/sed
 
 ### The Problem: Perl Commands Are Dangerously Ambiguous
 
@@ -1771,14 +1752,14 @@ let s = "current_function_frame: None,";  // ← Matches! Corrupts string
 
 **The perl command can't distinguish between these!** It will modify ALL of them, likely corrupting your code.
 
-### ✅ The Explicit, Safe Way (rs-hack)
+### ✅ The Explicit, Safe Way (yah)
 
-rs-hack provides **separate, explicit operations** for each use case. You can update both in one command or separately:
+yah provides **separate, explicit operations** for each use case. You can update both in one command or separately:
 
 #### Option 1: Update BOTH Definition and Literals (One Command!)
 ```bash
 # NEW: Do BOTH in one command with --literal-default
-rs-hack add-struct-field \
+yah hack add-struct-field \
   --path "src/**/*.rs" \
   --struct-name IRCtx \
   --field "return_type: Option<Type>" \
@@ -1810,7 +1791,7 @@ let ctx = IRCtx {
 
 **Step 1: Modify Struct Definitions Only**
 ```bash
-rs-hack add-struct-field \
+yah hack add-struct-field \
   --path "src/**/*.rs" \
   --struct-name IRCtx \
   --field "return_type: Option<Type>" \
@@ -1820,7 +1801,7 @@ rs-hack add-struct-field \
 
 **Step 2: Modify Struct Literal Expressions Only**
 ```bash
-rs-hack add-struct-literal-field \
+yah hack add-struct-literal-field \
   --path "src/**/*.rs" \
   --struct-name IRCtx \
   --field "return_type: None" \
@@ -1846,7 +1827,7 @@ rs-hack add-struct-literal-field \
 - ❌ **Manual Files**: Need to list every file explicitly
 - ❌ **No Preview**: Modifies files immediately
 
-### What rs-hack Does Behind the Scenes
+### What yah Does Behind the Scenes
 
 1. **Parse** each file into an AST using `syn`
 2. **Traverse** the AST to find struct definitions OR struct literal expressions (depending on operation)
@@ -1864,7 +1845,7 @@ Safe, semantic, and correct every time. 🦀
 | `sed` | ❌ | ❌ | ⚠️ | ✅ | ❌ |
 | `rust-analyzer` | ✅ | ✅ | ❌ | ❌ | ⚠️ |
 | `syn` + custom | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ |
-| **rs-hack** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **yah** | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## Features by Version
 
@@ -1946,10 +1927,10 @@ Safe, semantic, and correct every time. 🦀
 
 ### v0.3.0 - State Storage, Revert & Diff Output
 - **State tracking**: Every operation recorded with unique run ID
-- **Revert system**: Undo changes with `rs-hack revert <run-id>`
+- **Revert system**: Undo changes with `yah hack revert <run-id>`
 - **Diff output**: Generate git-compatible patches with `--format diff`
 - **AST node backups**: Stores only modified nodes (85-95% space savings)
-- **Configurable state**: Use `RS_HACK_STATE_DIR` environment variable
+- **Configurable state**: Use `YAH_STATE_DIR` environment variable
 - **Commands**: `history`, `revert`, `clean`
 
 ### v0.2.0 - Glob Patterns & Auto-Detect
@@ -1959,7 +1940,7 @@ Safe, semantic, and correct every time. 🦀
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests on [GitHub](https://github.com/1e1f/rs-hack).
+Contributions are welcome! Please feel free to submit issues or pull requests on [GitHub](https://github.com/1e1f/yah).
 
 ## License
 

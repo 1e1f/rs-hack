@@ -1,5 +1,5 @@
 #!/bin/bash
-# Integration test for rs-hack v0.5.0
+# Integration test for yah
 # Tests all operations + state management + advanced features + transform/inspect + rename + path resolution + discovery mode + variant filtering
 
 set -e
@@ -8,17 +8,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Go up one level to workspace root
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Use debug build for faster iteration during development
-BINARY="$PROJECT_DIR/target/debug/rs-hack"
+BINARY="$PROJECT_DIR/target/debug/yah"
 # Alternative: BINARY="cargo run --quiet --"
-# Alternative: BINARY="rs-hack"  # if installed globally
-# Alternative: BINARY="$PROJECT_DIR/target/release/rs-hack"  # for release builds
-# Sample input file is in the rs-hack subdirectory
+# Alternative: BINARY="yah"  # if installed globally
+# Alternative: BINARY="$PROJECT_DIR/target/release/yah"  # for release builds
+# Sample input file is in the yah subdirectory
 INPUT="$SCRIPT_DIR/examples/sample.rs"
 TEMP_DIR="$PROJECT_DIR/target/test-output"
-STATE_DIR="$TEMP_DIR/.rs-hack"  # State in test output directory
+STATE_DIR="$TEMP_DIR/.yah"  # State in test output directory
 
 # Export environment variable for all commands
-export RS_HACK_STATE_DIR="$STATE_DIR"
+export YAH_STATE_DIR="$STATE_DIR"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -38,12 +38,12 @@ mkdir -p "$TEMP_DIR"
 # Note: State directory will be created automatically in $STATE_DIR
 
 # Build the binary
-echo "Building rs-hack..."
+echo "Building yah..."
 cd "$PROJECT_DIR" && ~/.cargo/bin/cargo build 2>&1 | grep -v "warning:" || true
 
 echo ""
 echo "======================================"
-echo "   rs-hack v0.5.3 Integration Tests  "
+echo "   yah Integration Tests  "
 echo "======================================"
 echo ""
 
@@ -1076,8 +1076,8 @@ if [ $FAILED -eq 0 ]; then
         echo "  # View runs.json"
         echo "  cat $STATE_DIR/runs.json"
         echo ""
-        echo "  # View history with rs-hack"
-        echo "  RS_HACK_STATE_DIR=$STATE_DIR cargo run --quiet -- history"
+        echo "  # View history with yah"
+        echo "  YAH_STATE_DIR=$STATE_DIR cargo run --quiet -- history"
         echo ""
         echo "  # List backup files"
         echo "  ls -la $STATE_DIR/*/"

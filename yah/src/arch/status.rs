@@ -437,7 +437,7 @@ see: reference architecture/x.md
 
     #[test]
     fn scan_disappeared_handles_missing_file() {
-        let tmp = std::env::temp_dir().join("rs-hack-status-test-empty");
+        let tmp = std::env::temp_dir().join("yah-status-test-empty");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let (ids, n) = scan_disappeared(&tmp);
@@ -447,7 +447,7 @@ see: reference architecture/x.md
 
     #[test]
     fn scan_disappeared_legacy_single_file() {
-        let tmp = std::env::temp_dir().join("rs-hack-status-test-disappeared-legacy");
+        let tmp = std::env::temp_dir().join("yah-status-test-disappeared-legacy");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join(".yah")).unwrap();
         let log = "\
@@ -467,7 +467,7 @@ see: reference architecture/x.md
     fn scan_disappeared_sharded_layout() {
         // Events split across per-relay shards. scan_disappeared should
         // union them, sort by timestamp, and return the most recent.
-        let tmp = std::env::temp_dir().join("rs-hack-status-test-disappeared-shards");
+        let tmp = std::env::temp_dir().join("yah-status-test-disappeared-shards");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join(".yah").join("events")).unwrap();
         std::fs::write(
@@ -492,7 +492,7 @@ see: reference architecture/x.md
         // If both layouts are present (unlikely in practice — migration
         // should rename the legacy file), we prefer the sharded view so
         // migrated state wins.
-        let tmp = std::env::temp_dir().join("rs-hack-status-test-disappeared-both");
+        let tmp = std::env::temp_dir().join("yah-status-test-disappeared-both");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join(".yah").join("events")).unwrap();
         std::fs::write(

@@ -1,10 +1,10 @@
 //! @arch:layer(mcp)
 //! @arch:role(bridge)
 //! @arch:role(discovery)
-//! @arch:note(Each MCP tool maps 1:1 to an rs-hack CLI subcommand via subprocess)
+//! @arch:note(Each MCP tool maps 1:1 to a yah CLI subcommand via subprocess)
 //!
 //! Tool registry: defines MCP tool schemas and executes them
-//! by shelling out to the rs-hack CLI binary.
+//! by shelling out to the yah CLI binary.
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
@@ -194,7 +194,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "history",
-                    description: "Show history of rs-hack operations",
+                    description: "Show history of yah operations",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -204,7 +204,7 @@ impl ToolRegistry {
                 },
                 Tool {
                     name: "revert",
-                    description: "Revert a previous rs-hack operation by run ID",
+                    description: "Revert a previous yah operation by run ID",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -230,7 +230,7 @@ impl ToolRegistry {
                 // Use these to understand codebase architecture before editing.
                 // Requires @arch: annotations in doc comments and an optional
                 // [workspace.metadata.arch] schema in Cargo.toml — bootstrap with
-                // `rs-hack arch init --apply`. (Note: `rs-hack board init` is a
+                // `yah arch init --apply`. (Note: `yah board init` is a
                 // different thing — it installs hack-board slash commands.)
                 // ============================================================
                 Tool {
@@ -287,7 +287,7 @@ impl ToolRegistry {
                 // Tickets and relays live as @yah: doc-comment annotations in
                 // Rust source. Board state is branch-scoped; moving a ticket
                 // is a source edit and shows up in `git diff`. Bootstrap a
-                // project with `rs-hack board init`.
+                // project with `yah board init`.
                 // ============================================================
                 Tool {
                     name: "board_status",
@@ -420,14 +420,14 @@ impl ToolRegistry {
             }
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow!("rs-hack failed: {}", stderr))
+            Err(anyhow!("yah failed: {}", stderr))
         }
     }
 
     fn build_command(&self, tool_name: &str, arguments: &Value) -> Result<(String, Vec<String>)> {
         let mut args = Vec::new();
 
-        // Map tool names to actual rs-hack commands
+        // Map tool names to actual yah commands
         let command = match tool_name {
             // Find uses "find" command
             "find" => {
@@ -493,7 +493,7 @@ impl ToolRegistry {
                 }
                 "batch"
             }
-            // Architecture tools - map to "rs-hack arch <subcommand>"
+            // Architecture tools - map to "yah arch <subcommand>"
             "arch_context" => {
                 self.add_arch_context_args(&arguments, &mut args);
                 "arch context"
@@ -510,7 +510,7 @@ impl ToolRegistry {
                 self.add_arch_schema_args(&arguments, &mut args);
                 "arch schema"
             }
-            // hack-board tools - map to "rs-hack board <subcommand>"
+            // hack-board tools - map to "yah board <subcommand>"
             "board_status" => {
                 self.add_board_status_args(&arguments, &mut args);
                 "board status"

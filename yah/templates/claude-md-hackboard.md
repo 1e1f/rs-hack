@@ -1,16 +1,16 @@
-<!-- rs-hack:hack-board:start -->
+<!-- yah:hack-board:start -->
 ## hack-board — source-embedded tickets
 
 Work items for this repo live as `@yah:` doc-comment annotations in Rust
 source. There is **no separate issue tracker**. Launch the kanban UI with
-`rs-hack board serve` (it auto-picks a port from the workspace path).
+`yah board serve` (it auto-picks a port from the workspace path).
 
 ### Lifecycle
 
 | Column | `@yah:status(...)` | Meaning |
 |---|---|---|
 | **Epics** | (derived) | Relays that coordinate child relays — see below |
-| **Open** | `open` | Unclaimed — also holds `.hack/todo.md` entries (pre-ticket inbox) |
+| **Open** | `open` | Unclaimed — also holds `.yah/todo.md` entries (pre-ticket inbox) |
 | **Active** | `claimed` or `in-progress` | Someone's working on it |
 | **Handoff** | `handoff` | Ready for next agent — use `/handoff` |
 | **Review** | `review` or `done` | Awaiting sign-off |
@@ -29,13 +29,13 @@ The board auto-refreshes either way.
 
 ### SDLC rules
 
-Run `rs-hack board rules` for the canonical ruleset (Rule01–Rule12 + Col01
+Run `yah board rules` for the canonical ruleset (Rule01–Rule12 + Col01
 column rule). The same rules are embedded in every continuation prompt
-(`rs-hack board tickets --prompt <ID>`). Narrow to a situation with
+(`yah board tickets --prompt <ID>`). Narrow to a situation with
 `--context pickup | finishing | new-work | archive | refactor` — or use
 `--format terse` for one-line rules without the *why* / *how to apply*
 detail. For a planning-agent snapshot (counts, active owners, handoff
-queue, smell), run `rs-hack board status`.
+queue, smell), run `yah board status`.
 
 High-leverage rules to remember without looking:
 
@@ -78,12 +78,12 @@ signal. Don't start modifying other code until the status line is updated.
 
 Tickets don't stay on the board after they ship. Click the `archive` button
 on the ticket card — that strips the `@yah:…` annotation lines from source
-and appends an audit record to `.hack/events.jsonl`. Treat `status(done)` as
+and appends an audit record to `.yah/events.jsonl`. Treat `status(done)` as
 a short-lived staging state, not a resting place.
 
 ### The event log
 
-`.hack/events.jsonl` is a derivative audit log (not the source of truth):
+`.yah/events.jsonl` is a derivative audit log (not the source of truth):
 `created`, `modified`, `archived`, `disappeared`. The server replays it on
 startup and diffs against current source, so tickets that get accidentally
 deleted ("clobbered") surface as `disappeared` events and can be restored
@@ -91,23 +91,23 @@ from the last-known snapshot.
 
 ### Slash commands
 
-- `/comment` — log a progress summary to `.hack/summaries/`
+- `/comment` — log a progress summary to `.yah/summaries/`
 - `/handoff` — write a structured relay for the next agent (`@yah:relay(...)`)
 - `/refine` — turn a multi-phase plan into a relay + tickets
 
 If the slash commands aren't available in your harness (or `.claude/commands/`
 hasn't been populated yet), each prompt is also reachable as
-`rs-hack board prompt <name>` — same content, no install required. Run
-`rs-hack board prompt` (no arg) to list them.
+`yah board prompt <name>` — same content, no install required. Run
+`yah board prompt` (no arg) to list them.
 
 ### Never pick IDs yourself
 
 Two agents running in parallel will race and both pick the same R-number (or
-F/B/T number). Always use `rs-hack board claim` — it takes a file lock, scans
+F/B/T number). Always use `yah board claim` — it takes a file lock, scans
 source for the next unused ID, and writes the annotation atomically:
 
 ```bash
-rs-hack board claim --kind relay \
+yah board claim --kind relay \
   --file src/module.rs --title "Short title" \
   --assignee agent:claude --status handoff \
   --handoff "What was completed" --next "First step"
@@ -123,7 +123,7 @@ Stdout is the claimed ID. Two shapes:
 Add `--json` for `{id, file, line}`.
 
 **Claim a sub-ticket inside the current relay**, don't spin up a new
-relay for every chunk: `rs-hack board claim --kind task --parent R012`.
+relay for every chunk: `yah board claim --kind task --parent R012`.
 The relay is the baton; sub-tickets are the incremental checkpoints.
 
 ### Card actions
@@ -165,4 +165,4 @@ about `fn foo` lives on `fn foo`). When in doubt, file-level is safest.
 - `@yah:assumes("…")` — unverified claim baked into the handoff (repeatable; rendered in the prompt as risks for the next agent to confirm or challenge)
 - `@yah:cleanup("…")` — deferred tech debt (repeatable)
 - `@arch:see(path/to/doc.md)` — link to architecture docs
-<!-- rs-hack:hack-board:end -->
+<!-- yah:hack-board:end -->
