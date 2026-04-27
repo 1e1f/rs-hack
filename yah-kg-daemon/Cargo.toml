@@ -10,6 +10,7 @@ description = "Runtime composition of the yah knowledge-graph: store + watcher +
 [dependencies]
 yah-kg = { path = "../yah-kg" }
 yah-kg-store = { path = "../yah-kg-store" }
+yah-kg-anno = { path = "../yah-kg-anno" }
 notify = "8.2"
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
 thiserror = "1.0"

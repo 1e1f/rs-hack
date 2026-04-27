@@ -88,6 +88,16 @@ pub enum EdgeKind {
     /// Document → schema it conforms to.
     ConformsTo,
 
+    // ---------- Annotation overlay ----------
+    /// Structural node → synthetic `Tag` node. Powers the `@yah:tag(...)`
+    /// taxonomy: layer membership, role assignment, aspect grouping.
+    Tag,
+    /// Curated relation between two structural nodes that the AST can't
+    /// derive. `@yah:flow(audio::mixer → dispatch::loop)` is the canonical
+    /// example — declares a meaningful coupling (shared state, planned
+    /// future call, observed runtime path) the human knows about.
+    Flow,
+
     // ---------- Koda extension slot ----------
     Koda(KodaEdge),
 }

@@ -12,9 +12,11 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::timeout;
+use yah_kg::anno::AnnotationKind;
+use yah_kg::edge::EdgeKind;
 use yah_kg::event::{ArchEvent, IndexReason};
 use yah_kg::kind::{CommonKind, Lang, NodeKind};
-use yah_kg::rpc::{LookupParams, RootsParams, SubgraphParams};
+use yah_kg::rpc::{Direction, LookupParams, NeighborsParams, RootsParams, SubgraphParams};
 use yah_kg_daemon::{DaemonError, KgService};
 use yah_kg_rust::RustIndexer;
 use yah_kg_store::IndexerRegistry;
@@ -358,3 +360,192 @@ async fn boot_is_idempotent_and_rebinds_to_new_root() {
     assert!(!from_b.ids.is_empty());
 }
 
+
+#[tokio::test]
+async fn boot_runs_annotation_pass_and_node_returns_annotations() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir,
+        "src/lib.rs",
+        r#"//! @yah:tag(layer:core)
+
+/// @yah:tag(audio, hot-path)
+pub struct Mixer;
+
+/// @yah:flow(Mixer, "shared frame buffer")
+pub struct Dispatcher;
+"#,
+    );
+
+    let svc = KgService::new(registry());
+    svc.boot(dir.path().to_path_buf()).await.unwrap();
+
+    // Find the Mixer node and confirm it has typed annotations on NodeFull.
+    let mut mixer = None;
+    for id in svc
+        .lookup(LookupParams {
+            file: "src/lib.rs".into(),
+            line: None,
+            col: None,
+        })
+        .await
+        .ids
+    {
+        if let Some(n) = svc.node(id).await {
+            if n.node.label == "Mixer" {
+                mixer = Some(n);
+                break;
+            }
+        }
+    }
+    let mixer = mixer.expect("Mixer node");
+    let tags: Vec<String> = mixer
+        .annotations
+        .iter()
+        .filter_map(|a| match &a.kind {
+            AnnotationKind::Tag(t) => Some(t.label()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        tags.contains(&"audio".to_string())
+            && tags.contains(&"hot-path".to_string()),
+        "Mixer annotations should include audio + hot-path; got {tags:?}"
+    );
+
+    // Synthetic Tag node should be reachable via Tag edges from the
+    // structural node.
+    let tag_edges = svc
+        .neighbors(NeighborsParams {
+            id: mixer.node.id,
+            dir: Direction::Out,
+            edges: Some(vec![EdgeKind::Tag]),
+        })
+        .await;
+    let mut tag_labels = Vec::new();
+    for e in &tag_edges.edges {
+        if let Some(n) = svc.node(e.to).await {
+            tag_labels.push(n.node.label);
+        }
+    }
+    assert!(
+        tag_labels.contains(&"audio".to_string()),
+        "tag node `audio` should be reachable; got {tag_labels:?}"
+    );
+
+    // Flow edges resolved within the file: find Dispatcher.
+    let mut dispatcher_node = None;
+    for id in svc
+        .lookup(LookupParams {
+            file: "src/lib.rs".into(),
+            line: None,
+            col: None,
+        })
+        .await
+        .ids
+    {
+        if let Some(n) = svc.node(id).await {
+            if n.node.label == "Dispatcher" {
+                dispatcher_node = Some(n);
+                break;
+            }
+        }
+    }
+    let dispatcher = dispatcher_node.expect("Dispatcher node");
+    let flow_edges = svc
+        .neighbors(NeighborsParams {
+            id: dispatcher.node.id,
+            dir: Direction::Out,
+            edges: Some(vec![EdgeKind::Flow]),
+        })
+        .await;
+    assert_eq!(
+        flow_edges.edges.len(),
+        1,
+        "Dispatcher should have one flow edge"
+    );
+    let flow_target = svc.node(flow_edges.edges[0].to).await.unwrap();
+    assert_eq!(flow_target.node.label, "Mixer");
+}
+
+#[tokio::test]
+async fn reindex_path_refreshes_annotations() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = write(
+        &dir,
+        "src/lib.rs",
+        "/// @yah:tag(audio)\npub struct Mixer;\n",
+    );
+
+    let svc = KgService::new(registry());
+    svc.boot(dir.path().to_path_buf()).await.unwrap();
+
+    // Sanity: Mixer is tagged audio.
+    let mut mixer_id = None;
+    for id in svc
+        .lookup(LookupParams {
+            file: "src/lib.rs".into(),
+            line: None,
+            col: None,
+        })
+        .await
+        .ids
+    {
+        if let Some(n) = svc.node(id).await {
+            if n.node.label == "Mixer" {
+                mixer_id = Some(id);
+                break;
+            }
+        }
+    }
+    let mixer_id = mixer_id.unwrap();
+    let before = svc.node(mixer_id).await.unwrap();
+    let before_tags: Vec<String> = before
+        .annotations
+        .iter()
+        .filter_map(|a| match &a.kind {
+            AnnotationKind::Tag(t) => Some(t.label()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(before_tags, vec!["audio".to_string()]);
+
+    // Edit the file: change `audio` → `view`.
+    fs::write(&lib, "/// @yah:tag(view)\npub struct Mixer;\n").unwrap();
+    svc.reindex_path(&lib, IndexReason::Manual).await.unwrap();
+
+    let after = svc.node(mixer_id).await.unwrap();
+    let after_tags: Vec<String> = after
+        .annotations
+        .iter()
+        .filter_map(|a| match &a.kind {
+            AnnotationKind::Tag(t) => Some(t.label()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        after_tags,
+        vec!["view".to_string()],
+        "annotation should refresh on reindex; got {after_tags:?}"
+    );
+
+    // Old `audio` tag edge should no longer exist on Mixer.
+    let tag_edges = svc
+        .neighbors(NeighborsParams {
+            id: mixer_id,
+            dir: Direction::Out,
+            edges: Some(vec![EdgeKind::Tag]),
+        })
+        .await;
+    let mut labels = Vec::new();
+    for e in &tag_edges.edges {
+        if let Some(n) = svc.node(e.to).await {
+            labels.push(n.node.label);
+        }
+    }
+    assert_eq!(
+        labels,
+        vec!["view".to_string()],
+        "old audio tag edge should be gone"
+    );
+}

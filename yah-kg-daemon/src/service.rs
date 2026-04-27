@@ -24,6 +24,7 @@ use yah_kg::rpc::{
     LookupParams, LookupResult, NeighborsParams, NeighborsResult, RootsParams, RootsResult,
     StatsResult, Subgraph, SubgraphParams,
 };
+use yah_kg_anno::{apply_pass, AnnotationIndex};
 use yah_kg_store::{reindex_file, walk_and_index, IndexerRegistry, Store, WalkSummary};
 
 #[derive(Debug, thiserror::Error)]
@@ -66,6 +67,7 @@ struct Booted {
 
 pub struct KgService {
     store: Arc<RwLock<Store>>,
+    annotations: Arc<RwLock<AnnotationIndex>>,
     registry: Arc<IndexerRegistry>,
     events: broadcast::Sender<ArchEvent>,
     booted: Arc<RwLock<Option<Booted>>>,
@@ -82,6 +84,7 @@ impl KgService {
         let (events, _) = broadcast::channel(config.event_capacity);
         Self {
             store: Arc::new(RwLock::new(Store::new())),
+            annotations: Arc::new(RwLock::new(AnnotationIndex::new())),
             registry: Arc::new(registry),
             events,
             booted: Arc::new(RwLock::new(None)),
@@ -115,10 +118,15 @@ impl KgService {
         let start = Instant::now();
         let summary = {
             let mut store = self.store.write().await;
+            let mut anno = self.annotations.write().await;
             // Wipe existing nodes before booting against a new rig.
             *store = Store::new();
-            walk_and_index(&canon, &mut store, &self.registry)
-                .map_err(DaemonError::Index)?
+            *anno = AnnotationIndex::new();
+            let s = walk_and_index(&canon, &mut store, &self.registry)
+                .map_err(DaemonError::Index)?;
+            // Pass 4: annotations.
+            apply_pass(&mut store, &mut anno, None);
+            s
         };
         let elapsed = start.elapsed().as_millis() as u64;
 
@@ -152,6 +160,7 @@ impl KgService {
         }
 
         let store = Arc::clone(&self.store);
+        let annotations = Arc::clone(&self.annotations);
         let registry = Arc::clone(&self.registry);
         let events = self.events.clone();
         let root_for_task = rig_root.clone();
@@ -161,11 +170,12 @@ impl KgService {
             rig_root.clone(),
             move |abs_paths| {
                 let store = Arc::clone(&store);
+                let annotations = Arc::clone(&annotations);
                 let registry = Arc::clone(&registry);
                 let events = events.clone();
                 let root = root_for_task.clone();
                 Box::pin(async move {
-                    apply_paths(abs_paths, &root, &store, &registry, &events).await;
+                    apply_paths(abs_paths, &root, &store, &annotations, &registry, &events).await;
                 })
             },
         )
@@ -210,8 +220,20 @@ impl KgService {
 
         let delta = {
             let mut store = self.store.write().await;
-            reindex_file(&rig_root, &rel, &mut store, &self.registry)
-                .map_err(DaemonError::Index)?
+            let mut anno = self.annotations.write().await;
+            let d = reindex_file(&rig_root, &rel, &mut store, &self.registry)
+                .map_err(DaemonError::Index)?;
+            // Drop annotations for any nodes that vanished.
+            for id in &d.nodes_removed {
+                anno.remove(*id);
+            }
+            // Re-run Pass 4 over the file's surviving + new nodes only.
+            let scope: std::collections::HashSet<_> = store
+                .lookup(&rel, None)
+                .into_iter()
+                .collect();
+            apply_pass(&mut store, &mut anno, Some(&scope));
+            d
         };
 
         emit_delta(&self.events, &delta);
@@ -283,7 +305,12 @@ impl KgService {
 
     pub async fn node(&self, id: NodeId) -> Option<NodeFull> {
         let store = self.store.read().await;
-        store.node_full(id)
+        let mut full = store.node_full(id)?;
+        // Splice in the annotation overlay so a single arch.node call gives
+        // the UI the full picture.
+        let anno = self.annotations.read().await;
+        full.annotations = anno.get(id).to_vec();
+        Some(full)
     }
 
     pub async fn neighbors(&self, params: NeighborsParams) -> NeighborsResult {
@@ -363,6 +390,7 @@ async fn apply_paths(
     abs_paths: Vec<PathBuf>,
     rig_root: &Path,
     store: &Arc<RwLock<Store>>,
+    annotations: &Arc<RwLock<AnnotationIndex>>,
     registry: &Arc<IndexerRegistry>,
     events: &broadcast::Sender<ArchEvent>,
 ) {
@@ -397,8 +425,16 @@ async fn apply_paths(
     let mut totals = (0u32, 0u32, 0u32, 0u32, 0u32);
     for rel in &rels {
         let mut s = store.write().await;
+        let mut a = annotations.write().await;
         match reindex_file(rig_root, rel, &mut s, registry) {
             Ok(delta) => {
+                for id in &delta.nodes_removed {
+                    a.remove(*id);
+                }
+                let scope: std::collections::HashSet<_> =
+                    s.lookup(rel, None).into_iter().collect();
+                apply_pass(&mut s, &mut a, Some(&scope));
+                drop(a);
                 drop(s);
                 totals.0 += delta.nodes_added.len() as u32;
                 totals.1 += delta.nodes_changed.len() as u32;

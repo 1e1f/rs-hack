@@ -1,0 +1,19 @@
+[package]
+name = "yah-kg-anno"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Annotation overlay (tags, flows, rules) on top of the yah knowledge graph"
+
+[dependencies]
+yah-kg = { path = "../yah-kg" }
+yah-kg-store = { path = "../yah-kg-store" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+yah-kg-rust = { path = "../yah-kg-rust" }
+yah-kg-ts = { path = "../yah-kg-ts" }
+tempfile = "3"

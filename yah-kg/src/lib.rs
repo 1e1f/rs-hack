@@ -14,6 +14,7 @@
 //! depend on a stable type surface without dragging in `petgraph`, `syn`,
 //! `tree-sitter`, or transport machinery.
 
+pub mod anno;
 pub mod edge;
 pub mod event;
 pub mod ids;
@@ -21,6 +22,7 @@ pub mod indexer;
 pub mod kind;
 pub mod rpc;
 
+pub use anno::{AnnotationKind, AnnotationRef, TagRef};
 pub use edge::{EdgeId, EdgeKind, EdgeOut, KodaEdge};
 pub use event::{ArchEvent, ChangedField, IndexReason, IndexScope};
 pub use ids::{NodeFull, NodeId, NodeRef, Span};
