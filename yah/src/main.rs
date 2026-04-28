@@ -9,188 +9,49 @@
 //!
 //! @arch:see(architecture/multi-worktree-sync.md)
 //!
-//! @yah:relay(R006, "yah-ui: Tauri/React frontend port")
-//! @yah:status(open)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @yah:relay(R007, "yah-ui P1: design system + shell")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P1)
-//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @yah:relay(R008, "yah-ui P2: Board")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P2)
-//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @yah:relay(R009, "yah-ui P3: Architecture (mermaid)")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P3)
-//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @yah:relay(R010, "yah-ui P4: Agent")
-//! @yah:status(open)
-//! @yah:phase(P4)
-//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
-//! @yah:relay(R011, "yah-ui P5: splash assets + empty states")
-//! @yah:status(open)
-//! @yah:phase(P5)
-//! @yah:parent(R006)
 //! @arch:see(architecture/yah-ui-implementation-guide.md)
 //!
 //!
-//! @yah:ticket(R007-T2, "yah-ui shared primitives: Pill, Glyph, Menu, SectionHeader")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P1)
-//! @yah:parent(R007)
-//! @yah:handoff("Built four shared primitives in yah-ui/src/components/shared/: Pill (hue-keyed: open/active/handoff/review/bug/feature/task/epic, plus StatusPill, KindPill, KindBadge — all driven by --color-st-* tokens), Glyph (Icon line set + Glyph silhouette set ported from yah-design/project/data.jsx), Menu (anchored popover with click-outside via mousedown listener that ignores anchorRef) + MenuItem (leading/hint/danger slots), SectionHeader (illuminated drop-cap + small-caps eyebrow + horizontal rule, optional right slot for count badge). Refactored existing Pill.tsx off the generic Tailwind color tones (bg-blue, text-cyan, etc.) onto the new parchment palette. Typecheck clean, bun run build:css and build:js both green. Tailwind v4 emits text-st-{open|active|handoff|review|bug|feature|task|epic} + bg-vellum/70 + border-rule/50 + illum-cap/eyebrow/smallcaps utilities used by primitives.")
-//! @yah:next("R007-T3 picks up next: replace TitleBar/RigSelector/RelaySelector/SplitModeToggle/TabStrip with versions consuming these primitives. Existing shell files (yah-ui/src/components/shell/*.tsx) still reference pre-yah-design Tailwind classes (bg-elevated, text-text-muted, bg-green/red) that don't exist in new globals.css — replace, don't extend.")
-//! @yah:next("Visual verification of the primitives is deferred to R007-T3 — they're not wired into App.tsx. R007-T3's TitleBar+selectors will exercise Pill/Glyph/Menu against both themes.")
-//! @yah:next("Note: yah-ui/src/components/board/TicketCard.tsx imports KindPill/StatusPill from shared/Pill — same export names + same prop shapes preserved, so it builds. But its inline Tailwind classes (bg-elevated, text-yellow, etc.) are still pre-yah-design — that's R008-T2 scope, not R007.")
 //!
-//! @yah:ticket(R007-T3, "yah-ui shell: TitleBar, RigSelector, RelaySelector, SplitModeToggle, TabStrip")
-//! @yah:status(review)
-//! @yah:phase(P1)
-//! @yah:parent(R007)
-//! @yah:handoff("Replaced 4 shell components + added SplitModeToggle, all built against the parchment palette + R007-T2 primitives (Pill/Glyph/Menu/SectionHeader/KindBadge). Extended Tab type to include the run cluster (terminal/preview/files/services) + Theme type. App.tsx now owns theme state (CSS-variable swap on documentElement.dataset.theme), splitMode state, and routes run-cluster tabs to a ComingSoon stub. Typecheck clean for new code (only pre-existing serve.ts ambient-types errors remain). bun build:js + build:css both green. Dev server boots cleanly.")
-//! @yah:next("Visual sign-off: open localhost:5173, exercise theme toggle, rig + relay menus (⌘K filter), split-mode menu (cross-cluster pairings first), and the seven tabs (run-cluster shows ComingSoon).")
-//! @yah:next("Once approved, archive R007-T2 + R007-T3 from the board (strips @hack lines from yah/src/main.rs).")
 //!
-//! @yah:ticket(R008-T1, "Board scaffold: 5 columns + dnd-kit drag-and-drop with transition rules")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P2)
-//! @yah:parent(R008)
-//! @yah:handoff("Rewrote yah-ui/src/components/board/{Board,Column}.tsx onto the parchment palette. Board: 5 columns (Zones / Open / Active / Handoff / Review) with eyebrows, dnd-kit DndContext, ALLOWED_TARGETS transition matrix mirrored from CLAUDE.md (open->active; active->open|handoff|review; handoff->active|review; review->handoff). Drag start/end/cancel hooks track activeId; drop is rejected client-side when the target column is not in the source ticket's allowed set. Column: illuminated drop-cap initial + small-caps body + bordered count chip + italic eyebrow + filter button. Hover state uses color-mix(accent 9%, paper-2); disallowed columns dim to opacity-45; valid drop-hover gets accent border. Existing TicketCard left untouched (T2 scope). Typecheck clean apart from pre-existing serve.ts ambient-types errors. bun run build:css + build:js both green. Dev server boots.")
-//! @yah:next("Visual sign-off: open localhost:5173, drag a ticket open->active->handoff->review (mock data has R012-T2 in active you can drop into handoff), confirm zones rejects, confirm a card from review only allows drop on handoff (other cols dim).")
-//! @yah:next("Existing TicketCard renders with pre-yah-design Tailwind classes (bg-elevated, text-text-muted, etc.) that don't exist in globals.css — cards will look bare. That is R008-T2's problem, not T1's.")
-//! @yah:verify("cd yah-ui && bun run build")
-//! @yah:verify("cd yah-ui && bun run typecheck")
 //!
-//! @yah:ticket(R008-T2, "TicketCard + CardExpanded: relay rail, pennant, status pill, mixed-children smell")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P2)
-//! @yah:parent(R008)
-//! @yah:handoff("Refactored TicketCard onto the parchment palette + extracted CardExpanded into its own file. TicketCard: cursor-grab article with bg-vellum, dnd-kit useDraggable on the whole card (chevron and footer buttons stopPropagation pointerdown so they don't start drags). Relay rail: 4px left strip with linear-gradient(transparent, accent, transparent), candle-rail animation + drop-shadow when live (relay + agent + status in {claimed,in-progress,handoff}). Pennant: top-right ribbon via clip-path polygon — 7x12 solid-accent for normal relays, 9x16 with five-stop gradient (accent-2 / accent / accent+vellum mix / accent / accent-2) for kind=epic. Header: chevron + KindBadge + id (with parent ↪ chip) + StatusPill (suppressed when STATUS_LABEL[status] === columnEyebrow) + mixed-children bug glyph + phase. Title in font-display 15px. Assignee row with midnight dot. Zone child counts inline (R008-T3 will replace with proper CountChip). CardExpanded: Handoff (serif prose) / Next steps (accent bullet) / Gotchas (st-bug warning icon) / Verify (mono code chip). Footer: file:line truncate + graph/agent/prompt buttons. Wired Column → TicketCard via columnEyebrow prop. Extended Ticket.childCounts with optional relays count to enable the mixed-children calculation; existing mock data left untouched (no mock ticket has mixed children, so the smell glyph won't render until real data comes in). Typecheck clean apart from pre-existing serve.ts ambient-types errors. bun run build:css + build:js green. Dev server boots.")
-//! @yah:next("Visual sign-off at localhost:5173: open Board tab, expand a few cards (R012, R012-T2, R007, etc.), confirm relay rail + pennant on relays only, candle-rail animation on R012/R012-T2/R007 (the active/handoff agent-driven ones), epic pennant on R012 (kind=epic + isZone), drag a card to verify status pill suppression in the right column. I built clean but did NOT exercise the UI in a browser this turn — flag any visual regressions.")
-//! @yah:next("If pennant overlaps the count chip on small relays or the chevron sits awkwardly under the rail, the easy tweak is the article's pl-3.5/pl-3 — increase by .5 if needed.")
-//! @yah:verify("cd yah-ui && bun run typecheck")
-//! @yah:verify("cd yah-ui && bun run build")
 //!
-//! @yah:ticket(R008-T3, "CountChip + EmptyColumn + FillerSplash")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P2)
-//! @yah:parent(R008)
-//! @yah:handoff("Built CountChip (board/CountChip.tsx — serif numeral + small-caps label per chip, gilt rule divider via border-r, inherits hue text class), Splash (shared/Splash.tsx — placeholder vector ornaments per column-slug, prop-shape mirrors design return so R011/P5 can swap inner SVG for <img> without touching callers; legacy variant aliases scroll/lantern/camp/anvil/empty/signpost map to column slugs for run-tab + arch + agent reuse), EmptyColumn (board/EmptyColumn.tsx — themed Splash inside a dashed parchment frame, per-column caption/sub flavour) + FillerSplash (board/FillerSplash.tsx — bottom-of-column splash at width=140, opacity-45, pointer-events-none so it never blocks dnd-kit drops). Wired into Column.tsx: empty columns now render EmptyColumn instead of (empty) text; columns with 1-2 cards get FillerSplash pushed to the bottom. Refactored TicketCard's inline ZoneChildCounts to use CountChip. Typecheck clean apart from pre-existing serve.ts ambient-types errors. bun run build:css + build:js both green. I built clean but did NOT exercise the UI in a browser this turn — flag any visual regressions.")
-//! @yah:next("Visual sign-off: open localhost:5173, switch to Board tab. Empty columns (Zones in mock data) should show themed dashed-frame splash with caption + sub. Columns with ≤2 cards should show a smaller bottom splash at low opacity. Drag a card and confirm dnd-kit drops still land — pointer-events-none on FillerSplash is critical.")
-//! @yah:next("Zone child-counts on R012 should now render as serif numerals separated by gilt rules (CountChip) instead of inline separators. Hue tones: open=ochre, active=midnight-blue, handoff=sienna.")
-//! @yah:next("Splash ornaments are deliberate vector placeholders — R011/P5 swaps them for the wayfarer linocut PNG set + adds a useThemeAndSet hook for light/dark + arcane/wayfarer set switching. The variant alias map (scroll/lantern/camp/anvil/empty/signpost) is already in place for the run-cluster + arch/agent surfaces P5 will wire.")
-//! @yah:verify("cd yah-ui && bun run typecheck")
-//! @yah:verify("cd yah-ui && bun run build")
 //!
-//! @yah:ticket(R009-T1, "GraphPane: mermaid theming, dot-grid, post-render polish, click handlers")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P3)
-//! @yah:parent(R009)
 //!
-//! @yah:ticket(R009-T2, "ArchToolbar: RootSelector, DepthControl, EdgeKindFilters, PinnedViews, Legend")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P3)
-//! @yah:parent(R009)
-//! @yah:handoff("Composed the Architecture left rail. Added arch/constants.ts (shared EDGE_KINDS metadata + LAYER_HUES + strokeDasharray helper) so EdgeKindFilters, GraphPane, and Legend pull from one source of truth. Built five rail sections: DepthControl (1/2/3 hops segmented buttons with serif numeral + italic label, accent-tinted when active), EdgeKindFilters (checkbox + 22x6 svg stroke sample matched to the design — solid/dashed/dotted), PinnedViews (per-pin row with pin icon + hover-revealed × remove button + 'pin current view' add row + 'none yet' empty state), Legend (layer hue swatches limited to 4 by default to fit the rail). Refactored RootSelector off the pre-yah-design tokens onto parchment + the shared Menu primitive — anchored popover with 'From file' / 'Other roots' eyebrow groups, file/sub display per choice. Built ArchToolbar.tsx as the rail composer (Root/Depth/Edges/Pinned/Legend with SectionHeader between each, mt-auto pushes Legend to the bottom, paper-2/50 wash). Rewrote ArchView.tsx to lift pinned-views state up + wire ArchToolbar; GraphPane gained an onPinView prop so the canvas's existing 'Pin view' button now feeds the rail. Typecheck clean for new code. bun run build:css + build:js both green. I built clean but did NOT exercise the UI in a browser this turn — flag any visual regressions.")
-//! @yah:next("Visual sign-off: open localhost:5173, switch to Architecture tab. Confirm rail shows Root (file dropdown opens via Menu, eyebrow groups visible), Depth (1/2/3 hops, accent tint follows active), Edges (six rows with stroke samples), Pinned views (initial seed 'voice_allocator · 2 hops'; click 'pin current view' or canvas 'Pin view' button → row appears; hover row → × reveals; click row → root + depth restore), Legend (4 hue swatches at bottom).")
-//! @yah:next("R009-T3 picks up next: NodeHoverCard + NodeActionMenu + cross-tab nav. Current GraphPane has an inline hover card (top-right aside in GraphPane.tsx); T3 should extract it into NodeHoverCard.tsx, add NodeActionMenu (jump-to-source / re-root / open-in-agent), wire click handler in App.tsx so 'open in agent' switches to Agent tab + selects the relay.")
-//! @yah:next("Edge cases not exercised: dark theme palette swap on rail, long pin labels, RootSelector with a value not in CHOICES (falls back to displaying raw id).")
-//! @yah:gotcha("Two `rs-hack board serve` instances are running (pids 34870 + 34952). Stale rs-hack v0.5.4 only reads @hack: annotations so they show empty boards but still touch yah/src/main.rs every scan; that races with Edit tools. If you hit 'File has been modified since read' loops, kill them and use ./target/release/yah board serve instead.")
-//! @yah:verify("cd yah-ui && bun run typecheck")
-//! @yah:verify("cd yah-ui && bun run build")
 //!
-//! @yah:ticket(R009-T3, "NodeHoverCard + NodeActionMenu + cross-tab nav (jumpToFile, openInAgent)")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P3)
-//! @yah:parent(R009)
-//! @yah:handoff("Extracted GraphPane's inline hover-aside into NodeHoverCard.tsx (presentational, accepts ArchNode | null; surfaces shortName/layer/roles/doc/file:line; suppressed while NodeActionMenu is open). Built NodeActionMenu.tsx as a fixed-position popover at clientX/clientY with click-outside + Escape close + viewport clamp; three items: Jump to source (hint shows basename:line), Re-root here, Open in agent. GraphPane's prop surface changed from a single onNodeClick to onReroot + onJumpToFile + onOpenInAgent (clicking a node now opens the menu instead of immediately re-rooting). Cross-tab nav contract (impl-guide §6) wired in App.tsx: lifted archRoot/archDepth state up from ArchView; jumpToFile parses path:line, derives a node-id from basename-sans-extension, switches to arch tab; openInAgent sets relayId to the target and switches to agent tab. ArchView is now controlled (rootId/onRootChange/depth/onDepthChange + the two cross-tab callbacks). bun run build green; typecheck shows only the 5 pre-existing serve.ts Bun/Node typedef errors (unrelated). Did NOT exercise the UI in a browser this turn — flag any visual regressions.")
-//! @yah:next("Visual sign-off: open localhost:5173, switch to Architecture tab. Hover a node → NodeHoverCard appears top-right with shortName/layer/roles/doc/file:line. Click a node → NodeActionMenu opens at the cursor; Escape and click-outside both dismiss. 'Jump to source' switches tab and re-roots; 'Re-root here' updates RootSelector; 'Open in agent' switches to Agent tab and sets relayId to the node id (mock has no node→relay map so the agent view will land on its no-session pane — expected for v1).")
-//! @yah:next("Edge cases not exercised: menu position when clicking a node near the bottom-right corner (clamp logic), hover card under dark theme, openInAgent/jumpToFile when the source backend is real (today they only rewire client state, no IPC).")
-//! @yah:next("Once R009-T1/T2/T3 are visually approved, archive each (strips @yah lines from yah/src/main.rs).")
-//! @yah:verify("cd yah-ui && bun run build")
-//! @yah:verify("cd yah-ui && bun run typecheck")
-//! @yah:gotcha("Two stale 'rs-hack board serve' processes (pids 34870 + 34952) are still running from a prior session — they only read legacy @hack: annotations so they show empty boards, but they touch yah/src/main.rs every scan and can race with Edit tools. The new ./target/release/yah board serve (pid 77862) is also running and is the authoritative one.")
 //!
-//! @yah:ticket(R010-T1, "AgentView shell: SessionList, SessionPane, SessionHeader, StatusStrip")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P4)
-//! @yah:parent(R010)
-//! @yah:handoff("Built AgentView shell on parchment tokens: SessionList (filter input + candle pulse on streaming sessions), SessionHeader (relay ID + serif title + status pill + StatusStrip + stop button), StatusStrip (model + tokens + current tool + last file, derived from session.events' most recent tool_use). SessionPane composes SessionHeader over a 820px-max body column over the existing PromptInput. Wired App.setRelayId through AgentView.onSelectRelay so clicking a session row updates the title bar selector too. Existing Message.tsx + PromptInput.tsx + ToolCall.tsx still use legacy bg-surface/text-text tokens — they render but visibly unstyled; T2/T3/T4 will replace them entirely.")
-//! @yah:next("T2: replace Message.tsx with UserMsg/AssistantMsg/ThinkingMsg + Avatar; AssistantMsg needs path:line linkification firing onJumpToFile (cross-tab nav contract from impl-guide §6)")
-//! @yah:verify("cd yah-ui && bun run typecheck   # only pre-existing serve.ts errors")
-//! @yah:verify("cd yah-ui && bun run dev  # click Agent tab; SessionList/Header/StatusStrip render in parchment; toggle theme to candlelight")
 //!
-//! @yah:ticket(R010-T2, "Message components: User, Assistant, Thinking, Avatar (path:line linkification)")
-//! @yah:assignee(agent:claude)
-//! @yah:status(in-progress)
-//! @yah:phase(P4)
-//! @yah:parent(R010)
 //!
-//! @yah:ticket(R010-T3, "Tool result frames: ReadResult, GrepResult, EditDiff, BashOutput + ToolFrame")
-//! @yah:status(open)
-//! @yah:phase(P4)
-//! @yah:parent(R010)
 //!
-//! @yah:ticket(R010-T4, "PromptBar + StreamingCursor + NoSession")
-//! @yah:status(open)
-//! @yah:phase(P4)
-//! @yah:parent(R010)
 //!
-//! @yah:ticket(R011-T1, "Splash component + wayfarer illustrations wired to Board/Arch/Agent/Run empty states")
-//! @yah:assignee(agent:claude)
-//! @yah:status(review)
-//! @yah:phase(P5)
-//! @yah:parent(R011)
 //!
-//! @yah:relay(R012, "Stage 4: docs/help-text rs-hack→yah sweep")
-//! @yah:status(review)
-//! @yah:assignee(agent:claude)
-//! @yah:handoff("Eliminating remaining literal 'rs-hack' string references in clap help text, doc-comments, templates, slash commands, and CLAUDE.md. Annotations + dir paths already migrated in Stages 1-3.")
-//! @yah:next("Hand-edit yah/src/main.rs (296 hits, mostly clap after_help / deprecated subcommand examples — pattern is mechanical: 'rs-hack <subcmd>' → 'yah hack <subcmd>')")
-//! @yah:next("Hand-edit other yah/**/*.rs files (smaller files: state.rs, worktrees.rs, arch/*.rs, mcp/*.rs)")
-//! @yah:next("Hand-edit CLAUDE.md (13 hits — Rule #1 dogfood line, 'yah board serve' bullet, slash commands section)")
-//! @yah:next("Hand-edit templates/ + .claude/commands/ (97+28 hits — keep templates/ and .claude/commands/ in sync)")
-//! @yah:next("Defer README.md (211 hits) — separate decision (rewrite for yah vs split umbrella+yah/README.md)")
-//! @yah:next("Build, spot-check help output (yah board claim --help should no longer say 'rs-hack')")
-//! @yah:verify("cargo build -p yah")
-//! @yah:verify("cargo run --quiet --bin yah -- board claim --help | grep -c rs-hack  # should be 0")
-//! @yah:gotcha("Do NOT touch RS_HACK_STATE_DIR env var (legacy fallback in state.rs:40) or the 'rs-hack' verify-line allowlist in arch/ticket.rs — these are intentional historical compatibility")
-//! @yah:gotcha("README.md (211 hits) is excluded by handoff; treat as separate decision")
-//! @yah:handoff("Stage 4 docs/help-text rs-hack→yah sweep: (1) yah/src/main.rs — clap after_help, deprecated subcommand examples, doc-comments, internal refs all use 'yah hack <cmd>' / 'yah board' / 'yah arch' / 'yah mcp' (2) all yah/src/**/*.rs files swept including arch/ticket.rs prompt strings + matching test asserts in lockstep (3) state.rs comments + RS_HACK_STATE_DIR fallback preserved (4) yah/integration_test.sh updated incl. YAH_STATE_DIR canonical env var (5) templates/commands/{comment,handoff,refine}.md + templates/claude-md-hackboard.md updated; .claude/commands/ synced from templates (6) templates/claude-skills/rs-hack.md tool-name refs updated (file rename deferred — see cleanup) (7) CLAUDE.md Rule #1/#2 + injected hackboard snippet refreshed. Build clean (only pre-existing warnings); cargo test -p yah --lib: 147 passed; cargo test -p yah --test arch_dogfood: 26 passed; help-text spot-checks return 0 rs-hack hits.")
-//! @yah:next("Human verifies: cargo build -p yah && cargo test -p yah && yah board claim --help | grep -c rs-hack (should be 0)")
-//! @yah:next("Decide on README.md (211 hits, deferred per Stage 4 brief): rewrite for yah, or split umbrella README + yah/README.md")
-//! @yah:next("Decide on hack-board/ directory cohabitation strategy (Stage 6) — drives whether marker constants migrate")
-//! @yah:verify("cargo build -p yah")
-//! @yah:verify("cargo test -p yah --lib")
-//! @yah:verify("cargo test -p yah --test arch_dogfood")
-//! @yah:verify("./target/debug/yah board claim --help 2>&1 | grep -c 'rs-hack'  # expect 0")
-//! @yah:cleanup("yah/src/main.rs:4920-4921 — CLAUDE_MD_MARKER_START/END constants still use '<!-- rs-hack:hack-board:start/end -->'. External ABI: existing user CLAUDE.md files would lose re-recognition if changed. Migration story: support both legacy + new markers in detect, write new markers on init/--force, drop legacy after a release.")
-//! @yah:cleanup("templates/claude-skills/rs-hack.md filename + curl install URL (lines 9-10) still reference rs-hack. Tool-name references updated. Rename to yah.md when GitHub repo rename happens (per user note: rs-hack repo keeps @hack until hard switch).")
-//! @yah:cleanup("yah/src/arch/extract.rs:7 — historical R001-T2 ticket handoff prose still contains rs-hack-arch references describing past work. Verify lines updated (10-11). Prose is archeology; left untouched.")
-//! @yah:cleanup("yah/src/main.rs:4317-4318 — both YAH_BIN and RS_HACK_BIN env vars are set when launching hack-board's bun process. Drop RS_HACK_BIN once hack-board's TS reads YAH_BIN exclusively.")
-//! @yah:gotcha("yah/src/main.rs:116 contains a pre-existing gotcha about a stale rs-hack v0.5.4 board server racing with edits. Literal 'rs-hack' references in that gotcha describe the legacy binary and are intentional.")
-//! @yah:gotcha("yah/src/arch/ticket.rs:1137 COMMANDS allowlist still includes 'rs-hack' and 'rshack' for backward-compat with old @yah:verify(...) lines. Don't remove without auditing existing verify lines in source.")
+//!
+//! @arch:see(architecture/yah-roadmap-2026Q2.md)
+//!
+//! @arch:see(architecture/yah-roadmap-2026Q2.md)
+//!
+//! @arch:see(architecture/yah-roadmap-2026Q2.md)
+//!
+//!
+//! @arch:see(architecture/agent-skill-cli-surface.md)
+//! @arch:see(architecture/yah-roadmap-2026Q2.md)
+//!
+//! @arch:see(architecture/yahk-cli-binding.md)
+//!
+//!
+//!
+//!
+//!
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -293,6 +154,10 @@ enum Commands {
         #[arg(long, default_value = "stdio")]
         transport: String,
     },
+
+    /// Install yah skills (slash commands + MCP config) into an agent harness
+    #[command(subcommand)]
+    Skills(SkillsCommands),
 
     /// One-shot migration: rewrite legacy `@hack:` → `@yah:` in source, rename `.hack/` → `.yah/`
     Migrate {
@@ -1726,25 +1591,6 @@ enum ArchCommands {
         format: String,
     },
 
-    /// Validate architecture rules
-    Validate {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Path to rules TOML file (default: load from Cargo.toml metadata)
-        #[arg(short, long)]
-        rules: Option<PathBuf>,
-
-        /// Only show warnings and errors
-        #[arg(short, long)]
-        quiet: bool,
-
-        /// Also validate layer dependencies from schema
-        #[arg(long)]
-        include_schema_rules: bool,
-    },
-
     /// Export graph visualization
     Visualize {
         /// Path to workspace root
@@ -1754,30 +1600,6 @@ enum ArchCommands {
         /// Output format (mermaid, dot)
         #[arg(short, long, default_value = "mermaid")]
         format: String,
-    },
-
-    /// Print the schema loaded from Cargo.toml metadata
-    Schema {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Output format (summary, toml, json)
-        #[arg(short, long, default_value = "summary")]
-        format: String,
-    },
-
-    /// Initialize arch metadata in Cargo.toml
-    Init {
-        /// Output format (toml, example)
-        #[arg(short, long, default_value = "toml")]
-        format: String,
-        /// Write to Cargo.toml instead of printing
-        #[arg(long)]
-        apply: bool,
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
     },
 
 }
@@ -2286,6 +2108,42 @@ enum BoardCommands {
     Worktrees(WorktreesCommands),
 }
 
+/// Subcommands for `yah skills` — multi-harness installer for slash commands + MCP config.
+///
+/// Generalizes the original `yah board init` (claude-code only) so that
+/// the same templates land in the right place for any supported AI
+/// agent harness. Re-uses `yah/templates/` for slash-command bodies and
+/// the CLAUDE.md hack-board snippet.
+#[derive(Subcommand)]
+enum SkillsCommands {
+    /// Install yah slash commands and MCP config into an agent harness
+    ///
+    /// Idempotent: re-running with the same harness skips files that
+    /// already exist; pass --force to overwrite. The MCP entry is merged
+    /// into the harness's existing config (it does not clobber other
+    /// servers).
+    Install {
+        /// Target harness layout
+        #[arg(
+            long,
+            default_value = "claude-code",
+            value_parser = ["claude-code", "cursor", "aider", "generic"],
+        )]
+        harness: String,
+
+        /// Path to workspace root
+        #[arg(short, long, default_value = ".")]
+        path: PathBuf,
+
+        /// Overwrite existing files / mcpServers entry instead of skipping
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List supported harnesses and what each install writes
+    List,
+}
+
 /// Sibling-workspace registry management.
 #[derive(Subcommand)]
 enum WorktreesCommands {
@@ -2384,7 +2242,7 @@ fn validate_enum_variant_rename(
         let content = std::fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
 
-        let syntax_tree: File = syn::parse_str(&content)
+        let _syntax_tree: File = syn::parse_str(&content)
             .with_context(|| format!("Failed to parse {}", file_path.display()))?;
 
         // Search for simple text matches (this catches things AST might miss)
@@ -3435,7 +3293,7 @@ fn main() -> Result<()> {
             execute_operation_with_state(&files, &op, apply, None, &cli.local_state, &cli.format, cli.summary, cli.limit)?;
         }
 
-        HackCommands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only, default_rest, base, call, arg, arg_position, call_type, content_filter, position, apply } => {
+        HackCommands::Add { paths, name, field, field_name, field_type, field_value, variant, method, derive, r#use, match_arm, body, function, auto_detect, enum_name, doc_comment, kind, node_type, literal_default, literal_only: _, default_rest, base, call, arg, arg_position, call_type, content_filter, position, apply } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             // Handle --call operations first (add argument to function/method calls)
@@ -3840,7 +3698,7 @@ fn main() -> Result<()> {
                 // Removing impl method
                 // Note: We don't have RemoveImplMethod operation yet, so bail with helpful message
                 anyhow::bail!("Remove impl method is not yet implemented. Use the transform command to comment out methods:\n  yah hack transform --paths src --node-type impl-method --name {} --action comment --apply", method_name);
-            } else if let Some(derive_macro) = derive {
+            } else if let Some(_derive_macro) = derive {
                 // Removing derive macro
                 // Note: We don't have RemoveDerive operation yet, so bail with helpful message
                 anyhow::bail!("Remove derive macro is not yet implemented. This is planned for a future release.\nFor now, you can manually edit the derive attribute or use the transform command.");
@@ -4073,7 +3931,7 @@ fn main() -> Result<()> {
         }
 
         HackCommands::FindField { paths, field_name, summary } => {
-            use operations::{FieldLocation, FieldContext};
+            use operations::FieldContext;
 
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
@@ -4179,6 +4037,10 @@ fn main() -> Result<()> {
                 bail!("only stdio transport is supported (got: {})", transport);
             }
             handle_mcp_command()?;
+        }
+
+        Commands::Skills(skills_cmd) => {
+            handle_skills_command(skills_cmd)?;
         }
 
         Commands::Migrate { path, apply } => {
@@ -4393,8 +4255,11 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
 
             if let Some(ticket) = board.get(&id) {
                 if prompt {
-                    let ctx = board.build_prompt_context(&ticket.id);
-                    println!("{}", ticket.to_prompt_with_ctx(&ctx));
+                    if let Some(rendered) =
+                        board.to_prompt(&ticket.id, yah_kg::prompt::PromptMode::Pickup)
+                    {
+                        println!("{}", rendered);
+                    }
                     return Ok(());
                 }
                 match format.as_str() {
@@ -4441,8 +4306,11 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
             if let Some(ref ticket_id) = prompt {
                 match board.get(ticket_id) {
                     Some(ticket) => {
-                        let ctx = board.build_prompt_context(&ticket.id);
-                        println!("{}", ticket.to_prompt_with_ctx(&ctx));
+                        if let Some(rendered) =
+                            board.to_prompt(&ticket.id, yah_kg::prompt::PromptMode::Pickup)
+                        {
+                            println!("{}", rendered);
+                        }
                         return Ok(());
                     }
                     None => {
@@ -4506,7 +4374,10 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&tickets)?);
                 }
                 _ => {
-                    let filtered = TicketBoard { tickets: tickets.into_iter().cloned().collect() };
+                    let filtered = TicketBoard {
+                        tickets: tickets.into_iter().cloned().collect(),
+                        kg_board: yah_kg::board::Board::default(),
+                    };
                     println!("{}", filtered.to_markdown());
                 }
             }
@@ -4844,7 +4715,7 @@ fn handle_board_command(cmd: BoardCommands) -> Result<()> {
 }
 
 fn handle_worktrees(cmd: WorktreesCommands) -> Result<()> {
-    use worktrees::{Registry, Sibling};
+    use worktrees::Registry;
 
     match cmd {
         WorktreesCommands::Add { target, path } => {
@@ -4949,35 +4820,40 @@ const TPL_CLAUDE_MD_SNIPPET: &str =
 const CLAUDE_MD_MARKER_START: &str = "<!-- rs-hack:hack-board:start -->";
 const CLAUDE_MD_MARKER_END: &str = "<!-- rs-hack:hack-board:end -->";
 
-fn handle_init(path: &Path, force: bool) -> Result<()> {
-    let root = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let commands_dir = root.join(".claude").join("commands");
-    std::fs::create_dir_all(&commands_dir)?;
+const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("comment.md", TPL_COMMENT),
+    ("handoff.md", TPL_HANDOFF),
+    ("refine.md", TPL_REFINE),
+];
 
-    let files: &[(&str, &str)] = &[
-        ("comment.md", TPL_COMMENT),
-        ("handoff.md", TPL_HANDOFF),
-        ("refine.md", TPL_REFINE),
-    ];
-
-    let mut wrote = 0usize;
-    let mut skipped = 0usize;
-    for (name, body) in files {
+fn write_slash_commands(
+    commands_dir: &Path,
+    label_prefix: &str,
+    force: bool,
+    counters: &mut (usize, usize),
+) -> Result<()> {
+    std::fs::create_dir_all(commands_dir)?;
+    for (name, body) in SLASH_COMMANDS {
         let dest = commands_dir.join(name);
+        let label = format!("{label_prefix}/{name}");
         if dest.exists() && !force {
-            eprintln!("  skip  .claude/commands/{name} (exists, use --force to overwrite)");
-            skipped += 1;
+            eprintln!("  skip  {label} (exists, use --force to overwrite)");
+            counters.1 += 1;
             continue;
         }
         std::fs::write(&dest, body)?;
-        eprintln!("  write .claude/commands/{name}");
-        wrote += 1;
+        eprintln!("  write {label}");
+        counters.0 += 1;
     }
+    Ok(())
+}
 
-    // CLAUDE.md — append snippet if not already present; replace between
-    // yah markers if --force is set.
-    let claude_md = root.join("CLAUDE.md");
-    let existing = std::fs::read_to_string(&claude_md).unwrap_or_default();
+fn merge_claude_md_snippet(
+    claude_md: &Path,
+    force: bool,
+    counters: &mut (usize, usize),
+) -> Result<()> {
+    let existing = std::fs::read_to_string(claude_md).unwrap_or_default();
     let has_markers =
         existing.contains(CLAUDE_MD_MARKER_START) && existing.contains(CLAUDE_MD_MARKER_END);
 
@@ -4990,14 +4866,13 @@ fn handle_init(path: &Path, force: bool) -> Result<()> {
             "\n\n"
         };
         let new_content = format!("{existing}{separator}{TPL_CLAUDE_MD_SNIPPET}");
-        std::fs::write(&claude_md, new_content)?;
+        std::fs::write(claude_md, new_content)?;
         eprintln!(
             "  {} CLAUDE.md (hack-board section)",
             if existing.is_empty() { "write" } else { "append" }
         );
-        wrote += 1;
+        counters.0 += 1;
     } else if force {
-        // Replace between markers.
         let start = existing.find(CLAUDE_MD_MARKER_START).unwrap();
         let end = existing.find(CLAUDE_MD_MARKER_END).unwrap()
             + CLAUDE_MD_MARKER_END.len();
@@ -5005,19 +4880,229 @@ fn handle_init(path: &Path, force: bool) -> Result<()> {
         new_content.push_str(&existing[..start]);
         new_content.push_str(TPL_CLAUDE_MD_SNIPPET.trim_end());
         new_content.push_str(&existing[end..]);
-        std::fs::write(&claude_md, new_content)?;
+        std::fs::write(claude_md, new_content)?;
         eprintln!("  rewrite CLAUDE.md (hack-board section, --force)");
-        wrote += 1;
+        counters.0 += 1;
     } else {
         eprintln!("  skip  CLAUDE.md (hack-board section already present, use --force to refresh)");
-        skipped += 1;
+        counters.1 += 1;
     }
+    Ok(())
+}
 
+fn merge_mcp_into_json(
+    settings_path: &Path,
+    label: &str,
+    server_name: &str,
+    force: bool,
+    counters: &mut (usize, usize),
+) -> Result<()> {
+    use serde_json::{json, Map, Value};
+    let existing = if settings_path.exists() {
+        let s = std::fs::read_to_string(settings_path)?;
+        if s.trim().is_empty() {
+            Value::Object(Map::new())
+        } else {
+            serde_json::from_str::<Value>(&s)
+                .with_context(|| format!("{label} is not valid JSON"))?
+        }
+    } else {
+        Value::Object(Map::new())
+    };
+    let mut root = match existing {
+        Value::Object(m) => m,
+        _ => bail!("{label} top-level value must be a JSON object"),
+    };
+    let entry = json!({"command": "yah", "args": ["mcp"]});
+    let servers_val = root
+        .entry("mcpServers".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let servers = servers_val
+        .as_object_mut()
+        .with_context(|| format!("{label}: mcpServers must be a JSON object"))?;
+    if servers.contains_key(server_name) && !force {
+        eprintln!("  skip  {label} (mcpServers.{server_name} present, use --force)");
+        counters.1 += 1;
+        return Ok(());
+    }
+    let action = if servers.contains_key(server_name) { "rewrite" } else { "merge" };
+    servers.insert(server_name.to_string(), entry);
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut out = serde_json::to_string_pretty(&Value::Object(root))?;
+    out.push('\n');
+    std::fs::write(settings_path, out)?;
+    eprintln!("  {action} {label} (mcpServers.{server_name})");
+    counters.0 += 1;
+    Ok(())
+}
+
+fn merge_mcp_into_aider_yaml(
+    conf_path: &Path,
+    server_name: &str,
+    force: bool,
+    counters: &mut (usize, usize),
+) -> Result<()> {
+    use serde_yaml::{Mapping, Value};
+    let label = ".aider.conf.yml";
+    let existing: Value = if conf_path.exists() {
+        let s = std::fs::read_to_string(conf_path)?;
+        if s.trim().is_empty() {
+            Value::Mapping(Mapping::new())
+        } else {
+            serde_yaml::from_str(&s)
+                .with_context(|| format!("{label} is not valid YAML"))?
+        }
+    } else {
+        Value::Mapping(Mapping::new())
+    };
+    let mut root = match existing {
+        Value::Mapping(m) => m,
+        _ => bail!("{label} top-level value must be a YAML mapping"),
+    };
+
+    let mut entry = Mapping::new();
+    entry.insert(Value::String("command".into()), Value::String("yah".into()));
+    entry.insert(
+        Value::String("args".into()),
+        Value::Sequence(vec![Value::String("mcp".into())]),
+    );
+
+    let key_servers = Value::String("mcp-servers".into());
+    let servers_val = root
+        .entry(key_servers)
+        .or_insert(Value::Mapping(Mapping::new()));
+    let servers = match servers_val {
+        Value::Mapping(m) => m,
+        _ => bail!("{label}: mcp-servers must be a YAML mapping"),
+    };
+    let server_key = Value::String(server_name.into());
+    if servers.contains_key(&server_key) && !force {
+        eprintln!("  skip  {label} (mcp-servers.{server_name} present, use --force)");
+        counters.1 += 1;
+        return Ok(());
+    }
+    let action = if servers.contains_key(&server_key) { "rewrite" } else { "merge" };
+    servers.insert(server_key, Value::Mapping(entry));
+    if let Some(parent) = conf_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let out = serde_yaml::to_string(&Value::Mapping(root))?;
+    std::fs::write(conf_path, out)?;
+    eprintln!("  {action} {label} (mcp-servers.{server_name})");
+    counters.0 += 1;
+    Ok(())
+}
+
+fn install_claude_code(root: &Path, force: bool) -> Result<()> {
+    let mut counters = (0usize, 0usize);
+    write_slash_commands(&root.join(".claude").join("commands"), ".claude/commands", force, &mut counters)?;
+    merge_mcp_into_json(
+        &root.join(".claude").join("settings.json"),
+        ".claude/settings.json",
+        "yah",
+        force,
+        &mut counters,
+    )?;
+    merge_claude_md_snippet(&root.join("CLAUDE.md"), force, &mut counters)?;
+    finalize_install(counters, "yah board serve");
+    Ok(())
+}
+
+fn install_cursor(root: &Path, force: bool) -> Result<()> {
+    let mut counters = (0usize, 0usize);
+    write_slash_commands(&root.join(".cursor").join("commands"), ".cursor/commands", force, &mut counters)?;
+    merge_mcp_into_json(
+        &root.join(".cursor").join("mcp.json"),
+        ".cursor/mcp.json",
+        "yah",
+        force,
+        &mut counters,
+    )?;
+    finalize_install(counters, "yah board serve");
+    Ok(())
+}
+
+fn install_aider(root: &Path, force: bool) -> Result<()> {
+    let mut counters = (0usize, 0usize);
+    merge_mcp_into_aider_yaml(&root.join(".aider.conf.yml"), "yah", force, &mut counters)?;
+    eprintln!("  note  aider has no slash-command directory; use `yah board prompt <name>` for /comment, /handoff, /refine");
+    finalize_install(counters, "yah board serve");
+    Ok(())
+}
+
+fn install_generic(root: &Path, force: bool) -> Result<()> {
+    let mut counters = (0usize, 0usize);
+    let dest = root.join("yah-skills.json");
+    if dest.exists() && !force {
+        eprintln!("  skip  yah-skills.json (exists, use --force to overwrite)");
+        counters.1 += 1;
+    } else {
+        let manifest = serde_json::json!({
+            "skill": "yah",
+            "version": env!("CARGO_PKG_VERSION"),
+            "mcp_server": { "command": "yah", "args": ["mcp"] },
+            "slash_commands": SLASH_COMMANDS.iter().map(|(name, body)| {
+                let stem = name.trim_end_matches(".md");
+                serde_json::json!({ "name": stem, "filename": name, "body": body })
+            }).collect::<Vec<_>>(),
+            "claude_md_snippet": TPL_CLAUDE_MD_SNIPPET,
+        });
+        let mut out = serde_json::to_string_pretty(&manifest)?;
+        out.push('\n');
+        std::fs::write(&dest, out)?;
+        eprintln!("  write yah-skills.json");
+        counters.0 += 1;
+    }
+    finalize_install(counters, "feed yah-skills.json to your harness");
+    Ok(())
+}
+
+fn finalize_install(counters: (usize, usize), next_hint: &str) {
+    let (wrote, skipped) = counters;
     eprintln!();
     eprintln!("Done. {wrote} written, {skipped} skipped.");
     eprintln!();
-    eprintln!("Next: `yah board serve` (auto-picks a port from the workspace path).");
-    Ok(())
+    eprintln!("Next: `{next_hint}`.");
+}
+
+fn handle_skills_command(cmd: SkillsCommands) -> Result<()> {
+    match cmd {
+        SkillsCommands::Install { harness, path, force } => {
+            let root = std::fs::canonicalize(&path).unwrap_or(path);
+            match harness.as_str() {
+                "claude-code" => install_claude_code(&root, force),
+                "cursor" => install_cursor(&root, force),
+                "aider" => install_aider(&root, force),
+                "generic" => install_generic(&root, force),
+                other => bail!("unknown harness: {other} (expected: claude-code|cursor|aider|generic)"),
+            }
+        }
+        SkillsCommands::List => {
+            println!("Supported harnesses:");
+            println!();
+            println!("  claude-code  .claude/commands/{{comment,handoff,refine}}.md");
+            println!("               .claude/settings.json   (mcpServers.yah)");
+            println!("               CLAUDE.md               (hack-board snippet, marker-bounded)");
+            println!();
+            println!("  cursor       .cursor/commands/{{comment,handoff,refine}}.md");
+            println!("               .cursor/mcp.json        (mcpServers.yah)");
+            println!();
+            println!("  aider        .aider.conf.yml         (mcp-servers.yah)");
+            println!("               (no slash-command dir — use `yah board prompt <name>`)");
+            println!();
+            println!("  generic      yah-skills.json         (manifest of templates + MCP entry)");
+            println!();
+            println!("All installs are idempotent. Pass --force to overwrite existing files / mcpServers entries.");
+            Ok(())
+        }
+    }
+}
+
+fn handle_init(path: &Path, force: bool) -> Result<()> {
+    let root = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    install_claude_code(&root, force)
 }
 
 fn render_show_markdown(
@@ -5326,8 +5411,6 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
         extract::extract_from_workspace_verbose,
         graph::{ArchGraph, EdgeKind},
         query::{get_file_context, trace_path, Query},
-        schema::Schema,
-        validate::{load_rules, load_rules_from_metadata, rules_from_schema, validate, Severity},
     };
 
     match cmd {
@@ -5438,76 +5521,6 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
             }
         }
 
-        ArchCommands::Validate { path, rules, quiet, include_schema_rules } => {
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let graph = ArchGraph::from_annotations(annotations);
-
-            let mut all_rules = if let Some(rules_path) = rules {
-                let content = std::fs::read_to_string(&rules_path)?;
-                load_rules(&content)?
-            } else {
-                match load_rules_from_metadata(&path) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        if !quiet {
-                            eprintln!("Note: Could not load rules from Cargo.toml: {}", e);
-                        }
-                        Vec::new()
-                    }
-                }
-            };
-
-            if include_schema_rules {
-                if let Ok(schema) = Schema::from_cargo_metadata(&path) {
-                    all_rules.extend(rules_from_schema(&schema));
-                }
-            }
-
-            if all_rules.is_empty() {
-                if !quiet {
-                    println!("No architecture rules defined.");
-                    println!("Add rules to [[workspace.metadata.arch.rules]] in Cargo.toml");
-                    println!("Or use --include-schema-rules to validate layer dependencies.");
-                }
-                return Ok(());
-            }
-
-            if !quiet {
-                eprintln!("Validating {} rules...", all_rules.len());
-            }
-
-            let violations = validate(&graph, &all_rules);
-
-            if violations.is_empty() {
-                if !quiet {
-                    println!("✓ No violations found");
-                }
-            } else {
-                let errors = violations.iter().filter(|v| v.severity == Severity::Error).count();
-                let warnings = violations.iter().filter(|v| v.severity == Severity::Warning).count();
-
-                for v in &violations {
-                    let prefix = match v.severity {
-                        Severity::Error => "ERROR",
-                        Severity::Warning => "WARNING",
-                    };
-                    let location = match (&v.file, v.line) {
-                        (Some(f), Some(l)) => format!("{}:{}", f.display(), l),
-                        (Some(f), None) => f.display().to_string(),
-                        _ => "unknown".into(),
-                    };
-                    println!("{}: {} - {} ({})", prefix, v.rule, v.message, location);
-                }
-
-                if errors > 0 {
-                    eprintln!("\n✗ {} errors, {} warnings", errors, warnings);
-                    std::process::exit(1);
-                } else {
-                    eprintln!("\n⚠ {} warnings", warnings);
-                }
-            }
-        }
-
         ArchCommands::Visualize { path, format } => {
             let annotations = extract_from_workspace_verbose(&path, false)?;
             let graph = ArchGraph::from_annotations(annotations);
@@ -5549,40 +5562,6 @@ fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
 
                     println!("}}");
                 }
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Schema { path, format } => {
-            let schema = Schema::from_cargo_metadata(&path)?;
-
-            if schema.is_empty() {
-                eprintln!("No architecture schema found in Cargo.toml");
-                eprintln!("Add [workspace.metadata.arch] section to configure.");
-                eprintln!("Run 'yah arch init' for a template.");
-                return Ok(());
-            }
-
-            match format.as_str() {
-                "summary" => println!("{}", schema.summary()),
-                "toml" => println!("{}", schema.to_toml()?),
-                "json" => println!("{}", serde_json::to_string_pretty(&schema)?),
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Init { format, apply, path } => {
-            match format.as_str() {
-                "toml" => {
-                    if apply {
-                        apply_arch_init_template(&path)?;
-                    } else {
-                        print_arch_init_template();
-                        eprintln!("\n# To apply this to your Cargo.toml, run:");
-                        eprintln!("#   yah arch init --apply");
-                    }
-                }
-                "example" => print_arch_example_annotations(),
                 _ => eprintln!("Unknown format: {}", format),
             }
         }
@@ -5671,7 +5650,7 @@ impl Drop for IdLock {
 }
 
 fn handle_claim(args: ClaimArgs) -> Result<()> {
-    use arch::ticket::{ItemType, TicketBoard};
+    use arch::ticket::TicketBoard;
 
     let workspace = std::fs::canonicalize(&args.path).unwrap_or(args.path.clone());
     // Resolve the target file relative to the workspace if not already absolute
@@ -5683,23 +5662,22 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
     if !target.exists() {
         anyhow::bail!("Target file does not exist: {}", target.display());
     }
-    // Only .rs files are scanned by the extractor today — writing an
-    // annotation to a non-Rust file silently drops the ticket off the board.
-    // See @yah:ticket(R001-T2) in yah/src/arch/extract.rs for the tracked
-    // fix (AnnotationTarget::File + per-language comment prefixes).
-    match target.extension().and_then(|e| e.to_str()) {
-        Some("rs") => {}
-        Some(ext) => anyhow::bail!(
-            "board claim only supports .rs files; .{} is not scanned by the extractor \
-             yet (see R001-T2 in yah/src/arch/extract.rs). \
-             Anchor the ticket on a .rs file (use @arch:see(...) to point at the doc).",
+    // The extractor (yah/src/arch/extract.rs) walks rs/ts/tsx/js/jsx/md/
+    // toml/yaml/yml with per-language comment-prefix tables. Mirror that
+    // set here so `board open` can anchor a ticket directly on the file
+    // it concerns instead of forcing a .rs hop with @arch:see(...).
+    let comment_prefix = match target.extension().and_then(|e| e.to_str()) {
+        Some(ext) => annotation_prefix_for(ext).ok_or_else(|| anyhow::anyhow!(
+            "board open/claim doesn't support .{} files. Supported: \
+             rs, ts, tsx, js, jsx, md, toml, yaml, yml. \
+             Anchor on a related supported file (use @arch:see(...) to link the actual doc).",
             ext
-        ),
+        ))?,
         None => anyhow::bail!(
-            "board claim requires a file with a .rs extension; got {}",
+            "board open/claim requires a file with an extension; got {}",
             target.display()
         ),
-    }
+    };
     let target = std::fs::canonicalize(&target).unwrap_or(target);
 
     // Normalize kind. `epic` is shorthand for "relay with @yah:kind(epic)".
@@ -5847,6 +5825,7 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
         &args.gotcha,
         &args.assumes,
         &args.see,
+        comment_prefix,
     );
 
     let warnings = arch::smell::write_time_warnings(
@@ -5858,9 +5837,9 @@ fn handle_claim(args: ClaimArgs) -> Result<()> {
         eprintln!("⚠ {}", w);
     }
 
-    // Insert into target file: append to leading //! block if present, else prepend.
+    // Insert into target file: append to leading prefix block if present, else prepend.
     let original = std::fs::read_to_string(&target)?;
-    let (new_content, line) = insert_module_doc_block(&original, &ann);
+    let (new_content, line) = insert_module_doc_block(&original, &ann, comment_prefix);
     std::fs::write(&target, new_content)?;
 
     // Output: workspace-relative path when possible
@@ -6483,17 +6462,15 @@ fn locate_ticket_block(content: &str, id: &str) -> Option<TicketBlock> {
     };
 
     let is_doc = |i: usize| -> bool {
-        let t = lines[i].trim_start();
-        t.starts_with("//!") || t.starts_with("///")
+        comment_sigil(lines[i]).is_some()
     };
     let is_blank_doc = |i: usize| -> bool {
         let t = lines[i].trim();
-        t == "//!" || t == "///"
+        t == "//!" || t == "///" || t == "#"
     };
     let is_yah_or_arch = |i: usize| -> bool {
-        let t = lines[i].trim_start();
-        (t.starts_with("//!") || t.starts_with("///"))
-            && (t.contains("@yah:") || t.contains("@arch:"))
+        comment_sigil(lines[i]).is_some()
+            && (lines[i].contains("@yah:") || lines[i].contains("@arch:"))
     };
 
     let decl_idx = (0..lines.len()).find(|&i| is_doc(i) && is_this_decl(lines[i]))?;
@@ -6552,17 +6529,7 @@ fn set_or_insert_annotation(
     let needle = format!("@yah:{}(", key);
 
     for i in (block.start_line - 1)..block.end_line {
-        let trimmed = lines[i].trim_start();
-        let prefix_end = lines[i].len() - trimmed.len();
-        let indent = &lines[i][..prefix_end];
-        let rest_after_sigil = if let Some(r) = trimmed.strip_prefix("//!") {
-            Some(("//!", r))
-        } else if let Some(r) = trimmed.strip_prefix("///") {
-            Some(("///", r))
-        } else {
-            None
-        };
-        let Some((sigil, after)) = rest_after_sigil else {
+        let Some((indent, sigil, after)) = comment_sigil(&lines[i]) else {
             continue;
         };
         if after.trim_start().starts_with(&needle) {
@@ -6596,14 +6563,10 @@ fn append_lines_to_block(
     let adjusted: Vec<String> = new_lines_raw
         .iter()
         .map(|l| {
-            // Strip leading `//!` / `///` and re-attach the block's prefix.
-            let trimmed = l.trim_start();
-            let rest = if let Some(r) = trimmed.strip_prefix("//!") {
-                r
-            } else if let Some(r) = trimmed.strip_prefix("///") {
-                r
-            } else {
-                trimmed
+            // Strip leading `//!` / `///` / `#` and re-attach the block's prefix.
+            let rest = match comment_sigil(l) {
+                Some((_, _, r)) => r,
+                None => l.trim_start(),
             };
             format!("{}{}", prefix, rest)
         })
@@ -6616,16 +6579,49 @@ fn append_lines_to_block(
 }
 
 fn extract_doc_prefix(line: &str) -> String {
-    // Preserve leading whitespace + `//!` or `///`.
-    let ws_end = line.find(|c: char| !c.is_whitespace()).unwrap_or(0);
-    let ws = &line[..ws_end];
-    let rest = &line[ws_end..];
-    if rest.starts_with("//!") {
-        format!("{}//!", ws)
-    } else if rest.starts_with("///") {
-        format!("{}///", ws)
-    } else {
-        format!("{}//!", ws)
+    // Preserve leading whitespace + the comment sigil (`//!`, `///`, or `#`).
+    match comment_sigil(line) {
+        Some((indent, sigil, _)) => format!("{}{}", indent, sigil),
+        None => {
+            let ws_end = line.find(|c: char| !c.is_whitespace()).unwrap_or(0);
+            format!("{}//!", &line[..ws_end])
+        }
+    }
+}
+
+/// Recognize a yah/arch annotation comment sigil at the start of `line`.
+/// Returns `(leading_indent, sigil, rest_after_sigil)` for `//!`, `///`,
+/// or TOML/YAML `#` (excluding Rust `#[…]` / `#![…]` attributes).
+fn comment_sigil(line: &str) -> Option<(&str, &'static str, &str)> {
+    let trimmed = line.trim_start();
+    let prefix_end = line.len() - trimmed.len();
+    let indent = &line[..prefix_end];
+    if let Some(rest) = trimmed.strip_prefix("//!") {
+        return Some((indent, "//!", rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix("///") {
+        return Some((indent, "///", rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix('#') {
+        // Skip Rust attributes `#[...]` / `#![...]`.
+        if rest.starts_with('[') || rest.starts_with('!') {
+            return None;
+        }
+        return Some((indent, "#", rest));
+    }
+    None
+}
+
+/// Comment prefix used when *writing* annotation blocks to a target file.
+/// Mirrors the per-language tables in `yah/src/arch/extract.rs`. `Some("")`
+/// means "no prefix" (Markdown — the extractor reads contiguous non-blank
+/// lines as a single anchor block).
+fn annotation_prefix_for(ext: &str) -> Option<&'static str> {
+    match ext {
+        "rs" | "ts" | "tsx" | "js" | "jsx" => Some("//!"),
+        "toml" | "yaml" | "yml" => Some("#"),
+        "md" => Some(""),
+        _ => None,
     }
 }
 
@@ -6647,67 +6643,83 @@ fn build_annotation_block(
     gotcha: &[String],
     assumes: &[String],
     see: &[String],
+    prefix: &str,
 ) -> String {
     let mut lines = Vec::<String>::new();
     let head = if is_relay { "relay" } else { "ticket" };
-    lines.push(format!(
-        "//! @yah:{}({}, {:?})",
-        head, id, title
-    ));
+    let lp = if prefix.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", prefix)
+    };
+    lines.push(format!("{}@yah:{}({}, {:?})", lp, head, id, title));
     if let Some(k) = kind_override {
-        lines.push(format!("//! @yah:kind({})", k));
+        lines.push(format!("{}@yah:kind({})", lp, k));
     }
     if let Some(s) = status {
-        lines.push(format!("//! @yah:status({})", s));
+        lines.push(format!("{}@yah:status({})", lp, s));
     }
     if let Some(a) = assignee {
-        lines.push(format!("//! @yah:assignee({})", a));
+        lines.push(format!("{}@yah:assignee({})", lp, a));
     }
     if let Some(p) = phase {
-        lines.push(format!("//! @yah:phase({})", p));
+        lines.push(format!("{}@yah:phase({})", lp, p));
     }
     if let Some(p) = parent {
-        lines.push(format!("//! @yah:parent({})", p));
+        lines.push(format!("{}@yah:parent({})", lp, p));
     }
     if let Some(s) = severity {
-        lines.push(format!("//! @yah:severity({})", s));
+        lines.push(format!("{}@yah:severity({})", lp, s));
     }
     for h in handoff {
-        lines.push(format!("//! @yah:handoff({:?})", h));
+        lines.push(format!("{}@yah:handoff({:?})", lp, h));
     }
     for n in next {
-        lines.push(format!("//! @yah:next({:?})", n));
+        lines.push(format!("{}@yah:next({:?})", lp, n));
     }
     for v in verify {
-        lines.push(format!("//! @yah:verify({:?})", v));
+        lines.push(format!("{}@yah:verify({:?})", lp, v));
     }
     for c in cleanup {
-        lines.push(format!("//! @yah:cleanup({:?})", c));
+        lines.push(format!("{}@yah:cleanup({:?})", lp, c));
     }
     for g in gotcha {
-        lines.push(format!("//! @yah:gotcha({:?})", g));
+        lines.push(format!("{}@yah:gotcha({:?})", lp, g));
     }
     for a in assumes {
-        lines.push(format!("//! @yah:assumes({:?})", a));
+        lines.push(format!("{}@yah:assumes({:?})", lp, a));
     }
     for s in see {
-        lines.push(format!("//! @arch:see({})", s));
+        lines.push(format!("{}@arch:see({})", lp, s));
     }
     lines.join("\n")
 }
 
-/// Insert `block` into `content` as a module-level doc comment. If the file
-/// already starts with `//!` lines, append the block to that run (separated by
-/// a blank `//!` line). Otherwise insert at the very top.
-/// Returns the new content and the 1-indexed line number of the block's first
-/// line in the new content.
-fn insert_module_doc_block(content: &str, block: &str) -> (String, usize) {
+/// Insert `block` into `content` at the top, using `prefix` as the
+/// comment marker for head-block detection. If the file already starts
+/// with `<prefix>` lines, append to that run (separated by a bare
+/// `<prefix>` line). Otherwise prepend at the top.
+///
+/// Empty prefix (Markdown) skips head-block detection — every line would
+/// otherwise match — and always prepends with a blank-line separator.
+///
+/// Returns the new content and the 1-indexed line number of the block's
+/// first line in the new content.
+fn insert_module_doc_block(content: &str, block: &str, prefix: &str) -> (String, usize) {
+    if prefix.is_empty() {
+        let mut out = String::new();
+        out.push_str(block);
+        out.push_str("\n\n");
+        out.push_str(content);
+        return (out, 1);
+    }
+
     let lines: Vec<&str> = content.split('\n').collect();
     let mut head_end = 0usize;
     while head_end < lines.len() {
         let l = lines[head_end];
         let trimmed = l.trim_start();
-        if trimmed.starts_with("//!") {
+        if trimmed.starts_with(prefix) {
             head_end += 1;
         } else {
             break;
@@ -6715,10 +6727,10 @@ fn insert_module_doc_block(content: &str, block: &str) -> (String, usize) {
     }
 
     if head_end > 0 {
-        // Append to existing `//!` block.
+        // Append to existing prefix block.
         let mut new_lines: Vec<String> = lines[..head_end].iter().map(|s| s.to_string()).collect();
         // Separator between existing block and new annotations
-        new_lines.push("//!".to_string());
+        new_lines.push(prefix.to_string());
         let insert_start_line = new_lines.len() + 1; // 1-indexed
         for l in block.split('\n') {
             new_lines.push(l.to_string());
@@ -6735,148 +6747,6 @@ fn insert_module_doc_block(content: &str, block: &str) -> (String, usize) {
         out.push_str(content);
         (out, 1)
     }
-}
-
-fn apply_arch_init_template(path: &Path) -> Result<()> {
-    // Find workspace Cargo.toml
-    let cargo_toml = if path.join("Cargo.toml").exists() {
-        path.join("Cargo.toml")
-    } else {
-        // Try to find it via cargo metadata
-        let output = std::process::Command::new("cargo")
-            .args(["locate-project", "--workspace", "--message-format=plain"])
-            .current_dir(path)
-            .output()
-            .context("Failed to run cargo locate-project")?;
-        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
-    };
-
-    if !cargo_toml.exists() {
-        bail!("Could not find Cargo.toml at {:?}", cargo_toml);
-    }
-
-    // Read existing content
-    let content = std::fs::read_to_string(&cargo_toml)
-        .context("Failed to read Cargo.toml")?;
-
-    // Check if arch metadata already exists
-    if content.contains("[workspace.metadata.arch]") {
-        eprintln!("Architecture metadata already exists in {}", cargo_toml.display());
-        eprintln!("Edit manually or remove existing section first.");
-        return Ok(());
-    }
-
-    // Append the template
-    let template = r#"
-# Architecture Knowledge Graph Configuration
-# See: yah arch --help
-[workspace.metadata.arch]
-
-# Define architectural layers (customize for your project)
-[workspace.metadata.arch.layers]
-core = { description = "Core library with no external dependencies", allowed_dependencies = [] }
-lib = { description = "Library layer", allowed_dependencies = ["core"] }
-app = { description = "Application entry points", allowed_dependencies = ["core", "lib"] }
-
-# Define roles for components
-[workspace.metadata.arch.roles]
-compiler = "Transforms source to executable form"
-runtime = "Manages execution state"
-transport = "Routes messages between components"
-
-# Define validation rules
-[[workspace.metadata.arch.rules]]
-name = "core-independence"
-description = "Core layer cannot depend on higher layers"
-severity = "error"
-type = "layer_dependency"
-layer = "core"
-allowed = []
-"#;
-
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(&cargo_toml)
-        .context("Failed to open Cargo.toml for appending")?;
-
-    use std::io::Write;
-    writeln!(file, "{}", template)?;
-
-    eprintln!("Added [workspace.metadata.arch] to {}", cargo_toml.display());
-    eprintln!("Next steps:");
-    eprintln!("  1. Edit the layers/roles to match your architecture");
-    eprintln!("  2. Add @arch: annotations to your source files");
-    eprintln!("  3. Run 'yah arch extract' to build the graph");
-    Ok(())
-}
-
-fn print_arch_init_template() {
-    println!(r#"# Add this to your workspace Cargo.toml
-
-[workspace.metadata.arch]
-
-# Define architectural layers
-[workspace.metadata.arch.layers]
-core = {{ description = "Core library with no external dependencies", allowed_dependencies = [] }}
-lib = {{ description = "Library layer", allowed_dependencies = ["core"] }}
-api = {{ description = "API/service layer", allowed_dependencies = ["core", "lib"] }}
-app = {{ description = "Application entry points", allowed_dependencies = ["core", "lib", "api"] }}
-
-# Define roles for components
-[workspace.metadata.arch.roles]
-compiler = "Transforms source to executable form"
-runtime = "Manages execution state"
-transport = "Routes messages between components"
-storage = "Persists and retrieves data"
-
-# Define thread contexts (optional)
-[workspace.metadata.arch.threads]
-main = {{ priority = "normal", description = "Main thread" }}
-worker = {{ priority = "normal", description = "Background worker threads" }}
-
-# Define validation rules
-[[workspace.metadata.arch.rules]]
-name = "core-independence"
-description = "Core layer cannot depend on higher layers"
-severity = "error"
-type = "layer_dependency"
-layer = "core"
-allowed = []
-"#);
-}
-
-fn print_arch_example_annotations() {
-    println!(r#"# Example @arch: annotations for Rust source files
-
-## Module-level (at top of file with //! comments):
-
-//! @arch:layer(core)
-//! @arch:role(runtime)
-
-## Struct-level:
-
-/// @arch:layer(lib)
-/// @arch:role(storage)
-/// @arch:produces(event:Created, event:Updated)
-pub struct Repository {{ ... }}
-
-## Function-level:
-
-/// @arch:thread(worker)
-/// @arch:consumes(command:Create)
-pub fn process_command(cmd: Command) {{ ... }}
-
-## Available annotations:
-
-@arch:layer(name)              - Architectural layer
-@arch:role(name)               - Component role
-@arch:thread(name)             - Thread context
-@arch:produces(type:name, ...) - Messages this component produces
-@arch:consumes(type:name, ...) - Messages this component consumes
-@arch:depends_on(target)       - Explicit dependency
-@arch:pattern(name)            - Design pattern in use
-@arch:gateway                  - Protocol translation point
-"#);
 }
 
 /// Expand semantic kind to list of specific node types

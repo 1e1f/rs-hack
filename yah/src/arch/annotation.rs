@@ -127,16 +127,16 @@ pub enum ArchKind {
     // Two nouns: Ticket (unit of work) and Relay (thread of work).
     // Everything else is a tag on one of these.
 
-    /// @yah:ticket(ID, "title") - a unit of work
+    /// `@yah:ticket(ID, "title")` - a unit of work
     Ticket { id: String, title: String },
 
-    /// @yah:relay(ID, "title") - a thread of work / coordination point
+    /// `@yah:relay(ID, "title")` - a thread of work / coordination point
     Relay { id: String, title: String },
 
-    /// @yah:kind(feature|bug|task) - what kind of ticket
+    /// `@yah:kind(feature|bug|task)` - what kind of ticket
     Kind(String),
 
-    /// @yah:status(open|claimed|in-progress|handoff|review|done)
+    /// `@yah:status(open|claimed|in-progress|handoff|review|done)`
     Status(String),
 
     /// @yah:assignee(agent:claude, user:leif, etc.)

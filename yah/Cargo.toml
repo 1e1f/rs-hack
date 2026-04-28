@@ -72,6 +72,9 @@ thiserror = "1.0"
 petgraph = "0.6"
 cargo_metadata = "0.18"
 
+# Knowledge-graph contract types (shared with daemon, RPC, board recompute)
+yah-kg = { path = "../yah-kg" }
+
 # MCP server (stdio JSON-RPC)
 tokio = { version = "1.35", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }

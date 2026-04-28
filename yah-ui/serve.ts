@@ -1,3 +1,12 @@
+//! @yah:ticket(R015-T6, "yah-ui Vitest setup; clear pre-existing serve.ts typecheck noise")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P3)
+//! @yah:parent(R015)
+//! @yah:next("Add Vitest or bun-test config for component smoke tests (typecheck is the only check today)")
+//! @yah:next("serve.ts shows pre-existing Bun-globals errors — add @types/bun or // @ts-nocheck")
+//! @yah:verify("cd yah-ui && bun run typecheck  # zero errors")
+
 // Tiny static server for development. Same bundle works inside Tauri's webview;
 // in production the Rust `yah` binary will serve these assets.
 

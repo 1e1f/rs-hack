@@ -5,6 +5,20 @@
 //!
 //! Tool registry: defines MCP tool schemas and executes them
 //! by shelling out to the yah CLI binary.
+//!
+//! @yah:relay(R022, "MCP in-process dispatch — lift CLI to yah::cli::run(argv) lib API")
+//! @yah:status(open)
+//! @yah:parent(R013)
+//! @yah:next("Define yah::cli::run(argv) -> Result<i32> in lib.rs (or cli.rs)")
+//! @yah:next("Move dispatch logic from main.rs::main into the lib function")
+//! @yah:next("Add stdout-capture variant: yah::cli::run_capture(args) -> Result<String>")
+//! @yah:next("Migrate yah/src/mcp/tools.rs from Command::new to in-process call")
+//! @yah:next("Wrap calls in std::panic::catch_unwind so a panic doesn't kill MCP")
+//! @yah:next("Use try_parse_from to avoid clap's process::exit on --help")
+//! @yah:next("Latency benchmark: tool-call sequence over 1k-file repo, expect ~10x speedup")
+//! @yah:verify("cargo build -p yah && cargo test -p yah")
+//! @yah:verify("yah mcp smoke test: tool calls return identical results to subprocess impl")
+//! @arch:see(architecture/mcp-in-process-dispatch.md)
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};

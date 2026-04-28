@@ -1,15 +1,28 @@
-import { useState } from "react";
+
+import { useEffect, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { KindBadge, StatusPill } from "../shared/Pill";
 import { Glyph, Icon } from "../shared/Glyph";
 import { CardExpanded } from "./CardExpanded";
 import { CountChip } from "./CountChip";
+import { buildPickupPrompt, buildReviewPrompt } from "./prompt";
+import { getEnv } from "../../env";
+import type { WireViolation } from "../../env/types";
 import type { Ticket } from "../../types";
 
 interface TicketCardProps {
+  /* Rig the prompt should be rendered against. Threaded down from the
+     Board so the clipboard-copy click can call `arch.ticket_prompt` —
+     the daemon-side renderer that stays byte-equal with
+     `yah board show <id> --prompt`. */
+  rigId: string;
   ticket: Ticket;
   columnEyebrow?: string;
+  /* Rule violations whose anchor file matches this ticket's anchor file —
+     surfaced as a small badge in the header so a failing rule reads as a
+     status line on the relay/ticket that owns it (per R017-F2). */
+  violations?: WireViolation[];
 }
 
 /* Mapping from raw status to the column-eyebrow string. Used to suppress the
@@ -25,11 +38,57 @@ const STATUS_LABEL: Record<string, string> = {
   done: "Validated",
 };
 
-export function TicketCard({ ticket: t, columnEyebrow }: TicketCardProps) {
+export function TicketCard({ rigId, ticket: t, columnEyebrow, violations }: TicketCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+  const copyResetRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (copyResetRef.current !== null)
+        window.clearTimeout(copyResetRef.current);
+    },
+    [],
+  );
   const isRelay = t.itemType === "relay";
   const isZone = !!t.isZone;
   const isEpic = t.kind === "epic";
+  const isReviewMode = t.status === "review" || t.status === "done";
+
+  async function handleCopyPrompt(e: React.MouseEvent) {
+    e.stopPropagation();
+    /* Source-of-truth prompt rendering lives on the daemon
+       (`arch.ticket_prompt` → yah_kg::prompt::render). The browser stub
+       returns markdown:null because there's no daemon running; in that
+       case we fall back to the local builder so dev-mode without Tauri
+       still produces a clipboard payload. The Tauri path always returns
+       markdown for live ids — null only when the id isn't on the board. */
+    const mode = isReviewMode ? "review" : "pickup";
+    let text: string | null = null;
+    try {
+      const env = await getEnv();
+      const result = await env.rpc.ticketPrompt(rigId, { id: t.id, mode });
+      text = result.markdown;
+    } catch (err) {
+      console.warn("[ticket-prompt] rpc failed, falling back to local builder", err);
+    }
+    if (text == null) {
+      text = isReviewMode ? buildReviewPrompt(t) : buildPickupPrompt(t);
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+    if (copyResetRef.current !== null)
+      window.clearTimeout(copyResetRef.current);
+    copyResetRef.current = window.setTimeout(() => {
+      setCopyState("idle");
+      copyResetRef.current = null;
+    }, 1600);
+  }
   const hasAgent =
     isRelay && typeof t.assignee === "string" && t.assignee.startsWith("agent:");
   /* "Live" = a relay an agent is currently driving. We don't animate per-ticket;
@@ -50,6 +109,16 @@ export function TicketCard({ ticket: t, columnEyebrow }: TicketCardProps) {
   /* Hide status pill when it just echoes the column eyebrow. */
   const echoesColumn =
     !!columnEyebrow && STATUS_LABEL[t.status] === columnEyebrow;
+
+  const violationCount = violations?.length ?? 0;
+  const violationHasError =
+    violations?.some((v) => v.severity === "error") ?? false;
+  const violationTooltip = violations
+    ?.map(
+      (v) =>
+        `${v.severity === "error" ? "✗" : "⚠"} ${v.rule_kind}: ${v.message}`,
+    )
+    .join("\n");
 
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: t.id, disabled: isZone });
@@ -127,6 +196,17 @@ export function TicketCard({ ticket: t, columnEyebrow }: TicketCardProps) {
               )}
             </span>
             {!echoesColumn && !isZone && <StatusPill status={t.status} />}
+            {violationCount > 0 && (
+              <span
+                title={violationTooltip}
+                className={`inline-flex cursor-help items-center gap-0.5 ${
+                  violationHasError ? "text-st-bug" : "text-st-handoff"
+                }`}
+              >
+                <Icon name="bug" size={12} />
+                <span className="font-mono text-[10px]">{violationCount}</span>
+              </span>
+            )}
             {mixed && (
               <span
                 title="Mixed children — this relay holds both child relays and loose tickets. Move tickets into a child relay."
@@ -173,8 +253,33 @@ export function TicketCard({ ticket: t, columnEyebrow }: TicketCardProps) {
         <CardButton title="Open in Agent">
           <Glyph name="g-agent" size={12} /> agent
         </CardButton>
-        <CardButton title="Copy pickup prompt">
-          <Icon name="copy" size={11} /> prompt
+        <CardButton
+          title={
+            copyState === "copied"
+              ? "Prompt copied to clipboard"
+              : copyState === "error"
+                ? "Clipboard write failed — check browser permissions"
+                : isReviewMode
+                  ? "Copy review prompt (verify + approve/send-back)"
+                  : "Copy pickup prompt"
+          }
+          onClick={handleCopyPrompt}
+          tone={
+            copyState === "copied"
+              ? "success"
+              : copyState === "error"
+                ? "danger"
+                : "default"
+          }
+        >
+          <Icon name={copyState === "copied" ? "check" : "copy"} size={11} />{" "}
+          {copyState === "copied"
+            ? "copied"
+            : copyState === "error"
+              ? "failed"
+              : isReviewMode
+                ? "review"
+                : "prompt"}
         </CardButton>
       </footer>
     </article>
@@ -198,16 +303,29 @@ function ZoneChildCounts({
 function CardButton({
   title,
   children,
+  onClick,
+  tone = "default",
 }: {
   title: string;
   children: React.ReactNode;
+  onClick?: (e: React.MouseEvent) => void;
+  tone?: "default" | "success" | "danger";
 }) {
+  const toneClass =
+    tone === "success"
+      ? "text-st-review hover:bg-vellum-2"
+      : tone === "danger"
+        ? "text-st-bug hover:bg-vellum-2"
+        : "text-ink-3 hover:bg-vellum-2 hover:text-ink-2";
   return (
     <button
       title={title}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(e);
+      }}
       onPointerDown={(e) => e.stopPropagation()}
-      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-3 hover:bg-vellum-2 hover:text-ink-2"
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ${toneClass}`}
     >
       {children}
     </button>

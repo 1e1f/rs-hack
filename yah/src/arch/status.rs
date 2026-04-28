@@ -8,7 +8,7 @@
 //! command. Deliberately different shape from `board tickets` (per-ticket
 //! dump): counts, ownership, epic progress, smell signals.
 
-use crate::arch::ticket::{ItemType, Ticket, TicketBoard, TicketStatus};
+use crate::arch::ticket::{Ticket, TicketBoard, TicketStatus};
 use serde::Serialize;
 use std::path::Path;
 

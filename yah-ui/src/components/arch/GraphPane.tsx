@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import mermaid from "mermaid";
 import type { ArchEdge, ArchNode, ArchSubgraph, EdgeKind } from "../../types";
+import type { WireViolation } from "../../env/types";
 import { NodeHoverCard } from "./NodeHoverCard";
 import { NodeActionMenu } from "./NodeActionMenu";
 
@@ -152,6 +153,11 @@ interface GraphPaneProps {
   onOpenInAgent?: (nodeId: string) => void;
   onNodeHover?: (nodeId: string | null) => void;
   onPinView?: () => void;
+  /* Rule-validator output. Nodes whose id matches a violation's `offending`
+     (preferred) or `anchor` (fallback) get a red border + a `title` tooltip
+     listing the offending rule kinds — both applied via post-render
+     querySelector since mermaid's classDef doesn't take a per-node hue. */
+  violations?: WireViolation[];
 }
 
 interface ActionMenuState {
@@ -159,6 +165,17 @@ interface ActionMenuState {
   x: number;
   y: number;
 }
+
+interface Transform {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+const IDENTITY: Transform = { x: 0, y: 0, scale: 1 };
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 4;
+const PAN_THRESHOLD_PX = 4;
 
 export function GraphPane({
   subgraph,
@@ -168,12 +185,63 @@ export function GraphPane({
   onOpenInAgent,
   onNodeHover,
   onPinView,
+  violations,
 }: GraphPaneProps) {
+  /* Bucket violations by the affected node id. We prefer `offending` (the
+     node that broke the rule) over `anchor` (the node that authored the
+     rule); both ids surface a marker so the user sees both ends of a
+     failing rule. Memoized so the post-render styling effect doesn't
+     re-fire on unrelated re-renders. */
+  const violationsByNode = useMemo(() => {
+    const map = new Map<string, WireViolation[]>();
+    if (!violations) return map;
+    for (const v of violations) {
+      const ids = new Set<string>();
+      if (v.offending) ids.add(v.offending);
+      ids.add(v.anchor);
+      for (const id of ids) {
+        const arr = map.get(id) ?? [];
+        arr.push(v);
+        map.set(id, arr);
+      }
+    }
+    return map;
+  }, [violations]);
   const ref = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [menu, setMenu] = useState<ActionMenuState | null>(null);
   /* Bumped by a MutationObserver on [data-theme] so re-themes re-render. */
   const [themeTick, setThemeTick] = useState(0);
+  /* Pan is a CSS translate on the wrapper; zoom is applied by writing
+     the SVG's own width/height. CSS-scaling the wrapper rasterizes the
+     foreignObject HTML labels mermaid emits (browsers snapshot HTML in
+     SVG before transforming), which goes blurry past ~1.5x. Resizing
+     the SVG directly forces a vector rerender at every step. */
+  const [transform, setTransform] = useState<Transform>(IDENTITY);
+  const transformRef = useRef<Transform>(IDENTITY);
+  const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
+  /* Tracks whether the current rootId has been auto-fit yet. Each
+     mermaid re-render bumps `renderTick`, but we only want to reset the
+     viewport on the *first* render for a given root — subsequent
+     re-renders (caused by index_finished refetches, theme flips, edge-
+     filter toggles) should preserve whatever pan/zoom the user is on.
+     Reset to false in the rootId-change effect below. */
+  const hasFittedRef = useRef(false);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    startTx: number;
+    startTy: number;
+    moved: boolean;
+  } | null>(null);
+  /* Renderer revision so the fit effect knows when a fresh SVG landed
+     (the mermaid render pass writes innerHTML asynchronously). */
+  const [renderTick, setRenderTick] = useState(0);
+
+  useEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
 
   useEffect(() => {
     const obs = new MutationObserver(() => setThemeTick((t) => t + 1));
@@ -195,6 +263,26 @@ export function GraphPane({
       .then(({ svg }) => {
         if (cancelled || !ref.current) return;
         ref.current.innerHTML = svg;
+        /* Mermaid emits a viewBox + a width/height baked from layout.
+           Capture the natural dimensions, then strip width/height/maxWidth
+           so our zoom effect can drive them via inline width/height in
+           pixels at every scale step. */
+        const svgEl = ref.current.querySelector<SVGSVGElement>("svg");
+        if (svgEl) {
+          const vb = svgEl.viewBox.baseVal;
+          let w = vb && vb.width > 0 ? vb.width : svgEl.clientWidth;
+          let h = vb && vb.height > 0 ? vb.height : svgEl.clientHeight;
+          if (!w || !h) {
+            const rect = svgEl.getBoundingClientRect();
+            w = w || rect.width;
+            h = h || rect.height;
+          }
+          naturalSizeRef.current = { w, h };
+          svgEl.style.maxWidth = "none";
+          svgEl.removeAttribute("width");
+          svgEl.removeAttribute("height");
+          svgEl.style.display = "block";
+        }
 
         ref.current
           .querySelectorAll<SVGTextElement | HTMLElement>(".edgeLabel, .edgeLabel *")
@@ -217,8 +305,39 @@ export function GraphPane({
         ref.current.querySelectorAll<SVGGElement>("g.node").forEach((node) => {
           const raw = node.id;
           const nodeId = raw.replace(/^flowchart-/, "").replace(/-\d+$/, "");
+          /* Paint violations on the node's fill rect: an oxblood stroke
+             (heavier than the layer hue) + a native title tooltip listing
+             the offending rule kinds. We don't reach for SVG <title>
+             elements directly because mermaid would clobber them on
+             re-render; the DOM `title` attr is enough for hover hints. */
+          const nodeViolations = violationsByNode.get(nodeId);
+          if (nodeViolations && nodeViolations.length > 0) {
+            const hasError = nodeViolations.some((v) => v.severity === "error");
+            const stroke = hasError
+              ? cssVar("--color-oxblood", "#7a2a2a")
+              : cssVar("--color-brass", "#9c7a2a");
+            node
+              .querySelectorAll<SVGElement>("rect, polygon, circle, path")
+              .forEach((shape) => {
+                shape.style.stroke = stroke;
+                shape.style.strokeWidth = "2.4px";
+              });
+            const tip = nodeViolations
+              .map((v) => `${v.severity === "error" ? "✗" : "⚠"} ${v.rule_kind}: ${v.message}`)
+              .join("\n");
+            node.setAttribute("data-violations", String(nodeViolations.length));
+            const titleEl = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "title",
+            );
+            titleEl.textContent = tip;
+            node.insertBefore(titleEl, node.firstChild);
+          }
           node.style.cursor = "pointer";
           node.addEventListener("click", (ev) => {
+            /* Drag-to-pan can end on a node — suppress the click in that
+               case so the action menu doesn't pop after a pan release. */
+            if (dragRef.current?.moved) return;
             ev.stopPropagation();
             const archNode = subgraph.nodes.find((n) => n.id === nodeId);
             if (!archNode) return;
@@ -233,6 +352,7 @@ export function GraphPane({
             onNodeHover?.(null);
           });
         });
+        setRenderTick((t) => t + 1);
       })
       .catch((err) => {
         if (!cancelled && ref.current) {
@@ -242,7 +362,132 @@ export function GraphPane({
     return () => {
       cancelled = true;
     };
-  }, [subgraph, enabledKinds, onNodeHover, themeTick]);
+  }, [subgraph, enabledKinds, onNodeHover, themeTick, violationsByNode]);
+
+  /* Fit-to-view: scale the graph to ~90% of the container's smaller axis
+     and center it. Reads natural dimensions from the captured viewBox,
+     not from getBoundingClientRect (which would already include any
+     prior scale). */
+  const fitToView = useCallback(() => {
+    const container = containerRef.current;
+    const natural = naturalSizeRef.current;
+    if (!container || !natural) return;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    if (cw === 0 || ch === 0 || natural.w === 0 || natural.h === 0) return;
+    const scale = Math.min(
+      MAX_SCALE,
+      Math.max(MIN_SCALE, Math.min(cw / natural.w, ch / natural.h) * 0.9),
+    );
+    const x = (cw - natural.w * scale) / 2;
+    const y = (ch - natural.h * scale) / 2;
+    setTransform({ x, y, scale });
+    hasFittedRef.current = true;
+  }, []);
+
+  /* Re-arm auto-fit when the rootId changes — switching to a new root
+     (or opening a pinned view) should always recenter, since the user's
+     prior viewport is meaningless against a different graph. */
+  useEffect(() => {
+    hasFittedRef.current = false;
+  }, [subgraph.rootId]);
+
+  useLayoutEffect(() => {
+    if (renderTick === 0) return;
+    if (hasFittedRef.current) return;
+    fitToView();
+  }, [renderTick, fitToView]);
+
+  /* Push scale into the SVG's width/height so each zoom step rerenders
+     vectors + foreignObject contents crisply instead of being a CSS
+     bitmap stretch. Runs after every transform change. */
+  useLayoutEffect(() => {
+    const inner = ref.current;
+    const natural = naturalSizeRef.current;
+    if (!inner || !natural) return;
+    const svg = inner.querySelector<SVGSVGElement>("svg");
+    if (!svg) return;
+    svg.style.width = `${natural.w * transform.scale}px`;
+    svg.style.height = `${natural.h * transform.scale}px`;
+  }, [transform.scale, renderTick]);
+
+  const handleWheel = useCallback((ev: React.WheelEvent<HTMLDivElement>) => {
+    ev.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const mx = ev.clientX - rect.left;
+    const my = ev.clientY - rect.top;
+    setTransform((prev) => {
+      /* Wheel deltas vary wildly by input device — clamp to a stable
+         per-tick zoom factor so trackpad pinch and discrete-wheel mice
+         feel similar. */
+      const factor = Math.exp(-ev.deltaY * 0.0015);
+      const next = Math.min(
+        MAX_SCALE,
+        Math.max(MIN_SCALE, prev.scale * factor),
+      );
+      if (next === prev.scale) return prev;
+      const ratio = next / prev.scale;
+      return {
+        x: mx - (mx - prev.x) * ratio,
+        y: my - (my - prev.y) * ratio,
+        scale: next,
+      };
+    });
+  }, []);
+
+  const handleMouseDown = useCallback(
+    (ev: React.MouseEvent<HTMLDivElement>) => {
+      /* Only initiate pan from background mousedowns — node mousedowns
+         bubble up too, but their click handler runs first and stops
+         propagation, so the threshold + moved flag still gate things. */
+      if (ev.button !== 0) return;
+      dragRef.current = {
+        startX: ev.clientX,
+        startY: ev.clientY,
+        startTx: transformRef.current.x,
+        startTy: transformRef.current.y,
+        moved: false,
+      };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    function onMove(ev: MouseEvent) {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const dx = ev.clientX - drag.startX;
+      const dy = ev.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < PAN_THRESHOLD_PX) return;
+      drag.moved = true;
+      setTransform((prev) => ({
+        x: drag.startTx + dx,
+        y: drag.startTy + dy,
+        scale: prev.scale,
+      }));
+    }
+    function onUp() {
+      const drag = dragRef.current;
+      if (!drag) return;
+      /* Keep `moved` true through the click-bubble tick so node click
+         handlers can read it; clear on the next animation frame. */
+      if (drag.moved) {
+        requestAnimationFrame(() => {
+          dragRef.current = null;
+        });
+      } else {
+        dragRef.current = null;
+      }
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   const hoveredNode = subgraph.nodes.find((n) => n.id === hovered) ?? null;
 
@@ -256,24 +501,46 @@ export function GraphPane({
         <span>
           {subgraph.edges.filter((e) => enabledKinds.has(e.kind)).length} edges
         </span>
+        <span className="ml-auto tabular-nums text-ink-4">
+          {Math.round(transform.scale * 100)}%
+        </span>
+        <button
+          onClick={fitToView}
+          className="rounded px-2 py-1 text-ink-3 hover:bg-paper-2 hover:text-ink"
+          title="Fit to view"
+        >
+          Fit
+        </button>
         <button
           onClick={onPinView}
           disabled={!onPinView}
-          className="ml-auto rounded px-2 py-1 text-ink-3 hover:bg-paper-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="rounded px-2 py-1 text-ink-3 hover:bg-paper-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
         >
           Pin view
         </button>
       </div>
       <div
-        className="relative min-h-0 flex-1 overflow-auto"
+        ref={containerRef}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        className="relative min-h-0 flex-1 select-none overflow-hidden"
         style={{
           backgroundImage:
             "radial-gradient(circle, color-mix(in oklab, var(--color-ink-4) 25%, transparent) 1px, transparent 1.2px)",
-          backgroundSize: "24px 24px",
-          backgroundPosition: "10px 10px",
+          backgroundSize: `${24 * transform.scale}px ${24 * transform.scale}px`,
+          backgroundPosition: `${10 + transform.x}px ${10 + transform.y}px`,
+          cursor: dragRef.current?.moved ? "grabbing" : "grab",
         }}
       >
-        <div ref={ref} className="flex justify-center p-6" />
+        <div
+          ref={ref}
+          className="absolute left-0 top-0"
+          style={{
+            transform: `translate(${transform.x}px, ${transform.y}px)`,
+            transformOrigin: "0 0",
+            willChange: "transform",
+          }}
+        />
       </div>
       <NodeHoverCard node={menu ? null : hoveredNode} />
       {menu && (

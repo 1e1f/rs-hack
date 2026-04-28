@@ -236,7 +236,7 @@ mod tests {
     fn flags_stacked_handoff_over_threshold() {
         let mut t = mk_ticket("R001");
         t.handoff = vec!["x".repeat(300), "y".repeat(300)];
-        let board = TicketBoard { tickets: vec![t.clone()] };
+        let board = TicketBoard { tickets: vec![t.clone()], kg_board: yah_kg::board::Board::default() };
         let smells = ticket_smells(&t, &board);
         assert!(smells.iter().any(|s| s.contains("handoff stacked")));
     }
@@ -248,7 +248,7 @@ mod tests {
             "2026-04-19 pickup: did stuff".to_string(),
             "2026-04-22 pickup: did more stuff".to_string(),
         ];
-        let board = TicketBoard { tickets: vec![t.clone()] };
+        let board = TicketBoard { tickets: vec![t.clone()], kg_board: yah_kg::board::Board::default() };
         let smells = ticket_smells(&t, &board);
         assert!(smells.iter().any(|s| s.contains("dated markers")));
     }
@@ -259,7 +259,7 @@ mod tests {
         t.next_steps = vec![
             "Open R012-T2-B as the next free child via yah board claim --kind task --parent R012".to_string(),
         ];
-        let board = TicketBoard { tickets: vec![t.clone()] };
+        let board = TicketBoard { tickets: vec![t.clone()], kg_board: yah_kg::board::Board::default() };
         let smells = ticket_smells(&t, &board);
         assert!(smells.iter().any(|s| s.contains("concrete work unit")));
     }
@@ -271,7 +271,7 @@ mod tests {
         let mut child = mk_ticket("R001-T1");
         child.parent = Some("R001".to_string());
         child.status = TicketStatus::Review;
-        let board = TicketBoard { tickets: vec![parent.clone(), child] };
+        let board = TicketBoard { tickets: vec![parent.clone(), child], kg_board: yah_kg::board::Board::default() };
         let smells = ticket_smells(&parent, &board);
         assert!(smells.iter().any(|s| s.contains("Col01")));
     }

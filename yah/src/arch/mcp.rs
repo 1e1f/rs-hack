@@ -13,7 +13,6 @@
 //! - `arch_query`: Query the architecture graph
 //! - `arch_trace`: Find paths between nodes
 //! - `arch_context`: Get architectural context for a file
-//! - `arch_validate`: Validate architecture rules
 //!
 //! ## Integration with yah mcp
 //!
@@ -26,7 +25,6 @@ use crate::arch::promote::promote_summary;
 use crate::arch::query::{get_file_context, trace_path, Query};
 use crate::arch::summary;
 use crate::arch::ticket::TicketBoard;
-use crate::arch::validate::{load_rules_from_metadata, validate, Severity};
 use serde::{Deserialize, Serialize};
 
 /// Tool definitions for MCP registration.
@@ -220,23 +218,6 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["summary_id", "target_file"]
             }),
         },
-        ToolDefinition {
-            name: "arch_validate".into(),
-            description: "Validate architecture rules. Returns violations with file locations. Use after making changes to ensure architecture constraints are satisfied.".into(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to workspace root (default: current directory)"
-                    },
-                    "rules_file": {
-                        "type": "string",
-                        "description": "Path to custom rules TOML file (default: rules from Cargo.toml metadata)"
-                    }
-                }
-            }),
-        },
     ]
 }
 
@@ -246,7 +227,6 @@ pub fn handle_tool(name: &str, args: serde_json::Value) -> ToolResult {
         "arch_query" => handle_query(args),
         "arch_trace" => handle_trace(args),
         "arch_context" => handle_context(args),
-        "arch_validate" => handle_validate(args),
         "hack_tickets" => handle_tickets(args),
         "hack_summary" => handle_summary(args),
         "hack_promote" => handle_promote(args),
@@ -368,73 +348,6 @@ fn handle_context(args: serde_json::Value) -> ToolResult {
     }
 }
 
-fn handle_validate(args: serde_json::Value) -> ToolResult {
-    let path = args["path"].as_str().unwrap_or(".");
-    let rules_file = args["rules_file"].as_str();
-
-    let annotations = match extract_from_workspace(path) {
-        Ok(a) => a,
-        Err(e) => return ToolResult::error(format!("Failed to extract annotations: {}", e)),
-    };
-
-    let graph = ArchGraph::from_annotations(annotations);
-
-    // Load rules from file or from Cargo.toml metadata
-    let rules = if let Some(rules_path) = rules_file {
-        match std::fs::read_to_string(rules_path) {
-            Ok(content) => match crate::arch::validate::load_rules(&content) {
-                Ok(r) => r,
-                Err(e) => return ToolResult::error(format!("Failed to parse rules: {}", e)),
-            },
-            Err(e) => return ToolResult::error(format!("Failed to read rules file: {}", e)),
-        }
-    } else {
-        // Try to load from Cargo.toml metadata
-        match load_rules_from_metadata(path) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Note: Could not load rules from Cargo.toml: {}", e);
-                Vec::new()
-            }
-        }
-    };
-
-    if rules.is_empty() {
-        return ToolResult::text("No architecture rules defined. Add rules to [workspace.metadata.arch.rules] in Cargo.toml");
-    }
-
-    let violations = validate(&graph, &rules);
-
-    if violations.is_empty() {
-        ToolResult::text("✓ No violations found")
-    } else {
-        let mut output = String::new();
-        let errors = violations.iter().filter(|v| v.severity == Severity::Error).count();
-        let warnings = violations.iter().filter(|v| v.severity == Severity::Warning).count();
-
-        for v in &violations {
-            let prefix = match v.severity {
-                Severity::Error => "ERROR",
-                Severity::Warning => "WARNING",
-            };
-            let location = match (&v.file, v.line) {
-                (Some(f), Some(l)) => format!("{}:{}", f.display(), l),
-                (Some(f), None) => f.display().to_string(),
-                _ => "unknown".into(),
-            };
-            output.push_str(&format!("{}: {} - {} ({})\n", prefix, v.rule, v.message, location));
-        }
-
-        if errors > 0 {
-            output.push_str(&format!("\n✗ {} errors, {} warnings", errors, warnings));
-        } else {
-            output.push_str(&format!("\n⚠ {} warnings", warnings));
-        }
-
-        ToolResult::text(output)
-    }
-}
-
 fn handle_tickets(args: serde_json::Value) -> ToolResult {
     let path = args["path"].as_str().unwrap_or(".");
     let format = args["format"].as_str().unwrap_or("markdown");
@@ -478,9 +391,12 @@ fn handle_tickets(args: serde_json::Value) -> ToolResult {
             ToolResult::text(json)
         }
         _ => {
-            // Build a filtered board for markdown output
+            // Build a filtered board for markdown output. The KG board is
+            // only used for prompt rendering; markdown output doesn't need
+            // it, so leave it at default.
             let filtered = TicketBoard {
                 tickets: tickets.into_iter().cloned().collect(),
+                kg_board: yah_kg::board::Board::default(),
             };
             ToolResult::text(filtered.to_markdown())
         }
@@ -554,9 +470,9 @@ mod tests {
     #[test]
     fn test_tool_definitions() {
         let defs = tool_definitions();
-        assert_eq!(defs.len(), 7);
         assert!(defs.iter().any(|d| d.name == "arch_query"));
         assert!(defs.iter().any(|d| d.name == "arch_context"));
         assert!(defs.iter().any(|d| d.name == "hack_promote"));
+        assert!(!defs.iter().any(|d| d.name == "arch_validate"));
     }
 }

@@ -494,8 +494,17 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
 
 fn is_target_dir(entry: &walkdir::DirEntry) -> bool {
     let name = entry.file_name();
-    // Skip target dir and common non-source directories
-    name == "target" || name == "rust" || name == "vendor" || name == "node_modules"
+    // Skip target dir and common non-source / build-output directories.
+    // `dist`, `build`, `.next`, `.turbo` cover JS/TS bundlers — without
+    // them, bundles that inline source comments (e.g. esbuild's main.js)
+    // produce phantom duplicate annotations.
+    matches!(
+        name.to_str(),
+        Some(
+            "target" | "rust" | "vendor" | "node_modules"
+                | "dist" | "build" | ".next" | ".turbo"
+        )
+    )
 }
 
 /// Compute a hash of the source files for caching.

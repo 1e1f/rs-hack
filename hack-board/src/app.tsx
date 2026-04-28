@@ -213,7 +213,7 @@ function ArchiveButton({ ticket }: { ticket: Ticket }) {
   const btn = (
     <button
       disabled={state === "loading" || state === "archived"}
-      title="Archive this ticket — strips @yah: lines from source. Snapshot stays in .hack/events/ for unarchive."
+      title="Archive this ticket — strips @yah: lines from source. Snapshot stays in .yah/events/ for unarchive."
       onClick={async (e) => {
         e.stopPropagation();
         if (state === "loading" || state === "archived") return;

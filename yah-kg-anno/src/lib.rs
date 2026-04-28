@@ -25,6 +25,6 @@ pub mod apply;
 pub mod index;
 pub mod parser;
 
-pub use apply::{apply_pass, apply_to_node, ApplySummary};
-pub use index::AnnotationIndex;
-pub use parser::{parse_doc, ParseError, RawAnnotation};
+pub use apply::{apply_pass, apply_to_node, ApplySummary, TouchedWorkItem};
+pub use index::{AnnotationIndex, AnnotationIndexSnapshot};
+pub use parser::{parse_doc, ParseError, RawAnnotation, WorkItemType};

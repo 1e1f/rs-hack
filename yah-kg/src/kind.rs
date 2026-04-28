@@ -19,6 +19,7 @@ pub enum Lang {
     Ts,
     Yaml,
     Json,
+    Toml,
     Koda,
 }
 
@@ -78,6 +79,18 @@ pub enum CommonKind {
     /// qualified name (e.g. `tag:layer:core`). They participate in the
     /// graph through `EdgeKind::Tag` edges.
     Tag,
+    /// Synthetic work-item node created from a `@yah:relay(...)` header.
+    /// Qualified name is `relay:<ID>` (e.g. `relay:R042`); file is the
+    /// `"<work-item>"` sentinel. Carries no source span; the source
+    /// anchors point at it via `EdgeKind::Anchors`. Pass 2 of R017-F4
+    /// promotes relays to first-class graph citizens so the Board UI
+    /// can list / traverse them without scanning every doc.
+    Relay,
+    /// Synthetic work-item node created from a `@yah:ticket(...)` header.
+    /// Qualified name is `ticket:<ID>` (e.g. `ticket:R042-T1`). Same
+    /// `"<work-item>"` file sentinel as `Relay`. A ticket parents up
+    /// to its relay via `EdgeKind::ParentItem`.
+    Ticket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -7,7 +7,17 @@
 //! side index (as typed `AnnotationRef` values). The index powers
 //! `arch.node`'s `annotations` field — the UI fetches one node and gets
 //! its full overlay in one round-trip without traversing the graph.
+//!
+//! @yah:ticket(R017-F4, "Relay/Ticket annotation kinds in yah-kg-anno (richer payloads than Tag/Flow/Rule)")
+//! @yah:assignee(agent:claude)
+//! @yah:status(open)
+//! @yah:phase(P3)
+//! @yah:parent(R017)
+//! @yah:handoff("Passes 1–5 of R017-F4 landed: WorkItemAnno parser + synthetic Relay/Ticket nodes (Pass 1–2), arch.list_tickets/list_relays/get_ticket RPC + orphan-GC sweep (Pass 3), yah-kg::board recompute layer (Pass 4), and now the CLI swap (Pass 5) — yah/src/arch/ticket.rs's TicketBoard::from_annotations delegates cross-anchor recompute (epic inference, scalar conflicts) to yah_kg::board::Board::from_work_items. Per-file fold_file + PartialTicket survive; build_item/merge_scalar/record_conflict/extend_dedup/resolve_epics/compute_epic_status are gone. A Sidecar carries depends_on/see_also/target and the cross-anchor vec union (handoff/next/cleanup/verify/gotchas/assumes) since Board only reads anchors[0].anno from the wire DTO. yah-kg added as a path dep on yah/Cargo.toml. yah lib 147/147, arch_dogfood 26/26, arch_non_rust_extract 10/10, yah-kg 20/20, yah-kg-anno 19/19, yah-kg-daemon e2e 12/13 (macOS gotcha unchanged); yah board show/status dogfood clean. Remaining: hack-board frontend swap onto arch.list_tickets / arch.list_relays / arch.get_ticket — Tauri-track agent owns it.")
+//! @yah:next("Re-target the hack-board frontend to arch.list_tickets / arch.list_relays / arch.get_ticket — owned by the yah-ui / Tauri-as-server track. After the frontend lands, archive R017-F4.")
+//! @yah:gotcha("yah-kg-daemon test `reindex_after_disk_delete_wipes_file_nodes` is pre-existing red on macOS — relativize() canonicalize-fallback when the file is gone makes reindex_path early-return. Unrelated to this pass.")
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use yah_kg::anno::AnnotationRef;
 use yah_kg::ids::NodeId;
@@ -17,9 +27,36 @@ pub struct AnnotationIndex {
     by_node: HashMap<NodeId, Vec<AnnotationRef>>,
 }
 
+/// Serializable form of [`AnnotationIndex`]. Sorted by node id on emit so
+/// snapshot files diff cleanly. Wholly replaces in-memory state on
+/// [`AnnotationIndex::restore`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnnotationIndexSnapshot {
+    pub entries: Vec<(NodeId, Vec<AnnotationRef>)>,
+}
+
 impl AnnotationIndex {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn to_snapshot(&self) -> AnnotationIndexSnapshot {
+        let mut entries: Vec<(NodeId, Vec<AnnotationRef>)> = self
+            .by_node
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        AnnotationIndexSnapshot { entries }
+    }
+
+    pub fn restore(&mut self, snap: AnnotationIndexSnapshot) {
+        self.by_node.clear();
+        for (id, anns) in snap.entries {
+            if !anns.is_empty() {
+                self.by_node.insert(id, anns);
+            }
+        }
     }
 
     /// Wholesale-replace the annotations attached to `node`. Called by the

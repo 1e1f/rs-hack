@@ -160,6 +160,24 @@ impl Store {
         self.nodes.values()
     }
 
+    /// Internal iterators backing the snapshot serializer. Order is
+    /// unspecified — `to_snapshot` sorts before emitting.
+    pub(crate) fn nodes_iter(&self) -> impl Iterator<Item = &NodeRef> {
+        self.nodes.values()
+    }
+
+    pub(crate) fn edges_iter(&self) -> impl Iterator<Item = &EdgeOut> {
+        self.edges.values()
+    }
+
+    pub(crate) fn docs_iter(&self) -> impl Iterator<Item = (&NodeId, &String)> {
+        self.docs.iter()
+    }
+
+    pub(crate) fn properties_iter(&self) -> impl Iterator<Item = (&NodeId, &BTreeMap<String, String>)> {
+        self.properties.iter()
+    }
+
     pub fn node_full(&self, id: NodeId) -> Option<NodeFull> {
         let node = self.nodes.get(&id)?.clone();
         Some(NodeFull {

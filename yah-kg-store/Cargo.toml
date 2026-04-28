@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "In-memory knowledge-graph store backing the yah daemon's arch.* RPCs"
+publish = false
 
 [dependencies]
 yah-kg = { path = "../yah-kg" }

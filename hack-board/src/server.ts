@@ -2,10 +2,10 @@
 //! @yah:status(review)
 //! @yah:assignee(agent:claude)
 //! @yah:parent(R002)
-//! @yah:handoff("P2 implemented end-to-end. .hack/events.jsonl replaced by per-relay shards .hack/events/<id>.jsonl. New 'scan' event type keyed on FNV-1a 64 hash of canonical ticket JSON (line field excluded). Legacy log auto-migrates on first serve; preserves original timestamps and dedupes consecutive same-hash scans. Disappeared detection rewritten to walk shard tails. diffTicket / diffAndLog / snapshot / replaySnapshot all removed. rs-hack-arch/src/status.rs::scan_disappeared now reads the sharded layout (with legacy fallback) and sorts by timestamp across shards. Smoke tests: fresh workspace creates shards on first scan; legacy-workspace migration bucket-writes correctly with preserved timestamps; re-scan emits zero new events when nothing changed; orphan todos land in _todos.jsonl. Dogfooded against this repo: 18 legacy events migrated into R001/R002 shards.")
+//! @yah:handoff("P2 implemented end-to-end. .yah/events.jsonl replaced by per-relay shards .yah/events/<id>.jsonl. New 'scan' event type keyed on FNV-1a 64 hash of canonical ticket JSON (line field excluded). Legacy log auto-migrates on first serve; preserves original timestamps and dedupes consecutive same-hash scans. Disappeared detection rewritten to walk shard tails. diffTicket / diffAndLog / snapshot / replaySnapshot all removed. rs-hack-arch/src/status.rs::scan_disappeared now reads the sharded layout (with legacy fallback) and sorts by timestamp across shards. Smoke tests: fresh workspace creates shards on first scan; legacy-workspace migration bucket-writes correctly with preserved timestamps; re-scan emits zero new events when nothing changed; orphan todos land in _todos.jsonl. Dogfooded against this repo: 18 legacy events migrated into R001/R002 shards.")
 //! @yah:verify("cargo test -p rs-hack-arch status — passes, new sharded + legacy + prefers-shards tests")
-//! @yah:verify("Smoke: HACK_WORKSPACE=<new> bun run hack-board/src/server.ts; check .hack/events/ contains per-relay files and that second run emits no new events")
-//! @yah:verify("Legacy .hack/events.jsonl was migrated to .hack/events.jsonl.legacy; this repo's real workspace did so successfully")
+//! @yah:verify("Smoke: HACK_WORKSPACE=<new> bun run hack-board/src/server.ts; check .yah/events/ contains per-relay files and that second run emits no new events")
+//! @yah:verify("Legacy .yah/events.jsonl was migrated to .yah/events.jsonl.legacy; this repo's real workspace did so successfully")
 //! @arch:see(architecture/multi-worktree-sync.md)
 
 /**
@@ -21,7 +21,7 @@
  *
  * File watcher (Bun fs.watch) + UDP listener both trigger re-scans.
  * Source files are the single source of truth for live board state.
- * `.hack/events.jsonl` is a derivative audit log written on every rescan:
+ * `.yah/events.jsonl` is a derivative audit log written on every rescan:
  * created / modified / archived / disappeared. On startup the log is
  * replayed into memory so a first-scan diff can catch tickets that were
  * clobbered while the server was down.
@@ -148,14 +148,14 @@ let currentSummaries: Summary[] = [];
 let currentTodos: Todo[] = [];
 let scanCount = 0;
 
-const TODO_PATH = join(WORKSPACE, ".hack", "todo.md");
-const EVENTS_DIR = join(WORKSPACE, ".hack", "events");
-const EVENTS_LEGACY = join(WORKSPACE, ".hack", "events.jsonl");
+const TODO_PATH = join(WORKSPACE, ".yah", "todo.md");
+const EVENTS_DIR = join(WORKSPACE, ".yah", "events");
+const EVENTS_LEGACY = join(WORKSPACE, ".yah", "events.jsonl");
 const TODOS_SHARD = "_todos";
 const RENAMED_SHARD = "_renamed";
 
 // Per-relay event shards. Source is still the single source of truth for live
-// board state; `.hack/events/*.jsonl` is a derivative audit history. One file
+// board state; `.yah/events/*.jsonl` is a derivative audit history. One file
 // per relay (or per standalone ticket). Orphan events (todos, renames) live
 // in `_todos.jsonl` / `_renamed.jsonl`. See
 // architecture/multi-worktree-sync.md §2 for the full design.
@@ -870,7 +870,7 @@ function synthesizeReviewPrompt(t: Ticket, recentSummaries: Summary[]): string {
   lines.push("   ```");
   lines.push("");
   lines.push(
-    "   That strips the `@yah:` annotations from source and writes an `archived` event to `.hack/events/`. The snapshot stays in the shard, so the ticket can still be inspected via `rs-hack board show " +
+    "   That strips the `@yah:` annotations from source and writes an `archived` event to `.yah/events/`. The snapshot stays in the shard, so the ticket can still be inspected via `rs-hack board show " +
       t.id +
       "` and unarchived if needed. No server / port lookup required."
   );
@@ -1104,7 +1104,7 @@ async function scanTickets(): Promise<Ticket[]> {
 }
 
 async function scanSummaries(): Promise<Summary[]> {
-  const dir = join(WORKSPACE, ".hack", "summaries");
+  const dir = join(WORKSPACE, ".yah", "summaries");
   try {
     const glob = new Bun.Glob("*.md");
     const summaries: Summary[] = [];
@@ -1290,9 +1290,9 @@ const watcher = watch(WORKSPACE, { recursive: true }, (event, filename) => {
   if (
     filename &&
     (filename.endsWith(".rs") ||
-      filename.includes(".hack/summaries/") ||
-      filename.endsWith(".hack/todo.md") ||
-      filename === ".hack/todo.md") &&
+      filename.includes(".yah/summaries/") ||
+      filename.endsWith(".yah/todo.md") ||
+      filename === ".yah/todo.md") &&
     !isIgnored(filename, gitignoreRules)
   ) {
     triggerRescan(`fs:${filename}`);
@@ -1378,7 +1378,7 @@ const server = Bun.serve({
           stage: body.stage?.trim() || undefined,
           see: seeArr.length > 0 ? seeArr : undefined,
         });
-        await $`mkdir -p ${join(WORKSPACE, ".hack")}`.quiet();
+        await $`mkdir -p ${join(WORKSPACE, ".yah")}`.quiet();
         await Bun.write(TODO_PATH, serializeTodos(todos));
         triggerRescan("api:todo-add");
         return Response.json({ ok: true, id });
@@ -1409,7 +1409,7 @@ const server = Bun.serve({
         "build",
         ".git",
         ".next",
-        ".hack",
+        ".yah",
       ];
       const matches: string[] = [];
       try {
@@ -1609,12 +1609,12 @@ const server = Bun.serve({
         `2. Otherwise pick a source file that's the natural home for the work and add \`@yah:ticket(${todo.id.replace("T-", "T")}, "...")\` annotations at the top of the relevant mod/fn/struct.`,
         `3. Set \`@yah:status(in-progress)\` as your first action (this is the claim signal).`,
         `4. **Archive this todo** so it drops off the Open column:`,
-        `   - Simple: delete the \`## ${todo.id}\` block from \`.hack/todo.md\``,
+        `   - Simple: delete the \`## ${todo.id}\` block from \`.yah/todo.md\``,
         `   - Better (records the link to your relay in the audit log):`,
         `     \`curl -sX POST http://localhost:${PORT}/api/todos/${encodeURIComponent(todo.id)}/promote -H 'content-type: application/json' -d '{"relay_id":"RXXX"}'\``,
         ``,
         `**To move ticket columns later:** edit the \`@yah:status(...)\` line in source and save.`,
-        `**When done:** click the \`archive\` button on the ticket card — it strips the \`@yah:\` lines from source and logs to \`.hack/events.jsonl\`.`,
+        `**When done:** click the \`archive\` button on the ticket card — it strips the \`@yah:\` lines from source and logs to \`.yah/events.jsonl\`.`,
         ``,
         `The board auto-refreshes on file changes.`,
       ].join("\n");
@@ -1815,7 +1815,7 @@ const server = Bun.serve({
       try {
         const summaryPath = join(
           WORKSPACE,
-          ".hack",
+          ".yah",
           "summaries",
           `${summary.id}.md`
         );
@@ -2086,9 +2086,9 @@ const server = Bun.serve({
 
 // ── Initial scan ────────────────────────────────────────────────────────
 
-// One-shot migration: if a legacy `.hack/events.jsonl` exists and no shards
+// One-shot migration: if a legacy `.yah/events.jsonl` exists and no shards
 // are present, bucket the legacy entries into per-relay shards and rename
-// the old file to `.hack/events.jsonl.legacy` for audit.
+// the old file to `.yah/events.jsonl.legacy` for audit.
 const migration = await migrateLegacyEventsIfNeeded();
 if (migration) {
   console.log(

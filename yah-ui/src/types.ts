@@ -32,6 +32,11 @@ export interface Ticket {
   // worth of loose tickets, the card surfaces a "mixed children" smell.
   childCounts?: { open: number; active: number; handoff: number; relays?: number };
   isZone?: boolean;
+  /* Unix seconds of the most recent event for this id (status moves, scans,
+     archive). Sourced from `WireWorkItem.last_modified_ts`; daemon falls
+     back to the source file's mtime when no shard exists. Used as the
+     primary sort key per board column. */
+  lastModifiedTs?: number;
 }
 
 export interface Rig {
@@ -39,7 +44,14 @@ export interface Rig {
   name: string;
   kind: "local" | "remote";
   host?: string; // remote rigs only
+  path?: string; // local rigs (mirrors RigDto.path from app/tauri/src/state.rs)
   reachable: boolean;
+  /* Count of items wanting human attention on this rig — handoff tickets
+     today, plus Col01 smell hits later. Surfaces as a brass pill in the
+     RigSelector menu and an oxblood pip on the title-bar dot. */
+  needsAttention?: number;
+  /* Unix-ms of the last `set_active` for sort-by-recency in the picker. */
+  lastActiveAt?: number;
 }
 
 // Architecture graph

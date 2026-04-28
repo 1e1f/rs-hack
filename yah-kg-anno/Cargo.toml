@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Annotation overlay (tags, flows, rules) on top of the yah knowledge graph"
+publish = false
 
 [dependencies]
 yah-kg = { path = "../yah-kg" }

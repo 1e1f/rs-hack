@@ -18,10 +18,14 @@
 //!   with results returned innermost-first (smallest span containing the
 //!   line, descending by nesting depth).
 
+pub mod resolve;
 pub mod sink;
+pub mod snapshot;
 pub mod store;
 pub mod walker;
 
+pub use resolve::{drop_imports_from, resolve_rust_imports, resolve_ts_imports};
 pub use sink::StoreSink;
+pub use snapshot::{SnapshotError, StoreSnapshot, STORE_SNAPSHOT_VERSION};
 pub use store::{Store, StoreError};
 pub use walker::{reindex_file, walk_and_index, FileDelta, IndexerRegistry, WalkSummary};

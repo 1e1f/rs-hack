@@ -17,7 +17,7 @@
 use crate::arch::annotation::{AnnotationTarget, ArchAnnotation, ArchKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Whether this is a Ticket or a Relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,7 +223,8 @@ pub struct Ticket {
 
     /// True when this relay acts as an epic — either explicitly declared with
     /// `@yah:kind(epic)` or inferred from having child relays via
-    /// `@yah:parent(self.id)`. Set by [`TicketBoard::resolve_epics`].
+    /// `@yah:parent(self.id)`. Computed by [`yah_kg::board::Board`] and
+    /// projected onto the legacy `Ticket` shape in `from_annotations`.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub is_epic: bool,
 
@@ -328,24 +329,56 @@ pub struct PromptContext<'a> {
 }
 
 /// The board — a collection of tickets and relays.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TicketBoard {
     pub tickets: Vec<Ticket>,
+    /// Underlying KG board view backing the cross-anchor recompute and the
+    /// shared renderer in [`yah_kg::prompt`]. Populated by
+    /// [`TicketBoard::from_annotations`]; consumers use
+    /// [`TicketBoard::to_prompt`] (preferred) or read it directly.
+    ///
+    /// `#[serde(default)]` so older snapshot fixtures without this field
+    /// still deserialize — the prompt rendering then falls back to the
+    /// per-ticket shim, which is best-effort for epic grandchild counts.
+    #[serde(default)]
+    pub kg_board: yah_kg::board::Board,
 }
 
 impl TicketBoard {
     /// Build a board from annotations.
     ///
-    /// Grouping is ticket-scoped, not target-scoped: a single `//!` doc-block
-    /// can declare several stacked `@yah:ticket` / `@yah:relay` headers, and
-    /// each one owns the non-defining annotations that follow it (until the
-    /// next header). Before, all module-level annotations shared the same
-    /// `AnnotationTarget::Module` id and collapsed into one ticket — stacked
-    /// headers silently shadowed each other.
+    /// The CLI is the sole legacy consumer that still extracts tickets from
+    /// `&[ArchAnnotation]`; the daemon ships them directly as
+    /// `Vec<WorkItem>` over RPC. Both paths now converge on
+    /// [`yah_kg::board::Board`] for the cross-anchor recompute (epic
+    /// inference, scalar conflict surfacing). This method:
+    ///
+    /// 1. Buckets per `(file, syn-target)` "neighborhood", then per
+    ///    `@yah:ticket`/`@yah:relay` header within it. Stacked headers in
+    ///    one `//!` block produce distinct buckets — they used to collapse
+    ///    when keyed solely by `AnnotationTarget`.
+    /// 2. Folds each `(id, file)` bucket into a `PartialTicket` (per-file
+    ///    parse, last-write-wins for scalars).
+    /// 3. Translates each partial into a `WorkItemAnchor` with its parsed
+    ///    `WorkItemAnno`, groups anchors per id, hands the result to
+    ///    `Board::from_work_items` for the cross-anchor recompute.
+    /// 4. Maps each `BoardItem` back to a legacy `Ticket`, pulling
+    ///    `is_epic`/`epic_status`/`conflicts` straight from the board and
+    ///    reading file/line/target from `anchors[0]` for back-compat. A
+    ///    sidecar carries fields outside `WorkItemAnno`'s shape
+    ///    (`depends_on`, `see_also`, `target`) and the cross-anchor vec
+    ///    union (`handoff`/`next_steps`/…) the daemon does not perform on
+    ///    the wire DTO.
     pub fn from_annotations(annotations: &[ArchAnnotation]) -> Self {
-        // Step 1: isolate "neighborhoods" — annotations that share a file and
-        // syn target. Different targets in the same file (module block vs. a
-        // struct) can't bleed into each other.
+        use yah_kg::anno::WorkItemType as KgItemType;
+        use yah_kg::board::Board;
+        use yah_kg::ids::NodeId;
+        use yah_kg::kind::Lang;
+        use yah_kg::rpc::WorkItem;
+
+        // Step 1: isolate "neighborhoods" — annotations that share a file
+        // and syn target. Different targets in the same file (module block
+        // vs. a struct) can't bleed into each other.
         let mut neighborhoods: HashMap<(PathBuf, String), Vec<&ArchAnnotation>> =
             HashMap::new();
         for ann in annotations {
@@ -356,12 +389,12 @@ impl TicketBoard {
         }
 
         // Step 2: within each neighborhood, walk in source order. Each
-        // ticket/relay header opens a new logical bucket keyed by its ID;
-        // subsequent non-defining annotations attach to the most recent
-        // header. Annotations that appear before any header are dropped
-        // (mirrors the old behavior, which required a defining annotation
-        // in the bucket).
-        let mut by_ticket: HashMap<String, Vec<&ArchAnnotation>> = HashMap::new();
+        // `@yah:ticket`/`@yah:relay` header opens a logical bucket keyed by
+        // (id, file). Annotations that appear before any header are dropped
+        // (matches legacy behavior — a ticket needs a defining header in
+        // the bucket).
+        let mut by_id_file: HashMap<(String, PathBuf), Vec<&ArchAnnotation>> =
+            HashMap::new();
         for (_, mut anns) in neighborhoods {
             anns.sort_by_key(|a| a.line);
             let mut current: Option<String> = None;
@@ -370,90 +403,106 @@ impl TicketBoard {
                     current = Some(id.clone());
                 }
                 if let Some(ref cid) = current {
-                    by_ticket.entry(cid.clone()).or_default().push(ann);
+                    by_id_file
+                        .entry((cid.clone(), ann.file.clone()))
+                        .or_default()
+                        .push(ann);
                 }
             }
         }
 
-        let mut tickets = Vec::new();
-        for (_id, mut anns) in by_ticket {
-            // Sort by (file, line) so build_item's "first wins" is
-            // deterministic when the same ID appears in multiple files.
-            // Without this, HashMap iteration order made `file` flip
-            // between scans and the events log waffled.
-            anns.sort_by(|a, b| {
+        // Step 3: per (id, file), fold the chunk into a `PartialTicket`.
+        let mut partials_by_id: HashMap<String, Vec<PartialTicket>> = HashMap::new();
+        for ((id, file), anns) in by_id_file {
+            if let Some(p) = fold_file(file, &anns) {
+                partials_by_id.entry(id).or_default().push(p);
+            }
+        }
+
+        // Step 4: per id, sort partials by (file, header_line) — the
+        // lex-first is the canonical winner. Translate partials into
+        // anchors and bundle into `WorkItem`s for the Board recompute.
+        let mut relays: Vec<WorkItem> = Vec::new();
+        let mut tickets_wi: Vec<WorkItem> = Vec::new();
+        let mut sidecar: HashMap<String, Sidecar> = HashMap::new();
+
+        for (id, mut partials) in partials_by_id {
+            partials.sort_by(|a, b| {
                 a.file
                     .cmp(&b.file)
-                    .then_with(|| a.line.cmp(&b.line))
+                    .then_with(|| a.header_line.cmp(&b.header_line))
             });
-            if let Some(ticket) = build_item(&anns) {
-                tickets.push(ticket);
+
+            let item_type = match partials.iter().find_map(|p| p.item_type.clone()) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            let anchors: Vec<yah_kg::rpc::WorkItemAnchor> = partials
+                .iter()
+                .map(|p| partial_to_anchor(&id, p))
+                .collect();
+
+            let kg_item_type = match item_type {
+                ItemType::Relay => KgItemType::Relay,
+                ItemType::Ticket => KgItemType::Ticket,
+            };
+
+            // Board uses `WorkItem::anno` verbatim as the canonical
+            // (lex-first) view; per-anchor payloads on `anchors[i].anno`
+            // drive the cross-anchor conflict sweep.
+            let canonical_anno = anchors[0].anno.clone();
+            let work_item = WorkItem {
+                id: id.clone(),
+                node: NodeId::compute(Lang::Rust, &format!("ticket:{id}"), "<cli-adapter>"),
+                item_type: kg_item_type,
+                anno: canonical_anno,
+                anchors,
+                last_modified_ts: 0,
+            };
+
+            sidecar.insert(id.clone(), build_sidecar(&partials));
+
+            match work_item.item_type {
+                KgItemType::Relay => relays.push(work_item),
+                KgItemType::Ticket => tickets_wi.push(work_item),
             }
         }
 
-        tickets.sort_by(|a, b| a.id.cmp(&b.id));
-        let mut board = TicketBoard { tickets };
-        board.resolve_epics();
-        board
+        // Step 5: hand off to the shared recompute layer.
+        let board = Board::from_work_items(relays, tickets_wi);
+
+        // Step 6: project `BoardItem`s back into legacy `Ticket`s. The
+        // wire-DTO doesn't carry `depends_on`/`target`, and the daemon
+        // doesn't union vec fields across anchors — both come from the
+        // sidecar. (`see_also` now flows through `WorkItemAnno` so the
+        // daemon's Reference section matches the CLI's.)
+        let tickets: Vec<Ticket> = board
+            .items
+            .iter()
+            .cloned()
+            .map(|bi| board_item_to_ticket(bi, &sidecar))
+            .collect();
+
+        TicketBoard {
+            tickets,
+            kg_board: board,
+        }
     }
 
-    /// Walk the board and mark every relay that acts as an epic, computing
-    /// its derived status from its children's statuses.
+    /// Render the pickup or review prompt for `id` against this board.
+    /// Delegates to [`yah_kg::prompt::render`] — the same renderer the
+    /// daemon's `arch.ticket_prompt` RPC calls — so the CLI and the Tauri
+    /// client cannot drift on prompt shape.
     ///
-    /// Two ways to qualify as an epic:
-    /// 1. Explicit `@yah:kind(epic)` on the relay
-    /// 2. At least one *bare-R-ID* relay declares `@yah:parent(self.id)`
-    ///
-    /// Sub-tickets with compound IDs (`R007-T1`, `R007-T2`) don't make
-    /// their parent an epic — they make it an ordinary relay-with-subtickets.
-    /// Epics coordinate *between* relays, not within one.
-    ///
-    /// Also: infer `parent` from a compound ID prefix if the ticket didn't
-    /// declare `@yah:parent(...)` explicitly. `R007-T1` → parent `R007`.
-    fn resolve_epics(&mut self) {
-        use std::collections::HashMap;
-
-        // Infer parent from compound ID when not explicit.
-        for t in &mut self.tickets {
-            if t.parent.is_none() {
-                if let Some((p, _)) = t.id.split_once('-') {
-                    t.parent = Some(p.to_string());
-                }
-            }
-        }
-
-        // Collect bare-R child statuses by parent-id. Sub-tickets (compound
-        // IDs) are excluded — they don't promote their parent to epic.
-        let mut epic_children: HashMap<String, Vec<TicketStatus>> = HashMap::new();
-        for t in &self.tickets {
-            if t.item_type != ItemType::Relay || t.id.contains('-') {
-                continue;
-            }
-            if let Some(parent) = &t.parent {
-                epic_children
-                    .entry(parent.clone())
-                    .or_default()
-                    .push(t.status.clone());
-            }
-        }
-
-        for t in &mut self.tickets {
-            if t.item_type != ItemType::Relay {
-                continue;
-            }
-            // A sub-ticket (e.g. R007-T1) is never itself an epic.
-            if t.id.contains('-') {
-                continue;
-            }
-            let explicit = t.kind.as_deref() == Some("epic");
-            let children = epic_children.get(&t.id);
-            let has_children = children.is_some();
-            if !(explicit || has_children) {
-                continue;
-            }
-            t.is_epic = true;
-            t.epic_status = Some(compute_epic_status(children.map(|v| v.as_slice())));
-        }
+    /// Returns `None` when the id isn't on the board; callers (CLI, tests)
+    /// surface the miss explicitly instead of printing an empty prompt.
+    pub fn to_prompt(
+        &self,
+        id: &str,
+        mode: yah_kg::prompt::PromptMode,
+    ) -> Option<String> {
+        yah_kg::prompt::render(&self.kg_board, id, mode)
     }
 
     pub fn epics(&self) -> Vec<&Ticket> {
@@ -638,7 +687,14 @@ impl Ticket {
         self.to_prompt_with_ctx(&ctx)
     }
 
-    /// Build the continuation prompt with full hierarchy context.
+    /// CLI shim: delegates to [`yah_kg::prompt::render`] (the source-of-truth
+    /// renderer the daemon's `arch.ticket_prompt` RPC also uses) by translating
+    /// `self + ctx` into a one-off [`yah_kg::board::Board`]. Both paths produce
+    /// byte-identical output for the same input — the daemon RPC and `yah board
+    /// show --prompt` cannot drift.
+    ///
+    /// The contract of [`Ticket::to_prompt_with_ctx`] is unchanged. See
+    /// [`yah_kg::prompt`] for the rendering logic.
     ///
     /// The shape of the prompt adapts to the ticket's place in the tree:
     /// - **Leaf sub-ticket** (`ctx.parent.is_some()`, no live_children):
@@ -659,386 +715,9 @@ impl Ticket {
     /// sub-ticket points at that sub-ticket with a "continue it" verb
     /// rather than skipping to the next fresh one.
     pub fn to_prompt_with_ctx(&self, ctx: &PromptContext) -> String {
-        let live_children = ctx.live_children.as_slice();
-        let is_container = !live_children.is_empty();
-        let is_epic_container = is_container && self.is_epic;
-
-        let mut prompt = String::new();
-
-        prompt.push_str(&format!("# Continue: {} — {}\n\n", self.id, self.title));
-
-        // Gotchas: render at the top so the next agent doesn't stub their toe.
-        if !self.gotchas.is_empty() {
-            prompt.push_str("## ⚠ Gotchas (read first)\n\n");
-            for g in &self.gotchas {
-                prompt.push_str(&format!("- {}\n", g));
-            }
-            prompt.push('\n');
-        }
-
-        // Inherited gotchas from parent relay. Sub-ticket pickups routinely
-        // starve for parser traps / pre-existing breakage the relay already
-        // discovered — surface them here, clearly marked as inherited so
-        // the reader knows the source.
-        if let Some(parent) = ctx.parent {
-            if !parent.gotchas.is_empty() {
-                prompt.push_str(&format!(
-                    "## ⚠ Gotchas inherited from {} (read first)\n\n",
-                    parent.id
-                ));
-                for g in &parent.gotchas {
-                    prompt.push_str(&format!("- {}\n", g));
-                }
-                prompt.push('\n');
-            }
-        }
-
-        prompt.push_str("## Context\n\n");
-        prompt.push_str(&format!("`{}` ", self.id));
-        if let Some(ref assignee) = self.assignee {
-            prompt.push_str(&format!("(from {}) ", assignee));
-        }
-        prompt.push_str("is ready for continuation.\n\n");
-
-        if let Some(ref phase) = self.phase {
-            prompt.push_str(&format!("**Phase**: {}\n\n", phase));
-        }
-        if let Some(ref parent) = self.parent {
-            prompt.push_str(&format!("**Parent relay**: {}\n\n", parent));
-        }
-
-        if !self.handoff.is_empty() {
-            prompt.push_str("## What was completed\n\n");
-            if self.handoff.len() == 1 {
-                // Single handoff renders as a paragraph (legacy, preserves
-                // prose that was one long summary).
-                prompt.push_str(&self.handoff[0]);
-                prompt.push_str("\n\n");
-            } else {
-                // Multiple handoff lines render as bullets — each one a
-                // discrete chunk of work, file-grouped or bullet-per-change
-                // at the author's discretion.
-                for h in &self.handoff {
-                    prompt.push_str(&format!("- {}\n", h));
-                }
-                prompt.push('\n');
-            }
-            // Surface any file:line references buried in the prose. Scan the
-            // combined body so locations are extracted whether the handoff
-            // is a single paragraph or a list of bullets.
-            let combined = self.handoff.join("\n");
-            let locs = extract_code_locations(&combined);
-            if !locs.is_empty() {
-                prompt.push_str("**Locations referenced above:**\n\n");
-                for loc in &locs {
-                    prompt.push_str(&format!("- `{}`\n", loc));
-                }
-                prompt.push('\n');
-            }
-        }
-
-        // Container section — hoisted above next_steps so the Rule08 cycle
-        // (or epic child-relay walk) reads as THE next action. For containers
-        // the relay/epic's own `next_steps` are usually forward-spawn noise
-        // (follow-on tickets to file), not the baton.
-        if is_container {
-            if is_epic_container {
-                prompt.push_str("## Child relays (watering hole — work one at a time)\n\n");
-                prompt.push_str(
-                    "This is an epic — its baton is the chain of child relays below. \
-                     You don't have to finish the whole epic in one session; pick the \
-                     earliest live child, work its sub-tickets, then come back to this \
-                     prompt to see what's next. Epic progress is measured by children \
-                     reaching Review.\n\n",
-                );
-                for child in live_children {
-                    let status = child.status.column().to_lowercase();
-                    let counts = ctx
-                        .child_live_counts
-                        .get(&child.id)
-                        .copied()
-                        .unwrap_or_default();
-                    let counts_suffix = {
-                        let d = counts.describe();
-                        if d.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" · {}", d)
-                        }
-                    };
-                    let assignee = child
-                        .assignee
-                        .as_deref()
-                        .map(|a| format!(" · {}", a))
-                        .unwrap_or_default();
-                    prompt.push_str(&format!(
-                        "- **{}** [{}]{}{} · {}\n",
-                        child.id, status, assignee, counts_suffix, child.title
-                    ));
-                }
-                prompt.push('\n');
-            } else {
-                prompt.push_str("## Sub-tickets in flight\n\n");
-                prompt.push_str(
-                    "This relay has live sub-tickets. Work them one at a time (Rule08): \
-                     the earliest live one is the next action. Do it, archive it, then come \
-                     back here for the next. Don't try to do the full chain in a single \
-                     session.\n\n",
-                );
-                for child in live_children {
-                    let status = child.status.column().to_lowercase();
-                    let phase = child
-                        .phase
-                        .as_deref()
-                        .map(|p| format!(" · {}", p))
-                        .unwrap_or_default();
-                    let assignee = child
-                        .assignee
-                        .as_deref()
-                        .map(|a| format!(" · {}", a))
-                        .unwrap_or_default();
-                    prompt.push_str(&format!(
-                        "- **{}** [{}]{}{} · {}\n",
-                        child.id, status, phase, assignee, child.title
-                    ));
-                }
-            }
-
-            // Picker: earliest LIVE child by ID order. Includes InProgress /
-            // Claimed — the R005 fix. Previously we only matched Open|Handoff,
-            // which skipped an already-in-progress sub-ticket and pointed at
-            // the next fresh one instead.
-            if let Some(next) = live_children.first().copied() {
-                let line = match next.status {
-                    TicketStatus::Open => format!(
-                        "\nStart with:\n\n```bash\nyah board claim {}\n```\n\n",
-                        next.id
-                    ),
-                    TicketStatus::Handoff => format!(
-                        "\nStart with:\n\n```bash\nyah board move {} active\n```\n\n",
-                        next.id
-                    ),
-                    TicketStatus::Claimed | TicketStatus::InProgress => format!(
-                        "\nContinue with **{}** — already in flight ({}). Pull its pickup \
-                         prompt:\n\n```bash\nyah board tickets --prompt {}\n```\n\n",
-                        next.id,
-                        next.status.column().to_lowercase(),
-                        next.id
-                    ),
-                    // Review/Done shouldn't appear in live_children, but
-                    // render something coherent if one slips through.
-                    _ => format!("\nStart with **{}**.\n\n", next.id),
-                };
-                prompt.push_str(&line);
-            } else {
-                prompt.push('\n');
-            }
-        }
-
-        if !self.next_steps.is_empty() {
-            // When the relay has live children, its own `next_steps` is the
-            // author's forward-spawn list (follow-on tickets to file) — not
-            // the current baton. Relabel so a pickup agent doesn't confuse
-            // them with the sub-ticket cycle, which is hoisted above.
-            if is_container {
-                prompt.push_str(
-                    "## Follow-on spawns (not the baton — see sub-tickets above)\n\n",
-                );
-            } else {
-                prompt.push_str("## Next steps\n\n");
-            }
-            for step in &self.next_steps {
-                prompt.push_str(&format!("- {}\n", step));
-            }
-            prompt.push('\n');
-        }
-
-        if !self.cleanup.is_empty() {
-            prompt.push_str("## Cleanup backlog\n\n");
-            for item in &self.cleanup {
-                prompt.push_str(&format!("- {}\n", item));
-            }
-            prompt.push('\n');
-        }
-
-        if !self.verify.is_empty() {
-            prompt.push_str("## Verification\n\n");
-            // Split into runnable commands vs prose criteria. Only commands get
-            // fenced (copy-pasteable); prose stays as plain bullets so the next
-            // agent doesn't try to execute a sentence.
-            let mut cmd_chain: Vec<String> = Vec::new();
-            let mut last_was_prose = false;
-            for v in &self.verify {
-                if looks_like_shell_command(v) {
-                    prompt.push_str("```bash\n");
-                    prompt.push_str(v);
-                    prompt.push_str("\n```\n\n");
-                    cmd_chain.push(strip_trailing_comment(v));
-                    last_was_prose = false;
-                } else {
-                    prompt.push_str(&format!("- {}\n", v));
-                    last_was_prose = true;
-                }
-            }
-            if last_was_prose {
-                // Close the bullet run with a blank line before whatever
-                // follows (smoke test or next section).
-                prompt.push('\n');
-            }
-            if cmd_chain.len() > 1 {
-                prompt.push_str("Combined smoke test:\n\n```bash\n");
-                prompt.push_str(&cmd_chain.join(" && "));
-                prompt.push_str("\n```\n\n");
-            }
-        }
-
-        // Parent-relay verify smoke: a sub-ticket pickup should be able to
-        // run the relay's catch-all regression chain without opening the
-        // parent card. Render only shell commands (prose criteria are too
-        // context-heavy to inherit), as a combined smoke for copy-paste.
-        if let Some(parent) = ctx.parent {
-            let parent_cmds: Vec<String> = parent
-                .verify
-                .iter()
-                .filter(|v| looks_like_shell_command(v))
-                .map(|v| strip_trailing_comment(v))
-                .collect();
-            if !parent_cmds.is_empty() {
-                prompt.push_str(&format!(
-                    "## Verification inherited from {}\n\n",
-                    parent.id
-                ));
-                prompt.push_str(
-                    "Run the parent relay's smoke after your own checks — it catches \
-                     regressions in adjacent sub-tickets that a narrow verify would \
-                     miss.\n\n",
-                );
-                prompt.push_str("```bash\n");
-                prompt.push_str(&parent_cmds.join(" && "));
-                prompt.push_str("\n```\n\n");
-            }
-        }
-
-        // Assumptions baked into the handoff that the next agent should validate.
-        if !self.assumes.is_empty() {
-            prompt.push_str("## Assumptions (unverified — confirm or challenge)\n\n");
-            for a in &self.assumes {
-                prompt.push_str(&format!("- {}\n", a));
-            }
-            prompt.push('\n');
-        }
-
-        if !self.see_also.is_empty() {
-            prompt.push_str("## Reference\n\n");
-            for doc in &self.see_also {
-                prompt.push_str(&format!("- Read: {}\n", doc));
-            }
-            prompt.push('\n');
-        }
-
-        prompt.push_str("## Source\n\n");
-        prompt.push_str(&format!("Defined at `{}:{}`\n\n", self.file.display(), self.line));
-
-        prompt.push_str("## First action\n\n");
-        match self.status {
-            TicketStatus::Open => {
-                prompt.push_str(&format!(
-                    "Claim this ticket — one atomic command flips status and assignee (Rule01):\n\n\
-                     ```bash\n\
-                     yah board claim {}\n\
-                     ```\n\n\
-                     The Prompt button's clipboard copy does **not** move the card for you. \
-                     Run the claim before any other code edits.\n\n",
-                    self.id
-                ));
-            }
-            TicketStatus::Handoff => {
-                prompt.push_str(&format!(
-                    "Pick up the baton — one atomic command flips status and assignee (Rule01):\n\n\
-                     ```bash\n\
-                     yah board move {} active\n\
-                     ```\n\n\
-                     The Prompt button's clipboard copy does **not** move the card for you. \
-                     Run the move before any other code edits.\n\n",
-                    self.id
-                ));
-            }
-            TicketStatus::Claimed | TicketStatus::InProgress => {
-                prompt.push_str(&format!(
-                    "This ticket is already `{}` — you're continuing an in-flight session, \
-                     no claim needed. Begin with the next steps below.\n\n",
-                    self.status.column().to_lowercase()
-                ));
-            }
-            TicketStatus::Review | TicketStatus::Done => {
-                prompt.push_str(&format!(
-                    "This ticket is already in `{}`. If it needs more work, send it back \
-                     with `yah board move {} handoff --handoff \"what still needs doing\"`. \
-                     Otherwise use the review-mode prompt from the card's Review button.\n\n",
-                    self.status.column().to_lowercase(),
-                    self.id
-                ));
-            }
-        }
-
-        // Playbook — name the rules that are load-bearing for THIS pickup, not
-        // a generic list. Rule08 only matters when the relay has live children.
-        prompt.push_str("## Playbook\n\n");
-        if !live_children.is_empty() {
-            prompt.push_str(
-                "Load-bearing rules for this pickup: **Rule01** (claim first — above), \
-                 **Rule08** (sub-ticket cycle — above), **Col01** (three end-states — below). \
-                 Full ruleset: `yah board rules --context pickup` (or `finishing` \
-                 when you wrap up).\n\n",
-            );
-        } else {
-            prompt.push_str(
-                "Load-bearing rules for this pickup: **Rule01** (claim first — above), \
-                 **Col01** (three end-states — below). Full ruleset: \
-                 `yah board rules --context pickup` (or `finishing` when you wrap up).\n\n",
-            );
-        }
-        prompt.push_str(
-            "Inspect any related ticket: `yah board show <ID>` \
-             (compact view) or `yah board show <ID> --prompt` (full \
-             pickup form, like this one).\n\n",
-        );
-
-        prompt.push_str("## Then\n\n");
-        let mut step = 1usize;
-        prompt.push_str(&format!(
-            "{}. Read the reference docs and source context above.\n",
-            step
-        ));
-        step += 1;
-        prompt.push_str(&format!("{}. Complete the next steps listed.\n", step));
-        step += 1;
-        if !self.cleanup.is_empty() {
-            prompt.push_str(&format!(
-                "{}. Address cleanup items if time permits.\n",
-                step
-            ));
-            step += 1;
-        }
-        prompt.push_str(&format!("{}. Pick the right end-state (Col01):\n", step));
-        prompt.push_str(&format!(
-            "   - **More work remains (another phase, another agent):** \
-                `yah board move {} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
-                — same R-number, baton moves forward in place (Rule03).\n",
-            self.id
-        ));
-        prompt.push_str(&format!(
-            "   - **This ticket's tasks are met, awaiting human sign-off:** \
-                `yah board move {} review` and ping the user. Do **not** self-archive — \
-                review is where a human exercises `@yah:verify(...)` and confirms.\n",
-            self.id
-        ));
-        prompt.push_str(
-            "   - **Already signed off in a previous pass:** archive via the card button \
-                (strips `@yah:` lines from source, appends `archived` to `.yah/events.jsonl`).\n",
-        );
-
-        prompt
+        let board = build_one_off_kg_board(self, ctx);
+        yah_kg::prompt::render(&board, &self.id, yah_kg::prompt::PromptMode::Pickup)
+            .unwrap_or_default()
     }
 
     /// Generate a relay markdown document.
@@ -1259,32 +938,6 @@ fn extract_code_locations(prose: &str) -> Vec<String> {
     out
 }
 
-/// Derive an epic's status from the statuses of its child relays.
-///
-/// - `None` / empty slice → `"active"` (treat as in-planning / freshly declared)
-/// - any child not in `Review` or `Done` → `"active"`
-/// - all children in `Review`/`Done` → `"closed"`
-///
-/// Archived children don't appear in source at all, so they're simply absent
-/// from the slice — that's handled the same as "terminal" by the any-active
-/// check below.
-fn compute_epic_status(children: Option<&[TicketStatus]>) -> String {
-    let Some(children) = children else {
-        return "active".to_string();
-    };
-    if children.is_empty() {
-        return "active".to_string();
-    }
-    let any_active = children.iter().any(|s| {
-        !matches!(s, TicketStatus::Review | TicketStatus::Done)
-    });
-    if any_active {
-        "active".to_string()
-    } else {
-        "closed".to_string()
-    }
-}
-
 fn is_hack_relevant(kind: &ArchKind) -> bool {
     matches!(
         kind,
@@ -1383,9 +1036,67 @@ fn fold_file(file: PathBuf, anns: &[&ArchAnnotation]) -> Option<PartialTicket> {
     Some(p)
 }
 
-/// Push items from `src` into `dst` skipping duplicates (set-union semantics).
-/// Order: lex-first file's items first, then any new items from later files.
-fn extend_dedup<T: Clone + PartialEq>(dst: &mut Vec<T>, src: &[T]) {
+/// Out-of-band per-id state the `WorkItemAnno` wire DTO doesn't carry.
+/// Built once per id from its `PartialTicket`s before handing them to the
+/// Board recompute, then read back when projecting `BoardItem`s into the
+/// legacy `Ticket` shape.
+///
+/// Two flavors of fields here:
+///
+/// - **Out of WorkItemAnno's schema** — `target` (legacy
+///   `AnnotationTarget`), `depends_on`, `see_also`. These don't exist on
+///   the wire DTO at all, so the daemon can't ship them; the CLI keeps
+///   them on the side.
+/// - **Cross-anchor vec unions** — `handoff` / `next_steps` / `cleanup` /
+///   `verify` / `gotchas` / `assumes`. The Board uses `WorkItem::anno`
+///   verbatim (i.e. anchors[0]'s payload) for vec fields, but the legacy
+///   CLI behavior unions them across files (winner-first dedup) so a
+///   ticket declared twice doesn't lose `@yah:next(...)` lines from the
+///   second declaration. The sidecar holds the unioned view.
+struct Sidecar {
+    target: AnnotationTarget,
+    depends_on: Vec<String>,
+    see_also: Vec<String>,
+    handoff: Vec<String>,
+    next_steps: Vec<String>,
+    cleanup: Vec<String>,
+    verify: Vec<String>,
+    gotchas: Vec<String>,
+    assumes: Vec<String>,
+}
+
+fn build_sidecar(partials: &[PartialTicket]) -> Sidecar {
+    let target = partials[0]
+        .target
+        .clone()
+        .expect("fold_file always sets target when at least one ann present");
+    let mut sc = Sidecar {
+        target,
+        depends_on: Vec::new(),
+        see_also: Vec::new(),
+        handoff: Vec::new(),
+        next_steps: Vec::new(),
+        cleanup: Vec::new(),
+        verify: Vec::new(),
+        gotchas: Vec::new(),
+        assumes: Vec::new(),
+    };
+    for p in partials {
+        push_dedup(&mut sc.depends_on, &p.depends_on);
+        push_dedup(&mut sc.see_also, &p.see_also);
+        push_dedup(&mut sc.handoff, &p.handoff);
+        push_dedup(&mut sc.next_steps, &p.next_steps);
+        push_dedup(&mut sc.cleanup, &p.cleanup);
+        push_dedup(&mut sc.verify, &p.verify);
+        push_dedup(&mut sc.gotchas, &p.gotchas);
+        push_dedup(&mut sc.assumes, &p.assumes);
+    }
+    sc
+}
+
+/// Set-union extend: append items from `src` to `dst` in source order,
+/// skipping any already present.
+fn push_dedup<T: Clone + PartialEq>(dst: &mut Vec<T>, src: &[T]) {
     for item in src {
         if !dst.contains(item) {
             dst.push(item.clone());
@@ -1393,195 +1104,254 @@ fn extend_dedup<T: Clone + PartialEq>(dst: &mut Vec<T>, src: &[T]) {
     }
 }
 
-/// Record a scalar conflict: `value` from `loc` differs from a value
-/// already chosen for `field`. Idempotent on (field, value, loc).
-fn record_conflict(
-    conflicts: &mut std::collections::BTreeMap<String, Vec<FieldConflict>>,
-    field: &str,
-    value: String,
-    file: &Path,
-    line: usize,
-) {
-    let entry = conflicts.entry(field.to_string()).or_default();
-    let new = FieldConflict {
-        value,
-        path: file.to_path_buf(),
-        line,
+fn partial_to_anchor(id: &str, p: &PartialTicket) -> yah_kg::rpc::WorkItemAnchor {
+    let anno = yah_kg::anno::WorkItemAnno {
+        id: id.to_string(),
+        title: p.title.clone().unwrap_or_default(),
+        kind: p.kind.clone(),
+        status: p.status.as_ref().map(to_kg_status),
+        assignee: p.assignee.clone(),
+        parent: p.parent.clone(),
+        phase: p.phase.clone(),
+        severity: p.severity.clone(),
+        handoff: p.handoff.clone(),
+        next_steps: p.next_steps.clone(),
+        gotchas: p.gotchas.clone(),
+        assumes: p.assumes.clone(),
+        verify: p.verify.clone(),
+        cleanup: p.cleanup.clone(),
+        see_also: p.see_also.clone(),
     };
-    if !entry.contains(&new) {
-        entry.push(new);
+    let file_str = p.file.to_string_lossy().into_owned();
+    yah_kg::rpc::WorkItemAnchor {
+        node: yah_kg::ids::NodeId::compute(
+            yah_kg::kind::Lang::Rust,
+            &format!("anchor:{id}:{file_str}:{}", p.header_line),
+            "<cli-adapter>",
+        ),
+        file: file_str,
+        line: p.header_line as u32,
+        anno,
     }
 }
 
-/// Merge a scalar from `incoming` (from `loc`) into the winning `dst`
-/// (already populated from the lex-first file when not None). On
-/// disagreement, both values are recorded in `conflicts`.
-fn merge_scalar<T: Clone + PartialEq + ToString>(
-    dst: &mut Option<T>,
-    incoming: &Option<T>,
-    field: &str,
-    file: &Path,
-    line: usize,
-    winner_loc: Option<(&Path, usize)>,
-    conflicts: &mut std::collections::BTreeMap<String, Vec<FieldConflict>>,
-) {
-    let Some(inc) = incoming else { return };
-    match dst {
-        None => *dst = Some(inc.clone()),
-        Some(existing) if existing == inc => {} // agreement, no-op
-        Some(existing) => {
-            // Record both the winner and this dissenting value, once each.
-            if let Some((wf, wl)) = winner_loc {
-                record_conflict(conflicts, field, existing.to_string(), wf, wl);
-            }
-            record_conflict(conflicts, field, inc.to_string(), file, line);
-        }
+fn to_kg_status(s: &TicketStatus) -> yah_kg::anno::TicketStatus {
+    use yah_kg::anno::TicketStatus as Kg;
+    match s {
+        TicketStatus::Open => Kg::Open,
+        TicketStatus::Claimed => Kg::Claimed,
+        TicketStatus::InProgress => Kg::InProgress,
+        TicketStatus::Handoff => Kg::Handoff,
+        TicketStatus::Review => Kg::Review,
+        TicketStatus::Done => Kg::Done,
     }
 }
 
-/// Build a Ticket or Relay from a group of annotations on the same ID.
-/// `anns` may span multiple source files when the ID is declared in
-/// more than one place; the per-file folds are CRDT-merged here.
-fn build_item(anns: &[&ArchAnnotation]) -> Option<Ticket> {
-    if anns.is_empty() {
-        return None;
-    }
+/// Translate a single legacy `Ticket` into the wire-shape `WorkItem` the
+/// renderer in [`yah_kg::prompt`] consumes. Used by the
+/// [`Ticket::to_prompt_with_ctx`] shim to feed its renderer a
+/// `Board::from_work_items`-shaped view.
+fn ticket_to_work_item(t: &Ticket) -> yah_kg::rpc::WorkItem {
+    use yah_kg::anno::WorkItemType;
+    use yah_kg::ids::NodeId;
+    use yah_kg::kind::Lang;
 
-    // Group by file (anns are pre-sorted by (file, line) so a simple
-    // sequential scan keeps each file's annotations contiguous).
-    let mut per_file: Vec<(PathBuf, Vec<&ArchAnnotation>)> = Vec::new();
-    for ann in anns {
-        match per_file.last_mut() {
-            Some((f, group)) if f == &ann.file => group.push(ann),
-            _ => per_file.push((ann.file.clone(), vec![ann])),
-        }
-    }
-    let partials: Vec<PartialTicket> = per_file
-        .into_iter()
-        .filter_map(|(f, anns)| fold_file(f, &anns))
-        .collect();
-    if partials.is_empty() {
-        return None;
-    }
+    let anno = yah_kg::anno::WorkItemAnno {
+        id: t.id.clone(),
+        title: t.title.clone(),
+        kind: t.kind.clone(),
+        status: Some(to_kg_status(&t.status)),
+        assignee: t.assignee.clone(),
+        parent: t.parent.clone(),
+        phase: t.phase.clone(),
+        severity: t.severity.clone(),
+        handoff: t.handoff.clone(),
+        next_steps: t.next_steps.clone(),
+        gotchas: t.gotchas.clone(),
+        assumes: t.assumes.clone(),
+        verify: t.verify.clone(),
+        cleanup: t.cleanup.clone(),
+        see_also: t.see_also.clone(),
+    };
 
-    // Lex-first partial wins for scalars and supplies the canonical
-    // (file, line, target). Subsequent partials union vecs and surface
-    // scalar disagreements via `conflicts`.
-    let winner = &partials[0];
-    let canonical_file = winner.file.clone();
-    let canonical_line = winner.header_line;
-    let target = winner
-        .target
-        .clone()
-        .expect("fold_file always sets target when at least one ann present");
-
-    let mut id = winner.id.clone();
-    let mut title = winner.title.clone();
-    let mut item_type = winner.item_type.clone();
-    let mut kind = winner.kind.clone();
-    let mut status = winner.status.clone();
-    let mut assignee = winner.assignee.clone();
-    let mut phase = winner.phase.clone();
-    let mut parent = winner.parent.clone();
-    let mut severity = winner.severity.clone();
-    let mut handoff = winner.handoff.clone();
-    let mut next_steps = winner.next_steps.clone();
-    let mut cleanup = winner.cleanup.clone();
-    let mut verify = winner.verify.clone();
-    let mut gotchas = winner.gotchas.clone();
-    let mut assumes = winner.assumes.clone();
-    let mut see_also = winner.see_also.clone();
-    let mut depends_on = winner.depends_on.clone();
-    let mut conflicts: std::collections::BTreeMap<String, Vec<FieldConflict>> =
-        std::collections::BTreeMap::new();
-
-    let winner_loc: Option<(&Path, usize)> =
-        Some((winner.file.as_path(), winner.header_line));
-
-    for p in &partials[1..] {
-        let f = p.file.as_path();
-        let l = p.header_line;
-        // Title and kind are scalars too — surface any disagreement.
-        merge_scalar(&mut title, &p.title, "title", f, l, winner_loc, &mut conflicts);
-        merge_scalar(&mut kind, &p.kind, "kind", f, l, winner_loc, &mut conflicts);
-        merge_scalar(&mut status, &p.status, "status", f, l, winner_loc, &mut conflicts);
-        merge_scalar(&mut assignee, &p.assignee, "assignee", f, l, winner_loc, &mut conflicts);
-        merge_scalar(&mut phase, &p.phase, "phase", f, l, winner_loc, &mut conflicts);
-        merge_scalar(&mut parent, &p.parent, "parent", f, l, winner_loc, &mut conflicts);
-        merge_scalar(&mut severity, &p.severity, "severity", f, l, winner_loc, &mut conflicts);
-        // id and item_type can't legitimately differ (same neighborhood
-        // key, by construction) — fall back to the partial's value if
-        // the winner had none, otherwise skip.
-        if id.is_none() {
-            id = p.id.clone();
-        }
-        if item_type.is_none() {
-            item_type = p.item_type.clone();
-        }
-        // Vec fields union (set semantics).
-        extend_dedup(&mut handoff, &p.handoff);
-        extend_dedup(&mut next_steps, &p.next_steps);
-        extend_dedup(&mut cleanup, &p.cleanup);
-        extend_dedup(&mut verify, &p.verify);
-        extend_dedup(&mut gotchas, &p.gotchas);
-        extend_dedup(&mut assumes, &p.assumes);
-        extend_dedup(&mut see_also, &p.see_also);
-        extend_dedup(&mut depends_on, &p.depends_on);
-    }
-
-    // `files` is always populated, even with a single entry, so the
-    // wire shape is uniform across single- and multi-file tickets.
-    let files: Vec<TicketLocation> = partials
+    // Lex-first anchor first so `anchors[0]` matches `Ticket::file/line`.
+    let mut anchors: Vec<yah_kg::rpc::WorkItemAnchor> = t
+        .files
         .iter()
-        .map(|p| TicketLocation {
-            path: p.file.clone(),
-            line: p.header_line,
+        .map(|loc| {
+            let file_str = loc.path.to_string_lossy().into_owned();
+            yah_kg::rpc::WorkItemAnchor {
+                node: NodeId::compute(
+                    Lang::Rust,
+                    &format!("anchor:{}:{}:{}", t.id, file_str, loc.line),
+                    "<prompt-shim>",
+                ),
+                file: file_str,
+                line: loc.line as u32,
+                anno: anno.clone(),
+            }
         })
         .collect();
+    if anchors.is_empty() {
+        let file_str = t.file.to_string_lossy().into_owned();
+        anchors.push(yah_kg::rpc::WorkItemAnchor {
+            node: NodeId::compute(
+                Lang::Rust,
+                &format!("anchor:{}:{}:{}", t.id, file_str, t.line),
+                "<prompt-shim>",
+            ),
+            file: file_str,
+            line: t.line as u32,
+            anno: anno.clone(),
+        });
+    }
 
-    let id = id?;
-    let item_type = item_type?;
-    let title = title.unwrap_or_default();
-    let status = status.unwrap_or(TicketStatus::Open);
-    let file = canonical_file;
-    let line = canonical_line;
+    let item_type = match t.item_type {
+        ItemType::Relay => WorkItemType::Relay,
+        ItemType::Ticket => WorkItemType::Ticket,
+    };
 
-    // Infer kind from legacy aliases (bug/feature/task parsed as Ticket)
-    // or from ID prefix if no explicit @yah:kind
+    yah_kg::rpc::WorkItem {
+        id: t.id.clone(),
+        node: NodeId::compute(Lang::Rust, &format!("ticket:{}", t.id), "<prompt-shim>"),
+        item_type,
+        anno,
+        anchors,
+        last_modified_ts: 0,
+    }
+}
+
+/// Build a one-off [`yah_kg::board::Board`] from `t` and its
+/// `PromptContext` neighbours so [`yah_kg::prompt::render`] can render
+/// without needing a full workspace scan.
+fn build_one_off_kg_board(t: &Ticket, ctx: &PromptContext) -> yah_kg::board::Board {
+    use yah_kg::anno::WorkItemType;
+
+    let mut relays: Vec<yah_kg::rpc::WorkItem> = Vec::new();
+    let mut tickets: Vec<yah_kg::rpc::WorkItem> = Vec::new();
+    let mut bucket = |ticket: &Ticket| {
+        let wi = ticket_to_work_item(ticket);
+        match wi.item_type {
+            WorkItemType::Relay => relays.push(wi),
+            WorkItemType::Ticket => tickets.push(wi),
+        }
+    };
+
+    bucket(t);
+    if let Some(parent) = ctx.parent {
+        if parent.id != t.id {
+            bucket(parent);
+        }
+    }
+    for child in &ctx.live_children {
+        if child.id != t.id {
+            bucket(child);
+        }
+    }
+
+    yah_kg::board::Board::from_work_items(relays, tickets)
+}
+
+fn from_kg_status(s: yah_kg::anno::TicketStatus) -> TicketStatus {
+    use yah_kg::anno::TicketStatus as Kg;
+    match s {
+        Kg::Open => TicketStatus::Open,
+        Kg::Claimed => TicketStatus::Claimed,
+        Kg::InProgress => TicketStatus::InProgress,
+        Kg::Handoff => TicketStatus::Handoff,
+        Kg::Review => TicketStatus::Review,
+        Kg::Done => TicketStatus::Done,
+    }
+}
+
+fn board_item_to_ticket(
+    bi: yah_kg::board::BoardItem,
+    sidecar: &HashMap<String, Sidecar>,
+) -> Ticket {
+    use yah_kg::anno::WorkItemType as KgItemType;
+
+    let id = bi.item.id.clone();
+    let sc = sidecar
+        .get(&id)
+        .expect("sidecar populated for every id that produced a WorkItem");
+    let anchors = &bi.item.anchors;
+    let canonical = &anchors[0];
+
+    let item_type = match bi.item.item_type {
+        KgItemType::Relay => ItemType::Relay,
+        KgItemType::Ticket => ItemType::Ticket,
+    };
+
+    let status = bi
+        .item
+        .anno
+        .status
+        .map(from_kg_status)
+        .unwrap_or(TicketStatus::Open);
+
+    // Infer kind from ID prefix when no explicit @yah:kind on tickets.
+    // Relays carry "relay"-shaped semantics natively and don't get a
+    // kind unless the author wrote one.
+    let mut kind = bi.item.anno.kind.clone();
     if kind.is_none() && item_type == ItemType::Ticket {
         kind = match id.chars().next() {
             Some('B') | Some('b') => Some("bug".to_string()),
             Some('F') | Some('f') => Some("feature".to_string()),
-            _ => None, // T or unknown — badge() handles the default
+            _ => None,
         };
     }
 
-    Some(Ticket {
+    let files: Vec<TicketLocation> = anchors
+        .iter()
+        .map(|a| TicketLocation {
+            path: PathBuf::from(&a.file),
+            line: a.line as usize,
+        })
+        .collect();
+
+    let conflicts: std::collections::BTreeMap<String, Vec<FieldConflict>> = bi
+        .conflicts
+        .iter()
+        .map(|(field, vals)| {
+            (
+                field.clone(),
+                vals.iter()
+                    .map(|fc| FieldConflict {
+                        value: fc.value.clone(),
+                        path: PathBuf::from(&fc.file),
+                        line: fc.line as usize,
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+
+    Ticket {
         id,
-        title,
+        title: bi.item.anno.title.clone(),
         item_type,
         kind,
         status,
-        assignee,
-        phase,
-        parent,
-        severity,
-        handoff,
-        next_steps,
-        cleanup,
-        verify,
-        gotchas,
-        assumes,
-        depends_on,
-        see_also,
-        file,
-        line,
-        target,
+        assignee: bi.item.anno.assignee.clone(),
+        phase: bi.item.anno.phase.clone(),
+        parent: bi.effective_parent.clone(),
+        severity: bi.item.anno.severity.clone(),
+        handoff: sc.handoff.clone(),
+        next_steps: sc.next_steps.clone(),
+        cleanup: sc.cleanup.clone(),
+        verify: sc.verify.clone(),
+        gotchas: sc.gotchas.clone(),
+        assumes: sc.assumes.clone(),
+        depends_on: sc.depends_on.clone(),
+        see_also: sc.see_also.clone(),
+        file: PathBuf::from(&canonical.file),
+        line: canonical.line as usize,
+        target: sc.target.clone(),
         files,
         conflicts,
-        is_epic: false,       // resolved later by TicketBoard::resolve_epics
-        epic_status: None,
-    })
+        is_epic: bi.is_epic,
+        epic_status: bi.epic_status.map(|es| es.as_str().to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -2379,7 +2149,12 @@ mod r202 {
         let r202_counts = ctx.child_live_counts.get("R202").copied().unwrap_or_default();
         assert_eq!(r202_counts.total(), 0, "R202 has no sub-tickets of its own");
 
-        let prompt = r200.to_prompt_with_ctx(&ctx);
+        // Render via the canonical TicketBoard::to_prompt path — the per-ticket
+        // shim (`Ticket::to_prompt_with_ctx`) is best-effort and can't see
+        // grandchildren, which the epic prompt needs for the count suffix.
+        let prompt = board
+            .to_prompt("R200", yah_kg::prompt::PromptMode::Pickup)
+            .expect("R200 is on the board");
         assert!(
             prompt.contains("## Child relays"),
             "epic uses 'Child relays' header, not 'Sub-tickets in flight':\n{}",

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * One-shot compactor for .hack/events/*.jsonl shards.
+ * One-shot compactor for .yah/events/*.jsonl shards.
  *
  * Reads each ticket shard in order, reconstructs per-id state by walking
  * the genesis + delta sequence (treating any pre-delta-schema `scan`
@@ -24,7 +24,7 @@ import { readdir, readFile, writeFile, rename } from "fs/promises";
 import { join, resolve } from "path";
 
 const WORKSPACE = resolve(process.env.HACK_WORKSPACE || process.cwd());
-const EVENTS_DIR = join(WORKSPACE, ".hack", "events");
+const EVENTS_DIR = join(WORKSPACE, ".yah", "events");
 const TODOS_SHARD = "_todos.jsonl";
 const RENAMED_SHARD = "_renamed.jsonl";
 

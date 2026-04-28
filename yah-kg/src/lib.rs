@@ -13,18 +13,35 @@
 //! crate so the daemon, individual indexers, and the frontend bindings can
 //! depend on a stable type surface without dragging in `petgraph`, `syn`,
 //! `tree-sitter`, or transport machinery.
+//!
+//! @yah:relay(R016, "Indexer Pass 3: TS docs + cross-file Imports/Calls + JSON/YAML")
+//! @yah:status(open)
+//! @yah:phase(P1)
+//! @yah:parent(R013)
+//! @arch:see(architecture/yah-roadmap-2026Q2.md)
+//!
+//! @yah:relay(R017, "KG features: validator + snapshot persistence + relay/ticket nodes")
+//! @yah:status(open)
+//! @yah:phase(P2)
+//! @yah:parent(R013)
+//! @arch:see(architecture/yah-roadmap-2026Q2.md)
 
 pub mod anno;
+pub mod board;
 pub mod edge;
 pub mod event;
 pub mod ids;
 pub mod indexer;
 pub mod kind;
+pub mod prompt;
 pub mod rpc;
+pub mod validate;
 
 pub use anno::{AnnotationKind, AnnotationRef, TagRef};
+pub use board::{Board, BoardItem, ChildLiveCounts, EpicStatus, FieldConflict};
 pub use edge::{EdgeId, EdgeKind, EdgeOut, KodaEdge};
 pub use event::{ArchEvent, ChangedField, IndexReason, IndexScope};
 pub use ids::{NodeFull, NodeId, NodeRef, Span};
 pub use indexer::{IndexError, IndexSink, LanguageIndexer};
 pub use kind::{CommonKind, DocKind, KodaKind, Lang, MacroFlavor, NodeKind, RustKind, TsKind};
+pub use validate::{Scope, Severity, Violation};

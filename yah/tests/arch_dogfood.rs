@@ -1,14 +1,13 @@
 //! Dogfood integration test: runs yah arch on the yah workspace itself.
 //!
-//! This proves the annotation extraction, graph building, query, schema loading,
-//! and validation pipeline all work end-to-end on real annotated source code.
+//! This proves the annotation extraction, graph building, and query pipeline
+//! work end-to-end on real annotated source code. Validation lives in the
+//! `yah-kg-validator` crate now.
 
 use yah::arch::extract::extract_from_workspace_verbose;
 use yah::arch::graph::ArchGraph;
 use yah::arch::query::{get_file_context, Query};
-use yah::arch::schema::Schema;
 use yah::arch::ticket::TicketBoard;
-use yah::arch::validate::{load_rules_from_metadata, validate, rules_from_schema};
 use std::collections::HashSet;
 
 /// Helper: get workspace root (two levels up from this test file's crate)
@@ -242,88 +241,6 @@ fn test_file_context_mcp_server() {
     assert!(ctx.roles.contains(&"bridge".to_string()));
 }
 
-// ─── Schema ──────────────────────────────────────────────────────────────
-
-#[test]
-fn test_schema_loads_from_cargo_metadata() {
-    let root = workspace_root();
-    let schema = Schema::from_cargo_metadata(&root)
-        .expect("Failed to load schema from Cargo.toml");
-
-    assert!(!schema.is_empty(), "Schema should not be empty");
-    assert!(schema.is_valid_layer("core"), "core should be a valid layer");
-    assert!(schema.is_valid_layer("cli"), "cli should be a valid layer");
-    assert!(schema.is_valid_layer("mcp"), "mcp should be a valid layer");
-    assert!(schema.is_valid_layer("arch"), "arch should be a valid layer");
-    assert!(!schema.is_valid_layer("nonexistent"), "nonexistent should not be valid");
-
-    assert!(schema.is_valid_role("parser"), "parser should be a valid role");
-    assert!(schema.is_valid_role("refactor"), "refactor should be a valid role");
-    assert!(schema.is_valid_role("bridge"), "bridge should be a valid role");
-
-    let summary = schema.summary();
-    assert!(summary.contains("core"), "Summary should mention core layer");
-    assert!(summary.contains("parser"), "Summary should mention parser role");
-}
-
-// ─── Validation ──────────────────────────────────────────────────────────
-
-#[test]
-fn test_rules_load_from_metadata() {
-    let root = workspace_root();
-    let rules = load_rules_from_metadata(&root)
-        .expect("Failed to load rules");
-
-    assert!(
-        !rules.is_empty(),
-        "Should have at least one rule defined in Cargo.toml"
-    );
-
-    let rule_names: Vec<&str> = rules.iter().map(|r| r.name.as_str()).collect();
-    assert!(
-        rule_names.contains(&"core-independence"),
-        "Missing core-independence rule. Found: {:?}",
-        rule_names
-    );
-}
-
-#[test]
-fn test_schema_generates_layer_dependency_rules() {
-    let root = workspace_root();
-    let schema = Schema::from_cargo_metadata(&root).unwrap();
-    let rules = rules_from_schema(&schema);
-
-    assert!(
-        !rules.is_empty(),
-        "Schema should generate layer dependency rules"
-    );
-}
-
-#[test]
-fn test_validate_no_false_positives() {
-    // The workspace annotations should be valid against our rules
-    let root = workspace_root();
-    let graph = build_graph();
-    let rules = load_rules_from_metadata(&root).unwrap();
-
-    let violations = validate(&graph, &rules);
-
-    // We don't expect any errors (warnings are OK)
-    let errors: Vec<_> = violations
-        .iter()
-        .filter(|v| v.severity == yah::arch::validate::Severity::Error)
-        .collect();
-
-    // Note: there may be legitimate violations if the graph infers cross-layer edges.
-    // For now, just report them rather than asserting zero.
-    if !errors.is_empty() {
-        eprintln!("Validation errors found (may be expected during development):");
-        for v in &errors {
-            eprintln!("  {} - {}", v.rule, v.message);
-        }
-    }
-}
-
 // ─── Mermaid / Export ────────────────────────────────────────────────────
 
 #[test]
@@ -353,15 +270,14 @@ fn test_json_roundtrip() {
 #[test]
 fn test_mcp_tool_definitions() {
     let defs = yah::arch::mcp::tool_definitions();
-    assert_eq!(defs.len(), 7);
 
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     assert!(names.contains(&"arch_query"));
     assert!(names.contains(&"arch_trace"));
     assert!(names.contains(&"arch_context"));
-    assert!(names.contains(&"arch_validate"));
     assert!(names.contains(&"hack_tickets"));
     assert!(names.contains(&"hack_promote"));
+    assert!(!names.contains(&"arch_validate"), "arch_validate was removed in R020-T1");
 }
 
 // ─── Notes and Doc Text ──────────────────────────────────────────────────

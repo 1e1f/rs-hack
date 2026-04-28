@@ -1,3 +1,20 @@
+# @yah:ticket(R020-T1, "Trim workspace.metadata.arch.layers; replace with legal tag namespaces")
+# @yah:assignee(agent:claude)
+# @yah:status(review)
+# @yah:phase(P3)
+# @yah:parent(R020)
+# @yah:next("Annotations replaced the layer/role mechanism — keep only what the validator actually consumes")
+# @yah:next("[workspace.metadata.arch.tag_namespaces] declares legal @yah:tag(...) namespaces")
+#
+# @yah:ticket(R020-T2, "Move non-exe Rust → crates/, TS libs → packages/")
+# @yah:status(open)
+# @yah:phase(P3)
+# @yah:parent(R020)
+# @yah:next("Mechanical: yah-kg, yah-kg-store, yah-kg-rust, yah-kg-ts, yah-kg-anno, yah-kg-daemon → crates/")
+# @yah:next("yah-ui can stay top-level or move to packages/yah-ui")
+# @yah:next("Update Cargo.toml workspace.members + any path = entries")
+# @yah:next("Do this once before the codebase grows further (user's call)")
+
 [workspace]
 members = [
     "yah",
@@ -5,13 +22,30 @@ members = [
     "yah-kg-store",
     "yah-kg-rust",
     "yah-kg-ts",
+    "yah-kg-json-yaml",
     "yah-kg-daemon",
     "yah-kg-anno",
+    "yah-kg-validator",
+    "app/tauri",
+]
+# `app/tauri` requires libwebkit2gtk-4.1 on Linux; default-members keeps
+# `cargo build --workspace` and `cargo test --workspace` working on hosts
+# without webkit. Build the Tauri app explicitly with `cargo build -p yah-tauri`.
+default-members = [
+    "yah",
+    "yah-kg",
+    "yah-kg-store",
+    "yah-kg-rust",
+    "yah-kg-ts",
+    "yah-kg-json-yaml",
+    "yah-kg-daemon",
+    "yah-kg-anno",
+    "yah-kg-validator",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["Leif Shackelford <structuresound@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -19,51 +53,24 @@ repository = "https://github.com/1e1f/yah"
 
 [workspace.metadata.arch]
 
-[workspace.metadata.arch.layers]
-core = { description = "AST parsing, node types, and edit operations", allowed_dependencies = [] }
-cli = { description = "Clap-based CLI frontend", allowed_dependencies = ["core"] }
-mcp = { description = "MCP server - JSON-RPC bridge to CLI", allowed_dependencies = ["core"] }
-arch = { description = "Architecture knowledge graph from source annotations", allowed_dependencies = ["core"] }
-kg = { description = "Multi-language structural knowledge graph contract (yah daemon)", allowed_dependencies = [] }
-kg_store = { description = "In-memory petgraph-backed store + walker behind the kg contract", allowed_dependencies = ["kg"] }
-kg_lang = { description = "Per-language indexer implementations (Rust, TS, JSON/YAML, Koda)", allowed_dependencies = ["kg"] }
+# yah-kg-validator vocabulary v1. The validator does not currently consult
+# this section at runtime — it's documentation for authors writing
+# `@yah:rule(...)` directives. Rule kinds outside this list still trigger
+# an "unknown rule kind" violation; tag namespaces outside `tag_namespaces`
+# parse fine but `must-tag` rules against them will simply never resolve
+# any descendants.
+[workspace.metadata.arch.rule_vocabulary]
+no-import-of    = "Annotated subtree must not have outgoing `Imports` edges to any node in the selector set."
+no-dependency-on = "Annotated subtree must not depend on the selector set via Imports/Calls/References/Implements/Extends/ReExports/Bounds/ImplFor."
+max-depth        = "Annotated subtree must not nest deeper than N hops via Contains."
+must-tag         = "Every non-synthetic node in the annotated subtree must carry — or inherit via a Contains ancestor — at least one tag in the named namespace."
 
-[workspace.metadata.arch.roles]
-parser = "Parses Rust source into syn AST"
-refactor = "Transforms AST nodes (add, remove, rename, update)"
-discovery = "Finds and inspects AST nodes across files"
-emit = "Produces modified source code (surgical or reformat)"
-diff = "Computes and displays diffs between original and modified code"
-state = "Manages run history, backups, and revert capability"
-resolve = "Resolves qualified paths against use statements"
-traverse = "Walks AST trees to collect node matches"
-protocol = "JSON-RPC message framing and serialization"
-bridge = "Translates between MCP tool calls and CLI operations"
-extract = "Extracts @arch: annotations from Rust source"
-graph = "Stores and queries the architecture knowledge graph"
-validate = "Checks architecture rules against the graph"
-query = "Query language for architecture graph predicates"
-schema = "Defines valid annotation vocabulary from Cargo.toml metadata"
+# Selector grammar: tag(name) | tag(ns:name) | ns(namespace) |
+# node(qualified::name) | kind(common::module). See yah-kg-validator/src/lib.rs.
 
-[workspace.metadata.arch.threads]
-main = { priority = "normal", description = "Single-threaded CLI execution" }
-async_io = { priority = "normal", description = "Tokio async for MCP stdio" }
-
-[[workspace.metadata.arch.rules]]
-name = "core-independence"
-description = "Core layer cannot depend on CLI, MCP, or arch layers"
-severity = "error"
-type = "layer_dependency"
-layer = "core"
-allowed = []
-
-[[workspace.metadata.arch.rules]]
-name = "arch-independence"
-description = "Arch layer only depends on core (for shared types, if any)"
-severity = "warning"
-type = "layer_dependency"
-layer = "arch"
-allowed = ["core"]
+[workspace.metadata.arch.tag_namespaces]
+layer = "Logical layer the node belongs to (e.g. layer:kg, layer:kg_store, layer:cli)."
+role  = "Function the node performs within its layer (e.g. role:schema, role:graph, role:validate)."
 
 [profile.release]
 opt-level = 3

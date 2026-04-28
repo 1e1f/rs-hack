@@ -2619,7 +2619,7 @@ impl RustEditor {
                                 let location = self.editor.span_to_location(node.span());
 
                         // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
+                        let _preceding_comment = if self.include_comments {
                             extract_preceding_comment(&self.editor.content, location.line)
                         } else {
                             None
@@ -2694,7 +2694,7 @@ impl RustEditor {
                         let location = self.editor.span_to_location(node.span());
 
                         // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
+                        let _preceding_comment = if self.include_comments {
                             extract_preceding_comment(&self.editor.content, location.line)
                         } else {
                             None
@@ -2766,7 +2766,7 @@ impl RustEditor {
                             let location = self.editor.span_to_location(arm.span());
 
                         // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
+                        let _preceding_comment = if self.include_comments {
                             extract_preceding_comment(&self.editor.content, location.line)
                         } else {
                             None
@@ -2838,7 +2838,7 @@ impl RustEditor {
                         let location = self.editor.span_to_location(node.span());
 
                         // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
+                        let _preceding_comment = if self.include_comments {
                             extract_preceding_comment(&self.editor.content, location.line)
                         } else {
                             None
@@ -2912,7 +2912,7 @@ impl RustEditor {
                         let location = self.editor.span_to_location(node.span());
 
                         // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
+                        let _preceding_comment = if self.include_comments {
                             extract_preceding_comment(&self.editor.content, location.line)
                         } else {
                             None
@@ -4883,7 +4883,7 @@ impl RustEditor {
             EditMode::Surgical => {
                 // Use non-mutating visitor to collect replacement locations
                 use syn::visit::Visit;
-                use crate::surgical::Replacement;
+                
 
                 let mut collector = EnumVariantReplacementCollector {
                     enum_name: op.enum_name.clone(),
@@ -6016,7 +6016,7 @@ impl RustEditor {
                 .collect();
 
             // Insert in reverse order to maintain indices
-            for (i, comment_line) in comment_lines.iter().rev().enumerate() {
+            for (_i, comment_line) in comment_lines.iter().rev().enumerate() {
                 new_lines.insert(line_idx, comment_line.clone());
             }
 

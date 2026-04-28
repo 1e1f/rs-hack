@@ -57,6 +57,22 @@ pub enum ArchEvent {
         relay: String,
         ts: u64,
     },
+    /// A `@yah:relay(...)` block was upserted by the annotation pass.
+    /// Fires per relay touched on each reindex (boot or per-file). The
+    /// Board UI subscribes so it can refresh just the relay row without
+    /// re-rendering the whole graph. `node` is the synthetic
+    /// `CommonKind::Relay` node id; `work_item_id` is the source-level
+    /// ID like `R042`.
+    RelayChanged {
+        node: NodeId,
+        work_item_id: String,
+    },
+    /// A `@yah:ticket(...)` block was upserted by the annotation pass.
+    /// Counterpart to `RelayChanged` — see that variant for semantics.
+    TicketChanged {
+        node: NodeId,
+        work_item_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

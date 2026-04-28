@@ -18,6 +18,15 @@
 //!   declares an invariant the validator checks. Rule semantics are
 //!   reserved in the contract; the v1 extractor parses them but doesn't
 //!   yet ship a validator.
+//!
+//! @yah:ticket(R017-F1, "yah-kg-validator crate + vocabulary (no-import-of, no-dependency-on, max-depth, must-tag)")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R017)
+//! @yah:next("Walks KG, applies rules from index, returns Vec<Violation>")
+//! @yah:next("Cargo.toml [workspace.metadata.arch] section declares legal rule kinds + tag namespaces")
+//! @yah:next("Parser already handles @yah:rule(no-import-of: tag(view)); the type exists in the contract — wire validation")
 
 use crate::ids::NodeId;
 use serde::{Deserialize, Serialize};
@@ -56,6 +65,122 @@ pub enum AnnotationKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         args: Vec<String>,
     },
+    /// `@yah:relay(ID, "title")` plus the modifier directives that
+    /// followed it in the same doc block (status, assignee, parent,
+    /// handoff, next, gotcha, assumes, verify, cleanup, …). A relay is a
+    /// thread of work; pass 2 of R017-F4 will promote these to synthetic
+    /// `CommonKind::Relay` nodes with parent / depends_on edges.
+    Relay(WorkItemAnno),
+    /// `@yah:ticket(ID, "title")` plus its modifier directives. Tickets
+    /// are leaf work units parented to a relay.
+    Ticket(WorkItemAnno),
+}
+
+/// Payload shared by `Relay` and `Ticket` annotations. Field set mirrors
+/// `yah::arch::ticket::Ticket` (the CLI extractor's mature model); pass
+/// 2 of R017-F4 will unify the two parsers so this stays the only home.
+///
+/// Modifier directives (`@yah:status(...)`, `@yah:next("...")`, …) attach
+/// to the most recent `@yah:relay(...)` or `@yah:ticket(...)` header in
+/// the same doc string. A blank line *or* the next header closes a block.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkItemAnno {
+    pub id: String,
+    pub title: String,
+    /// `@yah:kind(feature|bug|task|epic)` — overrides the natural kind
+    /// (relays default to "relay"; tickets default to "task" or whatever
+    /// the ID prefix implies in the CLI extractor).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<TicketStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
+    /// `@yah:parent(R001)` — for sub-tickets and zone (relay-of-relays)
+    /// hierarchy. Resolved to a graph edge in pass 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    /// `@yah:handoff("...")` — repeatable. Stored in source order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handoff: Vec<String>,
+    /// `@yah:next("...")` — repeatable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<String>,
+    /// `@yah:gotcha("...")` — repeatable. Pre-existing breakage / traps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gotchas: Vec<String>,
+    /// `@yah:assumes("...")` — repeatable. Unverified claims.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assumes: Vec<String>,
+    /// `@yah:verify("...")` — repeatable. Acceptance commands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify: Vec<String>,
+    /// `@yah:cleanup("...")` — repeatable. Deferred tech debt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup: Vec<String>,
+    /// `@arch:see(path)` — repeatable. Architecture-doc references the
+    /// pickup prompt surfaces under the "Reference" section. Crosses the
+    /// `@yah:` / `@arch:` namespace boundary because the parser collects
+    /// these inside the same relay/ticket block — the doc reference is
+    /// a property of the work-item, not of the structural anchor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub see_also: Vec<String>,
+}
+
+/// Discriminator between the two work-item header kinds. `@yah:relay(...)`
+/// produces `Relay`, `@yah:ticket(...)` produces `Ticket`. Used both by
+/// the parser (to drive header dispatch) and by the RPC layer (so wire
+/// payloads can name the kind without leaking the internal `CommonKind`
+/// enum's variants for non-work-item nodes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkItemType {
+    Relay,
+    Ticket,
+}
+
+/// Lifecycle column. Mirrors the kanban transitions enforced by the
+/// board server (open → claimed/in-progress → handoff → review → done).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TicketStatus {
+    Open,
+    Claimed,
+    InProgress,
+    Handoff,
+    Review,
+    Done,
+}
+
+impl TicketStatus {
+    /// Parse the canonical kebab-case form. Authors sometimes write
+    /// `in_progress` or capitalize; accept those too.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "open" => Some(Self::Open),
+            "claimed" => Some(Self::Claimed),
+            "in-progress" | "in_progress" | "inprogress" => Some(Self::InProgress),
+            "handoff" => Some(Self::Handoff),
+            "review" => Some(Self::Review),
+            "done" => Some(Self::Done),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Claimed => "claimed",
+            Self::InProgress => "in-progress",
+            Self::Handoff => "handoff",
+            Self::Review => "review",
+            Self::Done => "done",
+        }
+    }
 }
 
 /// A tag with optional namespace. `layer:core` parses to `TagRef { ns:

@@ -97,6 +97,16 @@ pub enum EdgeKind {
     /// example — declares a meaningful coupling (shared state, planned
     /// future call, observed runtime path) the human knows about.
     Flow,
+    /// Structural node → synthetic `Relay`/`Ticket` node it carries. Drawn
+    /// by the annotation applier when a doc string contains `@yah:relay`
+    /// or `@yah:ticket` directives. Lets the Board UI ask "which file/
+    /// item hosts this ticket?" by walking incoming `Anchors` edges on
+    /// the synthetic node.
+    Anchors,
+    /// Work-item parent: synthetic `Ticket` → its parent `Relay`, or
+    /// `Relay` → parent `Relay` (zone hierarchy). Drawn from the
+    /// `@yah:parent(...)` directive on the work item.
+    ParentItem,
 
     // ---------- Koda extension slot ----------
     Koda(KodaEdge),

@@ -5,7 +5,6 @@
 //! Uses petgraph to store nodes (code entities) and edges (relationships).
 
 use crate::arch::annotation::{AnnotationTarget, ArchAnnotation, ArchKind, MessageSpec, ThreadSpec};
-use crate::arch::schema::Schema;
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,10 +18,6 @@ pub struct ArchGraph {
 
     /// Edges representing relationships
     edges: Vec<ArchEdge>,
-
-    /// The schema used for validation
-    #[serde(skip)]
-    schema: Schema,
 
     /// Hash of source files when graph was built
     source_hash: Option<String>,
@@ -149,15 +144,9 @@ pub enum EdgeKind {
 impl ArchGraph {
     /// Create a new empty graph.
     pub fn new() -> Self {
-        Self::with_schema(Schema::default())
-    }
-
-    /// Create a graph with a custom schema.
-    pub fn with_schema(schema: Schema) -> Self {
         Self {
             nodes: HashMap::new(),
             edges: Vec::new(),
-            schema,
             source_hash: None,
         }
     }
@@ -482,10 +471,6 @@ impl ArchGraph {
         serde_json::from_str(json)
     }
 
-    /// Get the schema.
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
 }
 
 impl Default for ArchGraph {

@@ -1,0 +1,43 @@
+[package]
+name = "yah-tauri"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tauri host for the yah desktop app — wraps yah-kg-daemon and exposes the arch.* surface as Tauri commands"
+publish = false
+
+[lib]
+name = "yah_tauri"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "yah-tauri"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+yah-kg = { path = "../../yah-kg" }
+yah-kg-daemon = { path = "../../yah-kg-daemon" }
+yah-kg-store = { path = "../../yah-kg-store" }
+yah-kg-rust = { path = "../../yah-kg-rust" }
+yah-kg-ts = { path = "../../yah-kg-ts" }
+yah-kg-json-yaml = { path = "../../yah-kg-json-yaml" }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-store = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros"] }
+thiserror = "1.0"
+tracing = "0.1"
+blake3 = "1.5"
+
+[features]
+# Empty by default; consumers add platform features as needed.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -3,9 +3,13 @@ import { TicketCard } from "./TicketCard";
 import { EmptyColumn } from "./EmptyColumn";
 import { FillerSplash } from "./FillerSplash";
 import { Icon } from "../shared/Glyph";
+import type { WireViolation } from "../../env/types";
 import type { ColumnKey, Ticket } from "../../types";
 
 interface ColumnProps {
+  /* Forwarded to each TicketCard so its Prompt button can call
+     `arch.ticket_prompt` against the right rig. */
+  rigId: string;
   columnKey: ColumnKey;
   label: string;
   eyebrow: string;
@@ -13,6 +17,9 @@ interface ColumnProps {
   /* True while a card is being dragged but this column is not a valid drop
      target. Dims the column to mirror the server's transition matrix. */
   disallowed?: boolean;
+  /* Pre-bucketed violations keyed by anchor file. Forwarded to each card so
+     a ticket whose anchor lives in a violating file gets a small badge. */
+  violationsByFile?: Map<string, WireViolation[]>;
 }
 
 /* Board column. Renders the illuminated drop-cap header + small-caps body +
@@ -20,11 +27,13 @@ interface ColumnProps {
    disallowed visuals are driven from Board state — the column itself doesn't
    know transition rules. */
 export function Column({
+  rigId,
   columnKey,
   label,
   eyebrow,
   tickets,
   disallowed = false,
+  violationsByFile,
 }: ColumnProps) {
   const { setNodeRef, isOver, active } = useDroppable({ id: columnKey });
   const isDragHover = isOver && !!active && !disallowed;
@@ -65,7 +74,13 @@ export function Column({
       </header>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2">
         {tickets.map((t) => (
-          <TicketCard key={t.id} ticket={t} columnEyebrow={eyebrow} />
+          <TicketCard
+            key={t.id}
+            rigId={rigId}
+            ticket={t}
+            columnEyebrow={eyebrow}
+            violations={violationsByFile?.get(t.file) ?? undefined}
+          />
         ))}
         {tickets.length === 0 && <EmptyColumn columnKey={columnKey} />}
         {tickets.length > 0 && tickets.length <= 2 && (

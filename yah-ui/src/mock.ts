@@ -4,8 +4,39 @@
 
 import type { ArchSubgraph, Rig, Session, Ticket } from "./types";
 
+// Three local rigs day-one (R024) so multi-rig flow is exercisable in
+// dev before the Tauri attach commands round-trip real folders. The
+// remotes stay on the list so the selector can still render the
+// host/reachable axes. needsAttention seeds let R024-T3's brass pill +
+// title-bar pip render without waiting on backend wiring.
 export const mockRigs: Rig[] = [
-  { id: "local", name: "synth-engine (local)", kind: "local", reachable: true },
+  {
+    id: "local",
+    name: "synth-engine",
+    kind: "local",
+    path: "/Users/leif/ss/synth-engine",
+    reachable: true,
+    needsAttention: 2,
+    lastActiveAt: Date.now() - 30_000,
+  },
+  {
+    id: "rs-hack",
+    name: "rs-hack",
+    kind: "local",
+    path: "/Users/leif/ss/rs-hack",
+    reachable: true,
+    needsAttention: 0,
+    lastActiveAt: Date.now() - 4 * 3600_000,
+  },
+  {
+    id: "yah-design",
+    name: "yah-design",
+    kind: "local",
+    path: "/Users/leif/ss/rs-hack/yah-design",
+    reachable: true,
+    needsAttention: 1,
+    lastActiveAt: Date.now() - 26 * 3600_000,
+  },
   {
     id: "droplet-1",
     name: "vps-frankfurt",
@@ -22,6 +53,14 @@ export const mockRigs: Rig[] = [
   },
 ];
 
+// Recency seeds let the Board sort (R025-T2: last-touched desc primary)
+// be visible in dev — without these every mock has lastModifiedTs=0
+// and the column would collapse to id-asc only. Values are unix seconds.
+const NOW_S = Math.floor(Date.now() / 1000);
+const MIN = 60;
+const HR = 3600;
+const DAY = 24 * HR;
+
 export const mockTickets: Ticket[] = [
   {
     id: "R012",
@@ -34,6 +73,7 @@ export const mockTickets: Ticket[] = [
     childCounts: { open: 1, active: 1, handoff: 1 },
     file: "src/ticket.rs",
     line: 21,
+    lastModifiedTs: NOW_S - 5 * MIN,
     handoff: [
       "Container tickets should be 'watering hole' prompts. Fresh agent arriving at a zone sees the child list, is pointed at the next live child, can come back to claim more.",
     ],
@@ -56,6 +96,7 @@ export const mockTickets: Ticket[] = [
     line: 663,
     handoff: ["Added gotcha-inheritance pass in to_prompt_with_ctx."],
     nextSteps: ["Apply same pattern to verify commands"],
+    lastModifiedTs: NOW_S - 2 * HR,
   },
   {
     id: "R012-T2",
@@ -67,6 +108,7 @@ export const mockTickets: Ticket[] = [
     assignee: "agent:claude",
     file: "src/ticket.rs",
     line: 720,
+    lastModifiedTs: NOW_S - 3 * MIN,
   },
   {
     id: "R012-T3",
@@ -77,6 +119,7 @@ export const mockTickets: Ticket[] = [
     parent: "R012",
     file: "src/ticket.rs",
     line: 800,
+    lastModifiedTs: NOW_S - 4 * HR,
   },
   {
     id: "R007",
@@ -90,6 +133,7 @@ export const mockTickets: Ticket[] = [
       "Per-relay event shards land in .yah/events/. Cross-worktree merging via timestamp-sort works for the simple case but races on concurrent appends.",
     ],
     nextSteps: ["File-lock during append", "Conflict surface in board UI"],
+    lastModifiedTs: NOW_S - 30 * MIN,
   },
   {
     id: "R009",
@@ -99,6 +143,7 @@ export const mockTickets: Ticket[] = [
     file: "src/extract.rs",
     line: 8,
     handoff: ["Parser stub emits the same ArchAnnotation struct for TS sources via tree-sitter."],
+    lastModifiedTs: NOW_S - 18 * HR,
   },
   {
     id: "R013",
@@ -107,6 +152,7 @@ export const mockTickets: Ticket[] = [
     status: "open",
     file: "src/graph.rs",
     line: 425,
+    lastModifiedTs: NOW_S - 3 * DAY,
   },
   {
     id: "F003",
@@ -116,6 +162,7 @@ export const mockTickets: Ticket[] = [
     status: "open",
     file: "src/components/board/TicketCard.tsx",
     line: 1,
+    lastModifiedTs: NOW_S - 6 * HR,
   },
   {
     id: "B007",
@@ -125,6 +172,7 @@ export const mockTickets: Ticket[] = [
     status: "open",
     file: "src/server.ts",
     line: 1240,
+    lastModifiedTs: NOW_S - 12 * HR,
   },
   {
     id: "R005",
@@ -135,6 +183,7 @@ export const mockTickets: Ticket[] = [
     file: "src/ticket.rs",
     line: 5,
     handoff: ["Refactored to two-noun model: Ticket + Relay."],
+    lastModifiedTs: NOW_S - 5 * DAY,
   },
 ];
 
@@ -236,7 +285,8 @@ export const mockSession: Session = {
       t: Date.now() - 30_000,
       role: "assistant",
       type: "text",
-      content: "Added verify-inheritance helper. Running tests.",
+      content:
+        "Added verify-inheritance helper at `src/ticket.rs:663` mirroring the gotcha pass. Running tests.",
     },
     {
       id: "e10",

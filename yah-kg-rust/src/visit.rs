@@ -24,6 +24,21 @@ pub struct Walker<'a> {
     file_id: NodeId,
     mod_path: Vec<String>,
     parents: Vec<NodeId>,
+    /// Top-level `use` paths collected during the walk. Emitted as the
+    /// file node's `imports` property at the end of [`Walker::run`] so
+    /// the daemon's Pass 3 cross-file resolver can read them back.
+    /// v1 only collects file-level uses (skips `mod foo { use ... }`)
+    /// because inline-mod `super::`/`self::` semantics need the inline
+    /// path to resolve correctly — out of scope for the first cut.
+    imports: Vec<String>,
+    /// `Calls` edges deferred until the structural walk finishes. The
+    /// store drops edges whose target id is missing, so we wait until
+    /// every same-file fn/method node has been emitted before flushing —
+    /// otherwise a forward call (`fn a() { b() } fn b() {}`) would race
+    /// the target node and silently drop. v1 only resolves simple-ident
+    /// callees (`foo()`, not `Foo::method()` or `x.foo()`); ambiguous
+    /// or multi-segment call paths are skipped.
+    pending_calls: Vec<(NodeId, NodeId)>,
     sink: &'a mut dyn IndexSink,
 }
 
@@ -36,6 +51,8 @@ impl<'a> Walker<'a> {
             file_id,
             mod_path: Vec::new(),
             parents: Vec::new(),
+            imports: Vec::new(),
+            pending_calls: Vec::new(),
             sink,
         }
     }
@@ -67,6 +84,20 @@ impl<'a> Walker<'a> {
             self.walk_item(item);
         }
         self.parents.pop();
+
+        // Drain collected use paths onto the file node. Newline-joined
+        // mirrors the convention `record_attrs` uses for `derives`.
+        if !self.imports.is_empty() {
+            let joined = self.imports.join("\n");
+            self.sink.push_property(self.file_id, "imports", &joined);
+        }
+
+        // Flush deferred Calls edges. The store drops edges whose target
+        // id has no node, so unresolved/external call sites disappear.
+        let pending = std::mem::take(&mut self.pending_calls);
+        for (from, to) in pending {
+            self.emit_edge(from, to, EdgeKind::Calls);
+        }
     }
 
     fn current_parent(&self) -> NodeId {
@@ -122,9 +153,32 @@ impl<'a> Walker<'a> {
             syn::Item::Const(c) => self.walk_const(&c.ident, &c.attrs, c.span()),
             syn::Item::Static(s) => self.walk_const(&s.ident, &s.attrs, s.span()),
             syn::Item::Macro(m) => self.walk_macro_decl(m),
-            // Use, ExternCrate, ForeignMod, TraitAlias, Verbatim — Pass 3 work.
+            syn::Item::Use(u) => {
+                if self.mod_path.is_empty() {
+                    self.collect_use(u);
+                }
+            }
+            // ExternCrate, ForeignMod, TraitAlias, Verbatim — Pass 3 work.
             _ => {}
         }
+    }
+
+    /// Flatten one `use` tree into normalized path strings and stash on
+    /// `self.imports`. Globs are kept as `path::*`; renames are stored
+    /// under their original target so the resolver doesn't have to guess
+    /// what `as Foo` aliased.
+    fn collect_use(&mut self, u: &syn::ItemUse) {
+        let leading = u.leading_colon.is_some();
+        let mut prefix: Vec<String> = if leading {
+            // `use ::foo` is absolute (external in 2018+ unless a crate
+            // named `foo` is in deps). We don't try to resolve external
+            // paths today, so tag the leading `::` and let the resolver
+            // skip it.
+            vec![String::new()]
+        } else {
+            Vec::new()
+        };
+        collect_use_paths(&u.tree, &mut prefix, &mut self.imports);
     }
 
     fn walk_mod(&mut self, m: &syn::ItemMod) {
@@ -329,6 +383,7 @@ impl<'a> Walker<'a> {
         if let Some(d) = doc_of_attrs(&f.attrs) {
             self.sink.push_doc(id, &d);
         }
+        self.collect_calls_in_block(id, &f.block);
     }
 
     fn walk_const(&mut self, ident: &syn::Ident, attrs: &[syn::Attribute], sp: proc_macro2::Span) {
@@ -412,6 +467,9 @@ impl<'a> Walker<'a> {
                 }
                 if let Some(d) = doc_of_attrs(&f.attrs) {
                     self.sink.push_doc(id, &d);
+                }
+                if let Some(default) = &f.default {
+                    self.collect_calls_in_block(id, default);
                 }
             }
             syn::TraitItem::Type(t) => {
@@ -547,6 +605,7 @@ impl<'a> Walker<'a> {
                 if let Some(d) = doc_of_attrs(&f.attrs) {
                     self.sink.push_doc(id, &d);
                 }
+                self.collect_calls_in_block(id, &f.block);
             }
             syn::ImplItem::Type(t) => {
                 let name = t.ident.to_string();
@@ -613,6 +672,23 @@ impl<'a> Walker<'a> {
             if let Some(d) = doc_of_attrs(&m.attrs) {
                 self.sink.push_doc(id, &d);
             }
+        }
+    }
+
+    /// Scan `block` for call sites and queue a `Calls` edge from `caller`
+    /// to each unambiguously-resolvable callee. Resolution is deliberately
+    /// narrow: only a single-ident path callee (`foo()`) where the same
+    /// module already defines `fn foo` will produce an edge — anything
+    /// requiring type inference (`x.foo()`), trait dispatch, or external-
+    /// crate path resolution is dropped on the floor by the store when
+    /// the target id has no node.
+    fn collect_calls_in_block(&mut self, caller: NodeId, block: &syn::Block) {
+        let mut names: Vec<String> = Vec::new();
+        collect_call_names_in_block(block, &mut names);
+        for name in names {
+            let qualified = self.qualify(&name);
+            let target = self.make_id(&qualified);
+            self.pending_calls.push((caller, target));
         }
     }
 
@@ -761,5 +837,205 @@ fn simple_ident(s: &str) -> Option<&str> {
         None
     } else {
         Some(s)
+    }
+}
+
+/// Recursively scan every `Stmt`/`Expr` in `block` and append the
+/// callee name of each `Expr::Call` whose path is a single ident
+/// without generic arguments. Multi-segment paths (`Foo::new()`,
+/// `crate::foo()`), method calls (`x.foo()`), macro invocations, and
+/// closures-of-closures all fall through silently.
+fn collect_call_names_in_block(block: &syn::Block, out: &mut Vec<String>) {
+    for stmt in &block.stmts {
+        collect_call_names_in_stmt(stmt, out);
+    }
+}
+
+fn collect_call_names_in_stmt(stmt: &syn::Stmt, out: &mut Vec<String>) {
+    match stmt {
+        syn::Stmt::Local(l) => {
+            if let Some(init) = &l.init {
+                collect_call_names_in_expr(&init.expr, out);
+                if let Some((_, e)) = &init.diverge {
+                    collect_call_names_in_expr(e, out);
+                }
+            }
+        }
+        syn::Stmt::Expr(e, _) => collect_call_names_in_expr(e, out),
+        // `Stmt::Item` introduces nested items (e.g. nested `fn`); their
+        // bodies aren't part of the parent fn's call surface — skip.
+        // `Stmt::Macro` (macro statements like `println!()`) we can't
+        // resolve without expansion, so skip.
+        _ => {}
+    }
+}
+
+fn collect_call_names_in_expr(expr: &syn::Expr, out: &mut Vec<String>) {
+    use syn::Expr;
+    match expr {
+        Expr::Call(c) => {
+            if let Some(name) = simple_call_name(&c.func) {
+                out.push(name);
+            } else {
+                collect_call_names_in_expr(&c.func, out);
+            }
+            for a in &c.args {
+                collect_call_names_in_expr(a, out);
+            }
+        }
+        Expr::MethodCall(m) => {
+            collect_call_names_in_expr(&m.receiver, out);
+            for a in &m.args {
+                collect_call_names_in_expr(a, out);
+            }
+        }
+        Expr::Block(b) => collect_call_names_in_block(&b.block, out),
+        Expr::Async(a) => collect_call_names_in_block(&a.block, out),
+        Expr::Unsafe(u) => collect_call_names_in_block(&u.block, out),
+        Expr::TryBlock(t) => collect_call_names_in_block(&t.block, out),
+        Expr::If(i) => {
+            collect_call_names_in_expr(&i.cond, out);
+            collect_call_names_in_block(&i.then_branch, out);
+            if let Some((_, e)) = &i.else_branch {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        Expr::Match(m) => {
+            collect_call_names_in_expr(&m.expr, out);
+            for arm in &m.arms {
+                if let Some((_, g)) = &arm.guard {
+                    collect_call_names_in_expr(g, out);
+                }
+                collect_call_names_in_expr(&arm.body, out);
+            }
+        }
+        Expr::Loop(l) => collect_call_names_in_block(&l.body, out),
+        Expr::While(w) => {
+            collect_call_names_in_expr(&w.cond, out);
+            collect_call_names_in_block(&w.body, out);
+        }
+        Expr::ForLoop(f) => {
+            collect_call_names_in_expr(&f.expr, out);
+            collect_call_names_in_block(&f.body, out);
+        }
+        Expr::Closure(c) => collect_call_names_in_expr(&c.body, out),
+        Expr::Await(a) => collect_call_names_in_expr(&a.base, out),
+        Expr::Try(t) => collect_call_names_in_expr(&t.expr, out),
+        Expr::Return(r) => {
+            if let Some(e) = &r.expr {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        Expr::Yield(y) => {
+            if let Some(e) = &y.expr {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        Expr::Reference(r) => collect_call_names_in_expr(&r.expr, out),
+        Expr::Unary(u) => collect_call_names_in_expr(&u.expr, out),
+        Expr::Binary(b) => {
+            collect_call_names_in_expr(&b.left, out);
+            collect_call_names_in_expr(&b.right, out);
+        }
+        Expr::Tuple(t) => {
+            for e in &t.elems {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        Expr::Array(a) => {
+            for e in &a.elems {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        Expr::Index(i) => {
+            collect_call_names_in_expr(&i.expr, out);
+            collect_call_names_in_expr(&i.index, out);
+        }
+        Expr::Field(f) => collect_call_names_in_expr(&f.base, out),
+        Expr::Cast(c) => collect_call_names_in_expr(&c.expr, out),
+        Expr::Paren(p) => collect_call_names_in_expr(&p.expr, out),
+        Expr::Group(g) => collect_call_names_in_expr(&g.expr, out),
+        Expr::Range(r) => {
+            if let Some(s) = &r.start {
+                collect_call_names_in_expr(s, out);
+            }
+            if let Some(e) = &r.end {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        Expr::Let(l) => collect_call_names_in_expr(&l.expr, out),
+        Expr::Assign(a) => {
+            collect_call_names_in_expr(&a.left, out);
+            collect_call_names_in_expr(&a.right, out);
+        }
+        Expr::Struct(s) => {
+            for f in &s.fields {
+                collect_call_names_in_expr(&f.expr, out);
+            }
+            if let Some(rest) = &s.rest {
+                collect_call_names_in_expr(rest, out);
+            }
+        }
+        Expr::Repeat(r) => {
+            collect_call_names_in_expr(&r.expr, out);
+            collect_call_names_in_expr(&r.len, out);
+        }
+        Expr::Break(b) => {
+            if let Some(e) = &b.expr {
+                collect_call_names_in_expr(e, out);
+            }
+        }
+        // Path / Lit / Macro / Const / Continue / Infer / Verbatim — leaves
+        // we can't / don't try to recurse into.
+        _ => {}
+    }
+}
+
+/// Return the callee name iff `e` is a single-segment path expression
+/// without generic arguments, qself, or a leading `::`. Anything else
+/// is too ambiguous to resolve unambiguously without type info.
+fn simple_call_name(e: &syn::Expr) -> Option<String> {
+    let syn::Expr::Path(p) = e else { return None };
+    if p.qself.is_some() || p.path.leading_colon.is_some() || p.path.segments.len() != 1 {
+        return None;
+    }
+    let seg = &p.path.segments[0];
+    if !matches!(seg.arguments, syn::PathArguments::None) {
+        return None;
+    }
+    Some(seg.ident.to_string())
+}
+
+/// Walk a `syn::UseTree` and append every leaf path (`a::b::Item`,
+/// `a::b::*`) to `out`. `prefix` accumulates segments as we descend
+/// into nested groups. The first segment is one of `crate`, `super`,
+/// `self`, or an external/dep ident — the resolver branches on that.
+fn collect_use_paths(tree: &syn::UseTree, prefix: &mut Vec<String>, out: &mut Vec<String>) {
+    match tree {
+        syn::UseTree::Path(p) => {
+            prefix.push(p.ident.to_string());
+            collect_use_paths(&p.tree, prefix, out);
+            prefix.pop();
+        }
+        syn::UseTree::Name(n) => {
+            prefix.push(n.ident.to_string());
+            out.push(prefix.join("::"));
+            prefix.pop();
+        }
+        syn::UseTree::Rename(r) => {
+            prefix.push(r.ident.to_string());
+            out.push(prefix.join("::"));
+            prefix.pop();
+        }
+        syn::UseTree::Glob(_) => {
+            let mut p = prefix.clone();
+            p.push("*".to_string());
+            out.push(p.join("::"));
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                collect_use_paths(item, prefix, out);
+            }
+        }
     }
 }

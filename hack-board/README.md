@@ -29,7 +29,7 @@ Consequences:
 - No separate issue tracker, no sync problem, no stale JIRA.
 - Archiving a ticket means deleting the annotation lines from source.
 - Everything that's *not* in source (todos, summaries, event log) is
-  explicitly labeled as derivative and lives under `.hack/`.
+  explicitly labeled as derivative and lives under `.yah/`.
 
 ---
 
@@ -51,7 +51,7 @@ ID shapes and when to use each:
 - **Compound sub-ticket** — `R007-T1`, `R007-T2`, … Allocated under a relay via `rs-hack board claim --parent R007`. Always `-T` regardless of kind.
 - **Standalone ticket** — `T03`, `F02`, `B01` (2-digit zero-padded). One-off work with no coordinating relay. Claim with no `--parent`.
 
-**Never pick IDs yourself.** `rs-hack board claim` takes a `.hack/id.lock`
+**Never pick IDs yourself.** `rs-hack board claim` takes a `.yah/id.lock`
 file lock, scans source for the current max, and writes the annotation
 atomically. Two agents running in parallel will not collide.
 
@@ -62,14 +62,14 @@ The board has five columns:
 | Column | `@yah:status(...)` value(s) | Meaning |
 |---|---|---|
 | **Epics** | (derived) | Coordination points. Epic status is `active` / `closed` computed from children. |
-| **Open** | `open` | Unclaimed. Also hosts `.hack/todo.md` entries (pre-ticket inbox). |
+| **Open** | `open` | Unclaimed. Also hosts `.yah/todo.md` entries (pre-ticket inbox). |
 | **Active** | `claimed` \| `in-progress` | Someone is working on it now. Two statuses collapse into one column. |
 | **Handoff** | `handoff` | Baton is down, ready for the next agent to pick up. |
 | **Review** | `review` \| `done` | Work is complete; awaiting sign-off. Terminal-on-board. |
 
 There is no `Done` column. "Done" is a short-lived staging value inside
 `Review`; the terminal action is **archive**, which removes the `@yah:`
-annotation lines from source and logs to `.hack/events.jsonl`.
+annotation lines from source and logs to `.yah/events.jsonl`.
 
 **Moving cards.** Either edit `@yah:status(...)` in source directly, or
 drag the card to a new column — the server rewrites the status line for
@@ -119,7 +119,7 @@ children first.
 
 ### Todos
 
-Lightweight pre-tickets in `.hack/todo.md`. Use these when you know
+Lightweight pre-tickets in `.yah/todo.md`. Use these when you know
 something needs doing but haven't decided the shape yet. Each todo carries:
 
 - `kind: feature | bug | task` — inherited when promoted to a ticket
@@ -139,7 +139,7 @@ with `{relay_id}` to link the promotion in the event log.
 
 ### Summaries
 
-Freeform progress notes in `.hack/summaries/*.md`. Written by `/comment`
+Freeform progress notes in `.yah/summaries/*.md`. Written by `/comment`
 (or `rs-hack board summary`). A summary with a `ticket:` frontmatter field
 attaches to that ticket's card; otherwise it lands in the board **Inbox**.
 Each summary has a "Fork" button that generates a continuation prompt and
@@ -147,7 +147,7 @@ copies it to the clipboard.
 
 ### Events log
 
-`.hack/events.jsonl` — append-only audit log. Derivative, not authoritative.
+`.yah/events.jsonl` — append-only audit log. Derivative, not authoritative.
 The server replays it on startup and diffs against the current source
 scan, so accidental deletions ("clobbers") show up as `disappeared`
 events. Typed events:
@@ -158,7 +158,7 @@ events. Typed events:
 | `modified` | Tracked field changed; payload includes `{field: {before, after}}` |
 | `archived` | Deliberate archive (strip annotation + log entry, one transaction) |
 | `disappeared` | Ticket gone from source without an archive event |
-| `todo_created` | New todo appears in `.hack/todo.md` |
+| `todo_created` | New todo appears in `.yah/todo.md` |
 | `todo_removed` | Todo disappears (edit or delete) |
 | `todo_promoted` | Explicit promote endpoint, includes `relay_id` link |
 
@@ -178,7 +178,7 @@ claim signal; no other modifications come before it.
 ### Rule02 — "Never pick IDs yourself"
 
 Every new relay/ticket is created via `rs-hack board claim`, which holds
-`.hack/id.lock` during scan+write. An agent manually picking `max(id) + 1`
+`.yah/id.lock` during scan+write. An agent manually picking `max(id) + 1`
 will collide with another concurrent agent.
 
 ### Rule03 — "Same-relay handoff is the default"
@@ -192,7 +192,7 @@ relay in place* (same R-number, overwriting `@yah:handoff(...)`,
 
 `status: done` is a short-lived staging state. Tickets don't rest there
 — the terminal action is `POST /api/archive/:id`, which removes the
-annotation from source and logs to `.hack/events.jsonl`. If a ticket
+annotation from source and logs to `.yah/events.jsonl`. If a ticket
 declared `@yah:verify(…)`, the archive confirm step surfaces those
 commands before writing.
 
@@ -211,7 +211,7 @@ An epic's own `@yah:status(...)` is ignored; its state is derived.
 
 The only way to change board state is to edit source (or to go through
 one of the explicit server endpoints — archive, promote, add-todo —
-which themselves edit source or `.hack/`). There is no "move ticket"
+which themselves edit source or `.yah/`). There is no "move ticket"
 API that doesn't ultimately result in a file write.
 
 ---
@@ -254,7 +254,7 @@ rs-hack board claim --kind task --file src/foo.rs --title "…" --parent $EPIC -
    `///` doc-comment block.
 3. Removes just the `@yah:…` lines within that block — preserves
    `@arch:see`, plain doc text, and the item being documented.
-4. Appends an `archived` event to `.hack/events.jsonl` with the full
+4. Appends an `archived` event to `.yah/events.jsonl` with the full
    ticket snapshot + the raw lines that were removed.
 5. Triggers a rescan; the ticket disappears from the board.
 
@@ -272,7 +272,7 @@ with `blockingChildren` list). Archive children first.
 ├── src/**/*.rs                    # Source — the authoritative board state.
 │                                  # All @yah: annotations live here.
 ├── architecture/**/*.md           # Referenced by @arch:see(...) annotations.
-├── .hack/
+├── .yah/
 │   ├── todo.md                    # Pre-ticket inbox (structured markdown).
 │   ├── summaries/*.md             # Progress notes from /comment.
 │   ├── events.jsonl               # Append-only audit log. Server replays
@@ -368,7 +368,7 @@ port is HTTP + 1). Override with `HACK_PORT` / `HACK_UDP_PORT`.
 
 Installed by `rs-hack board init` into `.claude/commands/`:
 
-- **`/comment`** — freeform progress summary to `.hack/summaries/`.
+- **`/comment`** — freeform progress summary to `.yah/summaries/`.
 - **`/handoff`** — same-relay continuation (default) or new-relay track.
   Uses `rs-hack board claim`.
 - **`/refine`** — turn a multi-phase plan into a relay + tickets.

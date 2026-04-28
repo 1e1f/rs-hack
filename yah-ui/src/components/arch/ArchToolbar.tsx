@@ -7,6 +7,7 @@ import { PinnedViews, type PinnedView } from "./PinnedViews";
 import { Legend } from "./Legend";
 
 interface ArchToolbarProps {
+  rigId: string;
   rootId: string;
   onRootChange: (id: string) => void;
   depth: number;
@@ -24,6 +25,7 @@ interface ArchToolbarProps {
    State lives one level up in ArchView so the rail and the canvas can
    stay in sync (e.g. graphpane "Pin view" button feeds onPinCurrent). */
 export function ArchToolbar({
+  rigId,
   rootId,
   onRootChange,
   depth,
@@ -44,7 +46,7 @@ export function ArchToolbar({
     >
       <section>
         <SectionHeader>Root</SectionHeader>
-        <RootSelector value={rootId} onChange={onRootChange} />
+        <RootSelector rigId={rigId} value={rootId} onChange={onRootChange} />
         <div className="mt-1.5 text-[11px] italic text-ink-4">
           Graph rebuilt from <span className="font-mono">@arch:</span> annotations
           on demand.

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Rust language indexer for the yah knowledge graph"
+publish = false
 
 [dependencies]
 yah-kg = { path = "../yah-kg" }

@@ -128,6 +128,10 @@ pub fn walk_and_index(
             FileOutcome::ParseError => summary.parse_errors += 1,
         }
     }
+    // Pass 3: now that every file's nodes + `imports` properties are in
+    // the store, walk the rig and emit cross-file `Imports` edges.
+    crate::resolve::resolve_rust_imports(store);
+    crate::resolve::resolve_ts_imports(store, &root_canon);
     Ok(summary)
 }
 
@@ -176,6 +180,13 @@ pub fn reindex_file(
         ensure_directory_chain(file_rel, &rig_canon, store);
         let _ = index_one_file(file_rel, &abs, &rig_canon, store, registry)?;
     }
+
+    // Pass 3: this file's import set may have changed and other files'
+    // imports may now resolve to a node that's been re-issued. Drop and
+    // re-resolve cheaply: full pass is O(files), edges dedupe by id.
+    crate::resolve::drop_imports_from(store, file_rel);
+    crate::resolve::resolve_rust_imports(store);
+    crate::resolve::resolve_ts_imports(store, &rig_canon);
 
     // 4. Snapshot after-state and diff.
     let after_nodes: HashMap<NodeId, NodeRef> = store
