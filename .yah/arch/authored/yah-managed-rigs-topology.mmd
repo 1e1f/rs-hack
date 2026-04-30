@@ -1,0 +1,108 @@
+%% yah managed-rigs topology — substrate only (provisioning, ingress, mesh, backups)
+%% paired doc: architecture/yah-managed-rigs-topology.md
+%% customer app data tiers: see ss/noisetable/architecture/noisetable-data-tiers.md
+%%                          and  ss/noisetable/.yah/arch/authored/noisetable-data-tiers.mmd
+
+flowchart TB
+    classDef user fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef cf fill:#fff3e0,stroke:#e65100,color:#bf360c
+    classDef hetzner fill:#fce4ec,stroke:#ad1457,color:#880e4f
+    classDef k3s fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef data fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
+    classDef control fill:#fffde7,stroke:#f9a825,color:#f57f17
+    classDef friend fill:#eceff1,stroke:#455a64,color:#263238
+    classDef customer fill:#e0f2f1,stroke:#00695c,color:#004d40,stroke-dasharray: 5 5
+
+    subgraph CLIENT["Local (laptop)"]
+        Tauri["Tauri yah-ui<br/>RigSelector<br/>+ Hetzner provisioner"]:::user
+    end
+
+    subgraph CONTROL["Substrate control plane"]
+        direction LR
+        Headscale["Headscale<br/>mesh identity<br/>+ ACL primitive<br/>(tag scheme = customer)"]:::control
+        HetznerAPI["Hetzner Cloud API<br/>(BYO token from operator)"]:::hetzner
+    end
+
+    subgraph CF["Cloudflare (DNS path only)"]
+        CFDNS["Geo-steering DNS<br/>app.yourdomain.com<br/>→ nearest region LB IP"]:::cf
+    end
+
+    subgraph DOGFOOD["Multi-machine mirror — multi-region k3s, public ingress"]
+        direction LR
+
+        subgraph EU["Region: Falkenstein (EU)"]
+            EULB["Hetzner LB<br/>(stable IP)"]:::hetzner
+            subgraph EUk3s["k3s cluster"]
+                EUNode1["k3s node<br/>CX22"]:::k3s
+                EUNode2["k3s node<br/>CX22"]:::k3s
+                EUApp["Customer app pods<br/>(e.g. noisetable)"]:::customer
+            end
+            EUS3[("Hetzner Object Storage<br/>S3 — Velero/Loki/restic")]:::data
+        end
+
+        subgraph US["Region: Hillsboro (US-W)"]
+            USLB["Hetzner LB<br/>(stable IP)"]:::hetzner
+            subgraph USk3s["k3s cluster"]
+                USNode1["k3s node<br/>CX22"]:::k3s
+                USNode2["k3s node<br/>CX22"]:::k3s
+                USApp["Customer app pods"]:::customer
+            end
+            USS3[("Hetzner Object Storage<br/>S3")]:::data
+        end
+    end
+
+    subgraph FRIENDS["Single-machine mirror — colocated, low-ops"]
+        direction LR
+        FriendBox["Hetzner CX22<br/>no public ports<br/>(docker-compose | systemd | k3s-1node)"]:::friend
+        Cloudflared["cloudflared<br/>dials out"]:::friend
+        FriendApp["Customer app mirror<br/>+ Postgres<br/>+ restic timer"]:::customer
+        StorageBox[("Hetzner Storage Box<br/>SFTP/Borg — restic target")]:::friend
+        CFTunnel["Cloudflare Tunnel<br/>alice.yourdomain.com<br/>free TLS, no inbound"]:::cf
+    end
+
+    %% client → rigs (control)
+    Tauri -->|"SSH-RPC<br/>(yah-kg-daemon)"| EUk3s
+    Tauri -.->|"SSH-RPC"| FriendApp
+
+    %% provisioning
+    Tauri -->|"BYO API token<br/>spin VM, cloud-init"| HetznerAPI
+    HetznerAPI -.->|"creates"| EUk3s
+    HetznerAPI -.->|"creates"| FriendBox
+
+    %% client → app data path (customer-app traffic)
+    Tauri -->|"https"| CFDNS
+    CFDNS -->|"EU users"| EULB
+    CFDNS -->|"US users"| USLB
+
+    EULB --> EUk3s
+    USLB --> USk3s
+
+    %% backups
+    EUk3s -->|"Velero / Loki<br/>nightly"| EUS3
+    USk3s -->|"Velero / Loki"| USS3
+    FriendApp -->|"restic daily"| StorageBox
+
+    %% mesh identity
+    EUk3s -.->|"register identity<br/>respect ACLs"| Headscale
+    USk3s -.->|"register identity"| Headscale
+    FriendApp -.->|"register (optional)"| Headscale
+
+    %% friends path
+    Cloudflared --> CFTunnel
+    CFTunnel -.->|"alice's traffic"| Tauri
+    FriendBox --- Cloudflared
+    FriendBox --- FriendApp
+
+    %% customer-app architecture pointer
+    Note1["Customer-app data architecture lives outside this diagram.<br/>noisetable's tiered data model:<br/>ss/noisetable/architecture/noisetable-data-tiers.md"]:::customer
+    Note1 -.- EUApp
+    Note1 -.- USApp
+    Note1 -.- FriendApp
+
+    %% vocabulary note
+    Note0["Vocabulary:<br/>• rig = project folder (source of truth, in RigSelector)<br/>• machine = host (CX22, k3s node, laptop) — IaaS provisions these<br/>• mirror = running deployment of a rig — PaaS deploys these<br/>• Multi-machine mirrors MUST also run as single-machine for e2e tests"]:::user
+    Note0 -.- Tauri
+
+    %% substrate-level defense annotation
+    Note2["Substrate-level defense in depth:<br/>1) Headscale tag ACLs (network) — yah provides primitive<br/>2) Per-tenant DB roles (data) — yah provides primitive<br/>3) Compile-time tier types — customer responsibility"]:::control
+    Note2 -.- Headscale

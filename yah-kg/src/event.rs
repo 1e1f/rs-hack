@@ -109,3 +109,34 @@ pub enum ChangedField {
     Properties,
     Annotations,
 }
+
+/// Filesystem change emitted as a `file.event` JSON-RPC notification by
+/// the daemon. Sent for every active watch handle whose root covers the
+/// changed path; consumers route by `watch_id`. Path is rig-relative
+/// with POSIX separators.
+///
+/// `kind` is best-effort — `notify` events are debounced and reclassified
+/// from disk state at emit time, so a quick rename-then-write may surface
+/// as a single `Modified`. Renderers shouldn't rely on tight kind fidelity
+/// for correctness; treat any event as "this path may have changed".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEvent {
+    /// Watch handle id this event belongs to (from
+    /// [`crate::rpc::WatchResult::id`]).
+    pub watch_id: u64,
+    pub kind: FileEventKind,
+    /// Rig-relative path to the affected file or directory.
+    pub path: String,
+    /// File mtime in milliseconds since the Unix epoch when known. `None`
+    /// for `Removed` events and on platforms that can't report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileEventKind {
+    Created,
+    Modified,
+    Removed,
+}

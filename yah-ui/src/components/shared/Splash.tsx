@@ -2,20 +2,29 @@ import { useEffect, useState } from "react";
 
 /* Empty-state composite: wayfarer linocut + caption + subline.
    Surfaces in EmptyColumn / FillerSplash (board), no-session (agent),
-   no-graph (arch), and the run-cluster coming-soon panes.
+   no-graph (arch), the test-cluster coming-soon panes, and the host-cluster
+   coming-soon panes.
 
-   Five base variants map 1:1 to a PNG pair (light + dark) under
-   `/illustrations/wayfarer-<column>-<theme>.png`. Legacy aliases (scroll,
-   lantern, camp, anvil, empty, signpost) survive from the design return so
-   surfaces outside the board can pick a column-flavoured illustration
-   without inventing new artwork. */
+   Each "asset" maps 1:1 to a PNG pair (light + dark) under
+   `/illustrations/solid-<asset>-<theme>.png`. Five board columns
+   (zones/open/active/handoff/review) each have their own asset; three
+   non-board assets (architecture, mirror, node) cover Design-arch, Host-services,
+   and Host-infra respectively. Legacy aliases (scroll/lantern/camp/anvil/empty/
+   signpost) survive from the design return and resolve through ALIAS_TO_ASSET
+   so surfaces that already picked a column-flavoured illustration keep working. */
 
-export type SplashVariant =
+type AssetSlug =
   | "zones"
   | "open"
   | "active"
   | "handoff"
   | "review"
+  | "architecture"
+  | "mirror"
+  | "node";
+
+export type SplashVariant =
+  | AssetSlug
   | "scroll"
   | "lantern"
   | "camp"
@@ -23,14 +32,10 @@ export type SplashVariant =
   | "empty"
   | "signpost";
 
-type ColumnSlug = "zones" | "open" | "active" | "handoff" | "review";
-
-const VARIANT_TO_COLUMN: Record<SplashVariant, ColumnSlug> = {
-  zones: "zones",
-  open: "open",
-  active: "active",
-  handoff: "handoff",
-  review: "review",
+const ALIAS_TO_ASSET: Record<
+  "scroll" | "lantern" | "camp" | "anvil" | "empty" | "signpost",
+  AssetSlug
+> = {
   scroll: "zones",
   lantern: "open",
   camp: "handoff",
@@ -38,6 +43,12 @@ const VARIANT_TO_COLUMN: Record<SplashVariant, ColumnSlug> = {
   empty: "open",
   signpost: "open",
 };
+
+function resolveAsset(v: SplashVariant): AssetSlug {
+  return v in ALIAS_TO_ASSET
+    ? ALIAS_TO_ASSET[v as keyof typeof ALIAS_TO_ASSET]
+    : (v as AssetSlug);
+}
 
 interface SplashProps {
   variant?: SplashVariant;
@@ -71,9 +82,9 @@ export function Splash({
   caption,
   sub,
 }: SplashProps) {
-  const col = VARIANT_TO_COLUMN[variant] ?? "open";
+  const asset = resolveAsset(variant);
   const theme = useTheme();
-  const src = `/illustrations/wayfarer-${col}-${theme}.png`;
+  const src = `/illustrations/solid-${asset}-${theme}.png`;
 
   return (
     <div className="mx-auto flex max-w-[360px] flex-col items-center gap-3.5 px-4 py-5 text-center">

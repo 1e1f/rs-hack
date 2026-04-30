@@ -19,6 +19,16 @@
 //! Inputs are intentionally shape-agnostic: `Board::from_work_items`
 //! takes one Vec for relays and one for tickets — the same shape the
 //! RPC results already arrive in. No graph access required.
+//!
+//! @yah:ticket(R028-F5, "Skill resolver: column/tag -> skill set, baked into prelude")
+//! @yah:status(open)
+//! @yah:phase(P2)
+//! @yah:parent(R028)
+//! @yah:next("Extend SDLC rule engine to map (column, tags) -> skill list")
+//! @yah:next("Default rules: review -> /review + /security-review; tag(security) -> /security-review")
+//! @yah:next("Resolved skills inject into Prelude (R028-T2)")
+//! @yah:verify("Open a ticket in Review column; prelude includes /review skill registration")
+//! @arch:see(architecture/yah-agent-runtime.md)
 
 use crate::anno::{TicketStatus, WorkItemType};
 use crate::rpc::{WorkItem, WorkItemAnchor};
@@ -221,6 +231,189 @@ impl Board {
             counts.bump(child.item.anno.status);
         }
         counts
+    }
+}
+
+/// Just the bits of a `WorkItem` the relay-derive pass needs. Lets us
+/// hold relays + tickets in one lookup without fighting the borrow
+/// checker over `&mut [WorkItem]` re-entry on the relay slice.
+struct DeriveSnap {
+    item_type: WorkItemType,
+    status: Option<TicketStatus>,
+    last_modified_ts: u64,
+}
+
+fn derive_status(
+    id: &str,
+    by_id: &HashMap<String, DeriveSnap>,
+    children_by_parent: &HashMap<String, Vec<String>>,
+    memo: &mut HashMap<String, TicketStatus>,
+    visiting: &mut std::collections::HashSet<String>,
+) -> TicketStatus {
+    if let Some(s) = memo.get(id) {
+        return *s;
+    }
+    let Some(snap) = by_id.get(id) else {
+        return TicketStatus::Open;
+    };
+    let own = snap.status.unwrap_or(TicketStatus::Open);
+    if visiting.contains(id) {
+        return own;
+    }
+    if !matches!(snap.item_type, WorkItemType::Relay) {
+        memo.insert(id.to_string(), own);
+        return own;
+    }
+    let Some(children) = children_by_parent.get(id) else {
+        memo.insert(id.to_string(), own);
+        return own;
+    };
+    if children.is_empty() {
+        memo.insert(id.to_string(), own);
+        return own;
+    }
+    visiting.insert(id.to_string());
+    let mut seen_active = false;
+    let mut seen_handoff = false;
+    let mut seen_open = false;
+    let mut seen_review = false;
+    for c in children {
+        let s = derive_status(c, by_id, children_by_parent, memo, visiting);
+        match s {
+            TicketStatus::Claimed | TicketStatus::InProgress => seen_active = true,
+            TicketStatus::Handoff => seen_handoff = true,
+            TicketStatus::Open => seen_open = true,
+            TicketStatus::Review | TicketStatus::Done => seen_review = true,
+        }
+    }
+    visiting.remove(id);
+    let derived = if seen_active {
+        TicketStatus::InProgress
+    } else if seen_handoff {
+        TicketStatus::Handoff
+    } else if seen_review && seen_open {
+        TicketStatus::Handoff
+    } else if seen_open {
+        TicketStatus::Open
+    } else {
+        TicketStatus::Review
+    };
+    memo.insert(id.to_string(), derived);
+    derived
+}
+
+fn derive_ts(
+    id: &str,
+    by_id: &HashMap<String, DeriveSnap>,
+    children_by_parent: &HashMap<String, Vec<String>>,
+    memo: &mut HashMap<String, u64>,
+    visiting: &mut std::collections::HashSet<String>,
+) -> u64 {
+    if let Some(t) = memo.get(id) {
+        return *t;
+    }
+    let Some(snap) = by_id.get(id) else {
+        return 0;
+    };
+    let own = snap.last_modified_ts;
+    if visiting.contains(id) {
+        return own;
+    }
+    if !matches!(snap.item_type, WorkItemType::Relay) {
+        memo.insert(id.to_string(), own);
+        return own;
+    }
+    let Some(children) = children_by_parent.get(id) else {
+        memo.insert(id.to_string(), own);
+        return own;
+    };
+    if children.is_empty() {
+        memo.insert(id.to_string(), own);
+        return own;
+    }
+    visiting.insert(id.to_string());
+    let mut max = own;
+    for c in children {
+        let t = derive_ts(c, by_id, children_by_parent, memo, visiting);
+        if t > max {
+            max = t;
+        }
+    }
+    visiting.remove(id);
+    memo.insert(id.to_string(), max);
+    max
+}
+
+/// Derive an effective `status` for every relay that has children, then
+/// roll up `last_modified_ts` as the max across the relay and every
+/// descendant. Mirrors `yah-ui/src/lib/relay-status.ts:withDerivedRelayFields`
+/// so the daemon's `arch.list_relays` ships the same view the desktop
+/// client computes locally — once children exist the source-authored
+/// `@yah:status(...)` becomes display-only.
+///
+/// Precedence (matches the TS `bucketOf` mapping):
+/// * any child in `claimed` | `in-progress` → `in-progress`
+/// * else any child in `handoff`              → `handoff`
+/// * else (any in `review`/`done` AND any `open`) → `handoff`
+///   (partial-completion checkpoint; "not started" would be misleading)
+/// * else any child in `open`                 → `open`
+/// * else (every child in `review` | `done`)  → `review`
+///
+/// Childless relays are left untouched. Tickets are read-only inputs —
+/// they can't have their own children, but they ARE descendants of the
+/// relays we're deriving for.
+pub fn apply_derived_relay_fields(relays: &mut [WorkItem], tickets: &[WorkItem]) {
+    if relays.is_empty() {
+        return;
+    }
+
+    let mut by_id: HashMap<String, DeriveSnap> =
+        HashMap::with_capacity(relays.len() + tickets.len());
+    let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
+    for w in relays.iter().chain(tickets.iter()) {
+        by_id.insert(
+            w.id.clone(),
+            DeriveSnap {
+                item_type: w.item_type,
+                status: w.anno.status,
+                last_modified_ts: w.last_modified_ts,
+            },
+        );
+        if let Some(p) = &w.anno.parent {
+            children_by_parent
+                .entry(p.clone())
+                .or_default()
+                .push(w.id.clone());
+        }
+    }
+
+    let mut status_memo: HashMap<String, TicketStatus> = HashMap::new();
+    let mut ts_memo: HashMap<String, u64> = HashMap::new();
+    let mut visiting: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for relay in relays.iter_mut() {
+        let Some(children) = children_by_parent.get(&relay.id) else {
+            continue;
+        };
+        if children.is_empty() {
+            continue;
+        }
+        let s = derive_status(
+            &relay.id,
+            &by_id,
+            &children_by_parent,
+            &mut status_memo,
+            &mut visiting,
+        );
+        relay.anno.status = Some(s);
+        let t = derive_ts(
+            &relay.id,
+            &by_id,
+            &children_by_parent,
+            &mut ts_memo,
+            &mut visiting,
+        );
+        relay.last_modified_ts = t;
     }
 }
 
@@ -645,5 +838,121 @@ mod tests {
         assert_eq!(counts.describe(), "2 open");
         counts.handoff = 1;
         assert_eq!(counts.describe(), "2 open · 1 handoff");
+    }
+
+    fn relay_with(id: &str, status: Option<TicketStatus>, parent: Option<&str>) -> WorkItem {
+        let mut a = anno_for(id);
+        a.status = status;
+        a.parent = parent.map(String::from);
+        item(id, WorkItemType::Relay, vec![anchor("a.rs", 1, a)])
+    }
+
+    fn ticket_with(id: &str, status: Option<TicketStatus>, parent: Option<&str>) -> WorkItem {
+        let mut a = anno_for(id);
+        a.status = status;
+        a.parent = parent.map(String::from);
+        item(id, WorkItemType::Ticket, vec![anchor("b.rs", 1, a)])
+    }
+
+    #[test]
+    fn derive_relay_status_picks_active_when_any_child_in_progress() {
+        let mut relays = vec![relay_with("R017", Some(TicketStatus::Open), None)];
+        let tickets = vec![
+            ticket_with("R017-T1", Some(TicketStatus::InProgress), Some("R017")),
+            ticket_with("R017-T2", Some(TicketStatus::Open), Some("R017")),
+        ];
+        apply_derived_relay_fields(&mut relays, &tickets);
+        assert_eq!(relays[0].anno.status, Some(TicketStatus::InProgress));
+    }
+
+    #[test]
+    fn derive_relay_status_partial_completion_reads_as_handoff() {
+        let mut relays = vec![relay_with("R017", Some(TicketStatus::Open), None)];
+        let tickets = vec![
+            ticket_with("R017-T1", Some(TicketStatus::Review), Some("R017")),
+            ticket_with("R017-T2", Some(TicketStatus::Open), Some("R017")),
+        ];
+        apply_derived_relay_fields(&mut relays, &tickets);
+        assert_eq!(relays[0].anno.status, Some(TicketStatus::Handoff));
+    }
+
+    #[test]
+    fn derive_relay_status_all_review_or_done_is_review() {
+        let mut relays = vec![relay_with("R017", Some(TicketStatus::Open), None)];
+        let tickets = vec![
+            ticket_with("R017-T1", Some(TicketStatus::Review), Some("R017")),
+            ticket_with("R017-T2", Some(TicketStatus::Done), Some("R017")),
+        ];
+        apply_derived_relay_fields(&mut relays, &tickets);
+        assert_eq!(relays[0].anno.status, Some(TicketStatus::Review));
+    }
+
+    #[test]
+    fn derive_relay_status_skips_relay_without_children() {
+        let mut relays = vec![relay_with("R017", Some(TicketStatus::Handoff), None)];
+        apply_derived_relay_fields(&mut relays, &[]);
+        // Source status preserved when no children exist.
+        assert_eq!(relays[0].anno.status, Some(TicketStatus::Handoff));
+    }
+
+    #[test]
+    fn derive_relay_status_recurses_through_child_relays() {
+        // Epic R013 → child relay R017 → ticket R017-T1(in-progress).
+        // R017 alone derives in-progress; R013 picks it up via R017.
+        let mut relays = vec![
+            relay_with("R013", Some(TicketStatus::Open), None),
+            relay_with("R017", Some(TicketStatus::Open), Some("R013")),
+        ];
+        let tickets = vec![ticket_with(
+            "R017-T1",
+            Some(TicketStatus::InProgress),
+            Some("R017"),
+        )];
+        apply_derived_relay_fields(&mut relays, &tickets);
+        let r013 = relays.iter().find(|r| r.id == "R013").unwrap();
+        let r017 = relays.iter().find(|r| r.id == "R017").unwrap();
+        assert_eq!(r017.anno.status, Some(TicketStatus::InProgress));
+        assert_eq!(r013.anno.status, Some(TicketStatus::InProgress));
+    }
+
+    #[test]
+    fn derive_relay_ts_rolls_up_max_across_descendants() {
+        let mut relays = vec![{
+            let mut w = relay_with("R017", Some(TicketStatus::Open), None);
+            w.last_modified_ts = 1_000;
+            w
+        }];
+        let tickets = vec![
+            {
+                let mut w = ticket_with("R017-T1", Some(TicketStatus::Open), Some("R017"));
+                w.last_modified_ts = 5_000;
+                w
+            },
+            {
+                let mut w = ticket_with("R017-T2", Some(TicketStatus::Open), Some("R017"));
+                w.last_modified_ts = 3_000;
+                w
+            },
+        ];
+        apply_derived_relay_fields(&mut relays, &tickets);
+        assert_eq!(relays[0].last_modified_ts, 5_000);
+    }
+
+    #[test]
+    fn derive_relay_status_is_idempotent() {
+        // Running derivation twice should produce the same result —
+        // critical for the UI which still calls withDerivedRelayFields
+        // on data the daemon has already derived.
+        let mut relays = vec![relay_with("R017", Some(TicketStatus::Open), None)];
+        let tickets = vec![ticket_with(
+            "R017-T1",
+            Some(TicketStatus::Handoff),
+            Some("R017"),
+        )];
+        apply_derived_relay_fields(&mut relays, &tickets);
+        let after_first = relays[0].anno.status;
+        apply_derived_relay_fields(&mut relays, &tickets);
+        assert_eq!(relays[0].anno.status, after_first);
+        assert_eq!(after_first, Some(TicketStatus::Handoff));
     }
 }

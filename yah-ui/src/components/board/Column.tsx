@@ -52,7 +52,7 @@ export function Column({
     >
       <header className="flex items-center gap-2 border-b border-rule/50 px-3 pt-2.5 pb-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2.5 text-ink">
+          <div className="flex items-baseline gap-1 text-ink">
             <span className="illum-cap text-[22px] leading-none">{head}</span>
             <span className="smallcaps text-[13px] font-medium tracking-[0.16em]">
               {tail}

@@ -55,7 +55,7 @@ fn build_context<'a>(board: &'a Board, id: &'a str) -> Option<PromptCtx<'a>> {
         .children_of(id)
         .filter(|c| status_is_live(c.item.anno.status))
         .collect();
-    live_children.sort_by(|a, b| a.item.id.cmp(&b.item.id));
+    live_children.sort_by(|a, b| child_order_key(a).cmp(&child_order_key(b)));
 
     let mut child_live_counts: HashMap<String, ChildLiveCounts> = HashMap::new();
     if item.is_epic {
@@ -75,6 +75,28 @@ fn build_context<'a>(board: &'a Board, id: &'a str) -> Option<PromptCtx<'a>> {
         live_children,
         child_live_counts,
     })
+}
+
+/// Order sub-tickets by phase first, then by the numeric tail of the id
+/// (so `P1`/`T2` precedes `P3`/`F9`, and `T2` precedes `T10`). Items
+/// with no phase or non-numeric ids sort last; ties fall back to the
+/// raw id string for a deterministic order.
+fn child_order_key(c: &BoardItem) -> (u32, u32, &str) {
+    let phase = c
+        .item
+        .anno
+        .phase
+        .as_deref()
+        .and_then(|p| p.trim_start_matches(['P', 'p']).parse::<u32>().ok())
+        .unwrap_or(u32::MAX);
+    let id_num = c
+        .item
+        .id
+        .rsplit(|ch: char| !ch.is_ascii_digit())
+        .find(|s| !s.is_empty())
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(u32::MAX);
+    (phase, id_num, c.item.id.as_str())
 }
 
 fn status_is_live(s: Option<TicketStatus>) -> bool {
@@ -354,44 +376,91 @@ fn render_pickup(ctx: &PromptCtx) -> String {
     prompt.push_str(&format!("Defined at `{}:{}`\n\n", canonical.file, canonical.line));
 
     prompt.push_str("## First action\n\n");
-    match anno.status {
-        Some(TicketStatus::Open) | None => {
+    if is_container {
+        // Relay status is derived from its children — never claim/move
+        // the relay itself, work the next live sub-ticket. If somehow
+        // there are no live children left (race with the deriver), fall
+        // back to a no-op note rather than instructing a relay move.
+        if let Some(next) = live_children.first().copied() {
+            let cmd = match next.item.anno.status {
+                Some(TicketStatus::Open) | None => {
+                    format!("yah board claim {}", next.item.id)
+                }
+                Some(TicketStatus::Handoff) => {
+                    format!("yah board move {} active", next.item.id)
+                }
+                Some(TicketStatus::Claimed) | Some(TicketStatus::InProgress) => {
+                    format!(
+                        "yah board tickets --prompt {}    # already in flight; pull its prompt",
+                        next.item.id
+                    )
+                }
+                Some(TicketStatus::Review) | Some(TicketStatus::Done) => {
+                    format!(
+                        "yah board show {} --prompt --review    # review-mode prompt",
+                        next.item.id
+                    )
+                }
+            };
             prompt.push_str(&format!(
-                "Claim this ticket — one atomic command flips status and assignee (Rule01):\n\n\
-                 ```bash\n\
-                 yah board claim {}\n\
-                 ```\n\n\
-                 The Prompt button's clipboard copy does **not** move the card for you. \
-                 Run the claim before any other code edits.\n\n",
-                item.item.id
+                "Pick up the next live sub-ticket — **{0}**. The relay's own \
+                 status is derived from its children, so don't claim or move \
+                 **{1}** itself; work {0} (and any siblings) until they all reach \
+                 review, then archive the relay.\n\n\
+                 ```bash\n{2}\n```\n\n\
+                 The Prompt button's clipboard copy does **not** move the card \
+                 for you. Run the command before any other code edits.\n\n",
+                next.item.id, item.item.id, cmd
+            ));
+        } else {
+            prompt.push_str(&format!(
+                "**{}** has no live sub-tickets — its derived status is `review`. \
+                 If new work is needed, open a sub-ticket: `yah board open --kind \
+                 task --parent {}`. Don't move the relay itself; its status \
+                 follows its children.\n\n",
+                item.item.id, item.item.id
             ));
         }
-        Some(TicketStatus::Handoff) => {
-            prompt.push_str(&format!(
-                "Pick up the baton — one atomic command flips status and assignee (Rule01):\n\n\
-                 ```bash\n\
-                 yah board move {} active\n\
-                 ```\n\n\
-                 The Prompt button's clipboard copy does **not** move the card for you. \
-                 Run the move before any other code edits.\n\n",
-                item.item.id
-            ));
-        }
-        Some(TicketStatus::Claimed) | Some(TicketStatus::InProgress) => {
-            prompt.push_str(&format!(
-                "This ticket is already `{}` — you're continuing an in-flight session, \
-                 no claim needed. Begin with the next steps below.\n\n",
-                status_column(anno.status).to_lowercase()
-            ));
-        }
-        Some(TicketStatus::Review) | Some(TicketStatus::Done) => {
-            prompt.push_str(&format!(
-                "This ticket is already in `{}`. If it needs more work, send it back \
-                 with `yah board move {} handoff --handoff \"what still needs doing\"`. \
-                 Otherwise use the review-mode prompt from the card's Review button.\n\n",
-                status_column(anno.status).to_lowercase(),
-                item.item.id
-            ));
+    } else {
+        match anno.status {
+            Some(TicketStatus::Open) | None => {
+                prompt.push_str(&format!(
+                    "Claim this ticket — one atomic command flips status and assignee (Rule01):\n\n\
+                     ```bash\n\
+                     yah board claim {}\n\
+                     ```\n\n\
+                     The Prompt button's clipboard copy does **not** move the card for you. \
+                     Run the claim before any other code edits.\n\n",
+                    item.item.id
+                ));
+            }
+            Some(TicketStatus::Handoff) => {
+                prompt.push_str(&format!(
+                    "Pick up the baton — one atomic command flips status and assignee (Rule01):\n\n\
+                     ```bash\n\
+                     yah board move {} active\n\
+                     ```\n\n\
+                     The Prompt button's clipboard copy does **not** move the card for you. \
+                     Run the move before any other code edits.\n\n",
+                    item.item.id
+                ));
+            }
+            Some(TicketStatus::Claimed) | Some(TicketStatus::InProgress) => {
+                prompt.push_str(&format!(
+                    "This ticket is already `{}` — you're continuing an in-flight session, \
+                     no claim needed. Begin with the next steps below.\n\n",
+                    status_column(anno.status).to_lowercase()
+                ));
+            }
+            Some(TicketStatus::Review) | Some(TicketStatus::Done) => {
+                prompt.push_str(&format!(
+                    "This ticket is already in `{}`. If it needs more work, send it back \
+                     with `yah board move {} handoff --handoff \"what still needs doing\"`. \
+                     Otherwise use the review-mode prompt from the card's Review button.\n\n",
+                    status_column(anno.status).to_lowercase(),
+                    item.item.id
+                ));
+            }
         }
     }
 
@@ -433,22 +502,47 @@ fn render_pickup(ctx: &PromptCtx) -> String {
         step += 1;
     }
     prompt.push_str(&format!("{}. Pick the right end-state (Col01):\n", step));
-    prompt.push_str(&format!(
-        "   - **More work remains (another phase, another agent):** \
-            `yah board move {} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
-            — same R-number, baton moves forward in place (Rule03).\n",
-        item.item.id
-    ));
-    prompt.push_str(&format!(
-        "   - **This ticket's tasks are met, awaiting human sign-off:** \
-            `yah board move {} review` and ping the user. Do **not** self-archive — \
-            review is where a human exercises `@yah:verify(...)` and confirms.\n",
-        item.item.id
-    ));
-    prompt.push_str(
-        "   - **Already signed off in a previous pass:** archive via the card button \
-            (strips `@yah:` lines from source, appends `archived` to `.yah/events.jsonl`).\n",
-    );
+    if is_container {
+        // Relay status is derived from children, so the move/review/archive
+        // actions all target the sub-ticket the agent just finished — never
+        // the relay itself. The relay archives last, after every child.
+        let target = live_children.first().map(|c| c.item.id.as_str()).unwrap_or("<sub-ticket>");
+        prompt.push_str(&format!(
+            "   - **More work remains on this sub-ticket:** \
+                `yah board move {0} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
+                — same sub-ticket id, baton moves forward (Rule03).\n",
+            target
+        ));
+        prompt.push_str(&format!(
+            "   - **Sub-ticket {0}'s tasks are met, awaiting human sign-off:** \
+                `yah board move {0} review` and ping the user. Do **not** self-archive — \
+                review is where a human exercises `@yah:verify(...)` and confirms. \
+                The relay's status will derive to `review` once every sub-ticket lands there.\n",
+            target
+        ));
+        prompt.push_str(&format!(
+            "   - **All sub-tickets reviewed and signed off:** archive each child first \
+                (card button), then archive **{}** to close the relay.\n",
+            item.item.id
+        ));
+    } else {
+        prompt.push_str(&format!(
+            "   - **More work remains (another phase, another agent):** \
+                `yah board move {} handoff --handoff \"what you just finished\" --next \"first concrete next step\"` \
+                — same R-number, baton moves forward in place (Rule03).\n",
+            item.item.id
+        ));
+        prompt.push_str(&format!(
+            "   - **This ticket's tasks are met, awaiting human sign-off:** \
+                `yah board move {} review` and ping the user. Do **not** self-archive — \
+                review is where a human exercises `@yah:verify(...)` and confirms.\n",
+            item.item.id
+        ));
+        prompt.push_str(
+            "   - **Already signed off in a previous pass:** archive via the card button \
+                (strips `@yah:` lines from source, appends `archived` to `.yah/events.jsonl`).\n",
+        );
+    }
 
     prompt
 }
@@ -733,6 +827,52 @@ mod tests {
         assert!(p.contains("R017-T1"));
         assert!(p.contains("Rule08"));
         assert!(p.contains("yah board move R017-T1 active"));
+    }
+
+    #[test]
+    fn sub_tickets_sort_by_phase_then_numeric_id() {
+        let parent_anno = WorkItemAnno {
+            id: "R033".into(),
+            title: "Files tab".into(),
+            ..Default::default()
+        };
+        let parent = item(
+            "R033",
+            WorkItemType::Relay,
+            vec![anchor("src/lib.rs", 1, parent_anno)],
+        );
+        let mk_child = |id: &str, phase: &str| {
+            let mut a = WorkItemAnno {
+                id: id.into(),
+                title: id.into(),
+                status: Some(TicketStatus::Open),
+                phase: Some(phase.into()),
+                ..Default::default()
+            };
+            a.parent = Some("R033".into());
+            item(
+                id,
+                WorkItemType::Ticket,
+                vec![anchor("src/lib.rs", 1, a)],
+            )
+        };
+        let board = Board::from_work_items(
+            vec![parent],
+            vec![
+                mk_child("R033-F9", "P3"),
+                mk_child("R033-T10", "P3"),
+                mk_child("R033-T1", "P1"),
+                mk_child("R033-T2", "P1"),
+                mk_child("R033-T5", "P2"),
+            ],
+        );
+        let p = render(&board, "R033", PromptMode::Pickup).unwrap();
+        let order = ["R033-T1", "R033-T2", "R033-T5", "R033-F9", "R033-T10"];
+        let positions: Vec<_> = order.iter().map(|id| p.find(id).unwrap()).collect();
+        for w in positions.windows(2) {
+            assert!(w[0] < w[1], "expected order {:?}, got positions {:?}", order, positions);
+        }
+        assert!(p.contains("yah board claim R033-T1"));
     }
 
     #[test]

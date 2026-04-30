@@ -613,39 +613,164 @@ fn json_property_nodes_carry_per_key_spans() {
 }
 
 #[test]
-fn yaml_and_toml_properties_still_use_file_wide_span_until_followup() {
-    // Per-key span tracking is JSON-only in this pass — YAML and TOML
-    // don't yet have a span source wired (yaml-rust2 events / toml_edit
-    // are the planned follow-ups). This test pins the current behavior
-    // so the follow-up PR notices when it flips.
+fn yaml_property_nodes_carry_per_key_spans() {
+    // YAML_SRC layout (1-indexed):
+    //   1: defaults: &defaults
+    //   2:   timeout: 30
+    //   3:   retries: 3
+    //   4:
+    //   5: dev:
+    //   6:   <<: *defaults
+    //   7:   host: localhost
+    //   8:
+    //   9: prod:
+    //  10:   <<: *defaults
+    //  11:   host: prod.example.com
     let store = build_yaml("config/services.yaml", YAML_SRC);
-    let host_id = store
+    let host_lines: Vec<u32> = store
         .lookup("config/services.yaml", None)
+        .into_iter()
+        .filter_map(|id| store.node_ref(id))
+        .filter(|n| n.label == "host" && matches!(n.kind, NodeKind::Doc(DocKind::Property)))
+        .map(|n| n.span.start_line)
+        .collect();
+    assert_eq!(
+        host_lines.len(),
+        2,
+        "two `host` Property nodes expected (one per dev/prod)"
+    );
+    let mut sorted = host_lines.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        vec![7, 11],
+        "`host` properties should land on the literal source lines, not the file-wide span"
+    );
+
+    // Direct top-level keys also pinpoint their source line.
+    let defaults = store
+        .lookup("config/services.yaml", None)
+        .into_iter()
+        .filter_map(|id| store.node_ref(id))
+        .find(|n| n.label == "defaults" && matches!(n.kind, NodeKind::Doc(DocKind::Property)))
+        .expect("defaults property");
+    assert_eq!(defaults.span.start_line, 1);
+}
+
+#[test]
+fn yaml_merge_resolved_keys_still_use_file_wide_span() {
+    // `serde_yaml` expands `<<: *defaults` into the merged keys
+    // (`timeout`, `retries`) at parse time, but those keys never
+    // physically appear at the merge site in source. yaml-rust2's
+    // event stream sees `<<` instead, so the merged children inherit
+    // the file-wide fallback span. This test pins that nuance — it's
+    // the trade-off that lets us avoid re-implementing merge
+    // resolution to track per-key positions.
+    let store = build_yaml("config/services.yaml", YAML_SRC);
+    let file_span = store
+        .lookup("config/services.yaml", None)
+        .into_iter()
+        .find_map(|id| {
+            let n = store.node_ref(id)?;
+            matches!(n.kind, NodeKind::Common(CommonKind::File)).then_some(n.span)
+        })
+        .unwrap();
+    // `serde_yaml` keeps `<<` as a literal key whose value is the
+    // resolved mapping, so the walker emits properties like
+    // `/dev/<<` (visible to yaml-rust2 → precise span) and
+    // `/dev/<</timeout` (a child of `<<` synthesized at parse time
+    // and *not* visible to the event stream → fallback to file-wide).
+    let dev_merge_timeout = store
+        .lookup("config/services.yaml", None)
+        .into_iter()
+        .filter_map(|id| store.node_ref(id))
+        .find(|n| {
+            n.qualified == "config/services.yaml#/dev/<</timeout"
+                && matches!(n.kind, NodeKind::Doc(DocKind::Property))
+        })
+        .expect("dev.<<.timeout property");
+    assert_eq!(
+        dev_merge_timeout.span, file_span,
+        "merge-resolved children fall back to the file-wide span"
+    );
+
+    // Sanity: the literal `<<` key itself does have a precise span.
+    let dev_merge_marker = store
+        .lookup("config/services.yaml", None)
+        .into_iter()
+        .filter_map(|id| store.node_ref(id))
+        .find(|n| {
+            n.qualified == "config/services.yaml#/dev/<<"
+                && matches!(n.kind, NodeKind::Doc(DocKind::Property))
+        })
+        .expect("dev.<< property");
+    assert_eq!(dev_merge_marker.span.start_line, 6);
+}
+
+#[test]
+fn toml_property_nodes_carry_per_key_spans() {
+    // toml_edit's `ImDocument::span()` per-key info threads through
+    // spans::extract_toml_spans → Walker::with_spans, so Property
+    // nodes for top-level + nested keys land on the literal source
+    // line of their `key = value` pair. CARGO_TOML layout (1-indexed):
+    //   1: [package]
+    //   2: name = "yah-kg-json-yaml"
+    //   3: version = "0.7.0"
+    //   4: edition = "2021"
+    //   5:
+    //   6: [dependencies]
+    //   7: yah-kg = { path = "../yah-kg" }
+    let store = build_toml("Cargo.toml", CARGO_TOML);
+
+    let prop_line = |label: &str| -> u32 {
+        let id = store
+            .lookup("Cargo.toml", None)
+            .into_iter()
+            .find(|id| {
+                store
+                    .node_ref(*id)
+                    .map(|n| {
+                        n.label == label
+                            && matches!(n.kind, NodeKind::Doc(DocKind::Property))
+                    })
+                    .unwrap_or(false)
+            })
+            .unwrap_or_else(|| panic!("missing property {label}"));
+        store.node_ref(id).unwrap().span.start_line
+    };
+
+    assert_eq!(prop_line("name"), 2, "`name` lives on line 2");
+    assert_eq!(prop_line("version"), 3, "`version` lives on line 3");
+    assert_eq!(prop_line("edition"), 4, "`edition` lives on line 4");
+    // Inline-table nested key (`yah-kg = { path = "../yah-kg" }`) —
+    // path lands on the same source line as its parent.
+    assert_eq!(prop_line("path"), 7, "inline-table `path` on line 7");
+
+    // Sanity: name span is no longer the whole file.
+    let file_span = store
+        .lookup("Cargo.toml", None)
+        .into_iter()
+        .find_map(|id| {
+            let n = store.node_ref(id)?;
+            matches!(n.kind, NodeKind::Common(CommonKind::File)).then_some(n.span)
+        })
+        .unwrap();
+    let name_id = store
+        .lookup("Cargo.toml", None)
         .into_iter()
         .find(|id| {
             store
                 .node_ref(*id)
                 .map(|n| {
-                    n.label == "host" && matches!(n.kind, NodeKind::Doc(DocKind::Property))
+                    n.label == "name" && matches!(n.kind, NodeKind::Doc(DocKind::Property))
                 })
                 .unwrap_or(false)
         })
-        .expect("at least one host property");
-    let host_span = store.node_ref(host_id).unwrap().span;
-    let file_id = store
-        .lookup("config/services.yaml", None)
-        .into_iter()
-        .find(|id| {
-            store
-                .node_ref(*id)
-                .map(|n| matches!(n.kind, NodeKind::Common(CommonKind::File)))
-                .unwrap_or(false)
-        })
         .unwrap();
-    let file_span = store.node_ref(file_id).unwrap().span;
-    assert_eq!(
-        host_span, file_span,
-        "YAML Property nodes still pin to the file-wide span until the yaml-rust2 events pass lands"
+    assert_ne!(
+        store.node_ref(name_id).unwrap().span,
+        file_span,
+        "name span must NOT cover the whole file anymore"
     );
 }
 

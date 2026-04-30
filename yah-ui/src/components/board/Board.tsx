@@ -4,6 +4,9 @@
 import { useMemo, useState } from "react";
 import {
   DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -80,6 +83,14 @@ export function Board({
   violations,
 }: BoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  /* Pointer activation distance — without this, any micro-jitter on
+     mousedown starts a drag and swallows the click, so click-to-expand
+     on a card never fires. 4px is small enough to feel instant on a real
+     drag and large enough to absorb tremor on a stationary press. */
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
 
   /* Apply the relay filter once, before grouping. Drag-end logic still
      references the full `tickets` list — the filter is presentation-only,
@@ -196,6 +207,7 @@ export function Board({
 
   return (
     <DndContext
+      sensors={dndSensors}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}

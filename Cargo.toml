@@ -25,12 +25,21 @@ members = [
     "yah-kg-json-yaml",
     "yah-kg-daemon",
     "yah-kg-anno",
+    "yah-kg-anno-wasm",
     "yah-kg-validator",
+    "yah-lsp",
+    "yah-rpc-ssh",
+    "yah-runner",
     "app/tauri",
 ]
-# `app/tauri` requires libwebkit2gtk-4.1 on Linux; default-members keeps
-# `cargo build --workspace` and `cargo test --workspace` working on hosts
-# without webkit. Build the Tauri app explicitly with `cargo build -p yah-tauri`.
+# `app/tauri` requires libwebkit2gtk-4.1 on Linux; `yah-kg-anno-wasm` is a
+# `cdylib` only useful built for `wasm32-unknown-unknown` via wasm-pack.
+# default-members keeps `cargo build --workspace` and `cargo test
+# --workspace` working on hosts without webkit and without forcing a wasm
+# toolchain on every contributor. Build the wasm crate explicitly with
+# `wasm-pack build yah-kg-anno-wasm` (or `cargo build -p yah-kg-anno-wasm
+# --target wasm32-unknown-unknown`); build the Tauri app explicitly with
+# `cargo build -p yah-tauri`.
 default-members = [
     "yah",
     "yah-kg",
@@ -41,6 +50,9 @@ default-members = [
     "yah-kg-daemon",
     "yah-kg-anno",
     "yah-kg-validator",
+    "yah-lsp",
+    "yah-rpc-ssh",
+    "yah-runner",
 ]
 resolver = "2"
 

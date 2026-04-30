@@ -21,12 +21,15 @@
 //! @yah:assignee(agent:claude)
 //! @yah:parent(R017)
 
-use yah_kg::anno::{TagRef, TicketStatus, WorkItemAnno};
+use serde::{Deserialize, Serialize};
+use yah_kg::agent_policy;
+use yah_kg::anno::{EngineRef, TagRef, ThinkBudget, TicketStatus, WorkItemAnno};
 
 /// Pre-resolution annotation: like `AnnotationKind` but without the
 /// anchor `NodeId` (which is supplied by the applier when it knows
 /// which node owns the doc string).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RawAnnotation {
     Tag(Vec<TagRef>),
     Flow {
@@ -53,7 +56,7 @@ pub use yah_kg::anno::WorkItemType;
 
 /// One parsed annotation plus the relative line within the doc string
 /// where it was found (1-based; index 1 is the first line of `doc`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedAnnotation {
     pub anno: RawAnnotation,
     pub line_offset: u32,
@@ -166,6 +169,32 @@ pub fn parse_doc(doc: &str) -> (Vec<ParsedAnnotation>, Vec<ParseError>) {
                     }),
                 },
                 "rule" => match parse_rule_body(&body) {
+                    Ok(RawAnnotation::Rule { rule_kind, args })
+                        if agent_policy::is_policy_rule_kind(&rule_kind) =>
+                    {
+                        // Agent-policy rule: fold onto the open work-item
+                        // (relay-scoped) when one is open; emit standalone
+                        // (workspace-scoped) otherwise.
+                        match agent_policy::parse_rule(&rule_kind, &args) {
+                            Some(Ok(policy)) => match work_item.as_mut() {
+                                Some(builder) => builder.anno.agent_policy.push(policy),
+                                None => out.push(ParsedAnnotation {
+                                    anno: RawAnnotation::Rule { rule_kind, args },
+                                    line_offset: line_no,
+                                }),
+                            },
+                            Some(Err(e)) => errors.push(ParseError::Malformed {
+                                kind: "rule".into(),
+                                line: line_no,
+                                message: e,
+                            }),
+                            // Shouldn't happen — `is_policy_rule_kind` gated us in.
+                            None => out.push(ParsedAnnotation {
+                                anno: RawAnnotation::Rule { rule_kind, args },
+                                line_offset: line_no,
+                            }),
+                        }
+                    }
                     Ok(rule) => out.push(ParsedAnnotation {
                         anno: rule,
                         line_offset: line_no,
@@ -199,9 +228,9 @@ pub fn parse_doc(doc: &str) -> (Vec<ParsedAnnotation>, Vec<ParseError>) {
                         }),
                     }
                 }
-                "status" | "assignee" | "parent" | "phase" | "severity" | "kind"
+                "status" | "at" | "assignee" | "parent" | "phase" | "severity" | "kind"
                 | "handoff" | "next" | "gotcha" | "gotchas" | "assumes" | "verify"
-                | "cleanup" => match work_item.as_mut() {
+                | "cleanup" | "think" | "engine" => match work_item.as_mut() {
                     Some(builder) => {
                         if let Err(e) = builder.apply_modifier(kind, &body) {
                             errors.push(ParseError::Malformed {
@@ -264,6 +293,15 @@ impl WorkItemBuilder {
                         .ok_or_else(|| format!("unknown status {:?}", stripped))?,
                 );
             }
+            "at" => {
+                if yah_kg::timefmt::parse_rfc3339(&stripped).is_none() {
+                    return Err(format!(
+                        "@yah:at expects RFC 3339 UTC (YYYY-MM-DDTHH:MM:SSZ), got {:?}",
+                        stripped
+                    ));
+                }
+                self.anno.at = Some(stripped);
+            }
             "assignee" => self.anno.assignee = Some(stripped),
             "parent" => self.anno.parent = Some(stripped),
             "phase" => self.anno.phase = Some(stripped),
@@ -278,6 +316,12 @@ impl WorkItemBuilder {
             "verify" => self.anno.verify.push(stripped),
             "cleanup" => self.anno.cleanup.push(stripped),
             "see" => self.anno.see_also.push(stripped),
+            "think" => {
+                self.anno.think = Some(ThinkBudget::parse(&stripped)?);
+            }
+            "engine" => {
+                self.anno.engine = Some(EngineRef::parse(&stripped)?);
+            }
             other => return Err(format!("unhandled modifier {:?}", other)),
         }
         Ok(())
@@ -608,6 +652,56 @@ mod tests {
     }
 
     #[test]
+    fn agent_policy_rule_inside_workitem_block_folds_onto_anno() {
+        let doc = r#"@yah:relay(R042, "Reviewer-only relay")
+@yah:rule(agent-role: "Reviewer", "You verify, you don't write.")
+@yah:rule(agent-do: "Run cargo test before approval.")
+@yah:rule(agent-dont: "Land code without sign-off.")"#;
+        let (out, errs) = parse_doc(doc);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(out.len(), 1, "rules fold into the workitem block");
+        let (kind, anno) = match &out[0].anno {
+            RawAnnotation::WorkItem { item_type, anno } => (*item_type, anno),
+            other => panic!("expected WorkItem, got {:?}", other),
+        };
+        assert_eq!(kind, WorkItemType::Relay);
+        assert_eq!(anno.agent_policy.len(), 3);
+        // Source order preserved.
+        assert_eq!(
+            anno.agent_policy[0].kind,
+            yah_kg::agent_policy::AgentPolicyKind::Role
+        );
+        assert_eq!(anno.agent_policy[0].role_name.as_deref(), Some("Reviewer"));
+        assert_eq!(
+            anno.agent_policy[1].kind,
+            yah_kg::agent_policy::AgentPolicyKind::Do
+        );
+        assert_eq!(
+            anno.agent_policy[1].body,
+            "Run cargo test before approval."
+        );
+        assert_eq!(
+            anno.agent_policy[2].kind,
+            yah_kg::agent_policy::AgentPolicyKind::Dont
+        );
+    }
+
+    #[test]
+    fn agent_policy_rule_outside_workitem_block_stays_standalone() {
+        let (out, errs) =
+            parse_doc("@yah:rule(agent-do: \"Workspace-level do.\")");
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(out.len(), 1);
+        match &out[0].anno {
+            RawAnnotation::Rule { rule_kind, args } => {
+                assert_eq!(rule_kind, "agent-do");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("expected standalone Rule, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn rejects_unknown_directive() {
         let (out, errs) = parse_doc("@yah:wat(stuff)");
         assert!(out.is_empty());
@@ -812,6 +906,65 @@ mod tests {
             panic!("expected tag, got {:?}", out[0]);
         };
         assert_eq!(tags, &vec![TagRef::new("audio")]);
+    }
+
+    #[test]
+    fn parses_think_and_engine_modifiers() {
+        let doc = r#"@yah:ticket(R028-T9, "Agent runtime smoke")
+@yah:status(open)
+@yah:think(deep)
+@yah:engine(claude:opus-4-7)"#;
+        let (out, errs) = parse_doc(doc);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(out.len(), 1);
+        let (kind, anno) = unwrap_work_item(&out[0]);
+        assert_eq!(kind, WorkItemType::Ticket);
+        assert_eq!(anno.think, Some(ThinkBudget::Deep));
+        let engine = anno.engine.as_ref().expect("engine present");
+        assert_eq!(engine.provider, "claude");
+        assert_eq!(engine.model.as_deref(), Some("opus-4-7"));
+    }
+
+    #[test]
+    fn parses_think_budget_with_explicit_token_count() {
+        let doc = r#"@yah:ticket(R028-T9, "Long-context tuning")
+@yah:think(budget=8192)"#;
+        let (out, errs) = parse_doc(doc);
+        assert!(errs.is_empty(), "{errs:?}");
+        let (_, anno) = unwrap_work_item(&out[0]);
+        assert_eq!(anno.think, Some(ThinkBudget::Budget { tokens: 8192 }));
+    }
+
+    #[test]
+    fn parses_engine_without_model_for_workspace_default() {
+        let doc = r#"@yah:ticket(R028-T9, "Default engine")
+@yah:engine(claude)"#;
+        let (out, errs) = parse_doc(doc);
+        assert!(errs.is_empty(), "{errs:?}");
+        let (_, anno) = unwrap_work_item(&out[0]);
+        let engine = anno.engine.as_ref().expect("engine present");
+        assert_eq!(engine.provider, "claude");
+        assert!(engine.model.is_none());
+    }
+
+    #[test]
+    fn unknown_think_mode_surfaces_as_error_but_block_continues() {
+        let doc = r#"@yah:ticket(R028-T9, "T")
+@yah:think(galaxy-brain)
+@yah:next("ok step")"#;
+        let (out, errs) = parse_doc(doc);
+        assert_eq!(errs.len(), 1, "bogus think is the only error");
+        assert_eq!(out.len(), 1);
+        let (_, anno) = unwrap_work_item(&out[0]);
+        assert!(anno.think.is_none());
+        assert_eq!(anno.next_steps, vec!["ok step".to_string()]);
+    }
+
+    #[test]
+    fn think_engine_modifier_without_header_is_an_error() {
+        let (out, errs) = parse_doc("@yah:think(deep)\n@yah:engine(claude:opus-4-7)");
+        assert!(out.is_empty());
+        assert_eq!(errs.len(), 2);
     }
 
     #[test]

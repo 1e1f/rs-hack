@@ -1,0 +1,32 @@
+[package]
+name = "yah-kg-anno-wasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "wasm-bindgen wrapper around yah-kg-anno's doc-string parser for in-editor live diagnostics"
+publish = false
+
+[lib]
+# `cdylib` produces the wasm artefact wasm-pack consumes; `rlib` keeps
+# the crate usable as a normal Rust dependency for native unit tests.
+crate-type = ["cdylib", "rlib"]
+
+# wasm-pack ships an older wasm-opt that doesn't speak the bulk-memory
+# proposal that current wasm-bindgen emits by default. The unoptimized
+# artefact is still valid wasm — consumers who care about size can run
+# a recent wasm-opt themselves. Re-enable once wasm-pack updates its bin.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
+[dependencies]
+# `default-features = false` drops the apply/index modules and the
+# yah-kg-store path dep — those pull in petgraph and walkdir which don't
+# fit the wasm bundle. We only need the parser.
+yah-kg-anno = { path = "../yah-kg-anno", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"

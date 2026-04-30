@@ -48,3 +48,6 @@
 {"t":1777338852,"type":"disappeared","id":"R016-F3","lastTicket":{"id":"R016-F3","title":"TS cross-file Imports edges: parse import statements, resolve via tsconfig paths or relative","item_type":"ticket","status":"open","phase":"P1","parent":"R016","next_steps":["Honor tsconfig.json paths + baseUrl when resolving non-relative specifiers","Relative specifiers resolve against the importer's directory"],"depends_on":[],"see_also":[],"file":"yah-kg-ts/src/lib.rs","line":38,"target":{"Module":{"path":"lib"}},"files":[{"path":"yah-kg-ts/src/lib.rs","line":38}]}}
 {"t":1777339111,"type":"scan","id":"R016-T6","changes":{"assignee":{"after":"agent:claude"},"status":{"before":"open","after":"in-progress"}}}
 {"t":1777339212,"type":"scan","id":"R016-T6","changes":{"status":{"before":"in-progress","after":"review"}}}
+{"t":1777339601,"type":"scan","id":"R016","changes":{"assignee":{"after":"agent:claude"},"status":{"before":"open","after":"in-progress"}}}
+{"t":1777339606,"type":"scan","id":"R016-T7","changes":{"assignee":{"after":"agent:claude"},"status":{"before":"open","after":"in-progress"}}}
+{"t":1777340157,"type":"scan","id":"R016-T7","changes":{"status":{"before":"in-progress","after":"review"}}}

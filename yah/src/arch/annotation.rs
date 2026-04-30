@@ -175,6 +175,16 @@ pub enum ArchKind {
     /// in its own section in the pickup prompt so the next agent can treat it
     /// as a risk rather than as ground truth. Repeatable.
     Assumes(String),
+
+    /// `@yah:think(deep | standard | fast | budget=N)` — per-ticket
+    /// thinking budget for the agent runtime (R028). The value rides on
+    /// `Ticket::think` and is read by the prelude assembler (R028-F2).
+    Think(yah_kg::anno::ThinkBudget),
+
+    /// `@yah:engine(provider:model)` — per-ticket model selection (R028).
+    /// `claude:*` routes to the Claude SDK runner; everything else routes
+    /// to yah-runner. Carried on `Ticket::engine`.
+    Engine(yah_kg::anno::EngineRef),
 }
 
 /// Thread specification.
@@ -364,6 +374,20 @@ impl ArchKind {
             "verify" => Self::Verify(value.trim_matches('"').to_string()),
             "gotcha" => Self::Gotcha(value.trim_matches('"').to_string()),
             "assumes" => Self::Assumes(value.trim_matches('"').to_string()),
+            "think" => match yah_kg::anno::ThinkBudget::parse(value.trim_matches('"')) {
+                Ok(t) => Self::Think(t),
+                Err(_) => Self::Unknown {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                },
+            },
+            "engine" => match yah_kg::anno::EngineRef::parse(value.trim_matches('"')) {
+                Ok(e) => Self::Engine(e),
+                Err(_) => Self::Unknown {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                },
+            },
             // Legacy aliases — story/epic become parent on the relay
             "story" | "epic" => Self::Parent(value.split(',').next().unwrap_or(value).trim().to_string()),
 

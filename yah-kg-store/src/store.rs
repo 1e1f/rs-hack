@@ -368,6 +368,65 @@ impl Store {
             }
         }
     }
+
+    /// Bulk-rebuild the store from snapshot parts. Called by
+    /// [`Store::restore`]. Pre-allocates every side map and bypasses the
+    /// per-node dedupe checks `upsert_node` would otherwise perform —
+    /// `to_snapshot` already iterates a `HashMap<NodeId, _>` so the
+    /// incoming `Vec<NodeRef>` is unique by construction. Edges with a
+    /// missing endpoint are dropped silently (same contract as
+    /// `upsert_edge`); a `to_snapshot` round-trip never produces them.
+    pub(crate) fn rebuild_from_parts(
+        &mut self,
+        nodes: Vec<NodeRef>,
+        edges: Vec<EdgeOut>,
+        docs: Vec<(NodeId, String)>,
+        properties: Vec<(NodeId, BTreeMap<String, String>)>,
+    ) {
+        let n_nodes = nodes.len();
+        let n_edges = edges.len();
+
+        self.graph = StableDiGraph::with_capacity(n_nodes, n_edges);
+        self.node_index = HashMap::with_capacity(n_nodes);
+        self.nodes = HashMap::with_capacity(n_nodes);
+        self.edges = HashMap::with_capacity(n_edges);
+        self.docs = HashMap::with_capacity(docs.len());
+        self.properties = HashMap::with_capacity(properties.len());
+        self.by_file = HashMap::new();
+
+        for node in nodes {
+            let id = node.id;
+            let idx = self.graph.add_node(id);
+            self.node_index.insert(id, idx);
+            match self.by_file.get_mut(&node.file) {
+                Some(v) => v.push((node.span, id)),
+                None => {
+                    self.by_file
+                        .insert(node.file.clone(), vec![(node.span, id)]);
+                }
+            }
+            self.nodes.insert(id, node);
+        }
+
+        for edge in edges {
+            let (Some(&from), Some(&to)) = (
+                self.node_index.get(&edge.from),
+                self.node_index.get(&edge.to),
+            ) else {
+                continue;
+            };
+            self.graph.add_edge(from, to, edge.id);
+            self.edges.insert(edge.id, edge);
+        }
+
+        for (id, doc) in docs {
+            self.docs.insert(id, doc);
+        }
+
+        for (id, props) in properties {
+            self.properties.insert(id, props);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

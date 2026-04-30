@@ -193,6 +193,18 @@ pub struct Ticket {
     /// Links to architecture docs
     pub see_also: Vec<String>,
 
+    /// `@yah:think(deep | standard | fast | budget=N)` — per-ticket
+    /// thinking budget for the agent runtime (R028). Translated into the
+    /// Claude SDK's `thinking` config when the prelude is assembled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub think: Option<yah_kg::anno::ThinkBudget>,
+
+    /// `@yah:engine(provider:model)` — per-ticket model selection (R028).
+    /// Drives runner dispatch and surfaces in the agent pane's engine
+    /// chip. `None` defers to the workspace default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<yah_kg::anno::EngineRef>,
+
     /// Convenience alias for `files[0].path` — the lex-first source
     /// location. Kept for back-compat with consumers that read a single
     /// path; new code should iterate `files`.
@@ -957,6 +969,8 @@ fn is_hack_relevant(kind: &ArchKind) -> bool {
             | ArchKind::Assumes(_)
             | ArchKind::See(_)
             | ArchKind::DependsOn { .. }
+            | ArchKind::Think(_)
+            | ArchKind::Engine(_)
     )
 }
 
@@ -987,6 +1001,8 @@ struct PartialTicket {
     assumes: Vec<String>,
     see_also: Vec<String>,
     depends_on: Vec<String>,
+    think: Option<yah_kg::anno::ThinkBudget>,
+    engine: Option<yah_kg::anno::EngineRef>,
 }
 
 /// Fold one file's worth of annotations (already sorted by line) into a
@@ -1030,6 +1046,8 @@ fn fold_file(file: PathBuf, anns: &[&ArchAnnotation]) -> Option<PartialTicket> {
             ArchKind::Assumes(a) => p.assumes.push(a.clone()),
             ArchKind::See(s) => p.see_also.push(s.clone()),
             ArchKind::DependsOn { target: dep, .. } => p.depends_on.push(dep.clone()),
+            ArchKind::Think(t) => p.think = Some(*t),
+            ArchKind::Engine(e) => p.engine = Some(e.clone()),
             _ => {}
         }
     }
@@ -1110,6 +1128,7 @@ fn partial_to_anchor(id: &str, p: &PartialTicket) -> yah_kg::rpc::WorkItemAnchor
         title: p.title.clone().unwrap_or_default(),
         kind: p.kind.clone(),
         status: p.status.as_ref().map(to_kg_status),
+        at: None,
         assignee: p.assignee.clone(),
         parent: p.parent.clone(),
         phase: p.phase.clone(),
@@ -1121,6 +1140,9 @@ fn partial_to_anchor(id: &str, p: &PartialTicket) -> yah_kg::rpc::WorkItemAnchor
         verify: p.verify.clone(),
         cleanup: p.cleanup.clone(),
         see_also: p.see_also.clone(),
+        think: p.think,
+        engine: p.engine.clone(),
+        agent_policy: Vec::new(),
     };
     let file_str = p.file.to_string_lossy().into_owned();
     yah_kg::rpc::WorkItemAnchor {
@@ -1161,6 +1183,7 @@ fn ticket_to_work_item(t: &Ticket) -> yah_kg::rpc::WorkItem {
         title: t.title.clone(),
         kind: t.kind.clone(),
         status: Some(to_kg_status(&t.status)),
+        at: None,
         assignee: t.assignee.clone(),
         parent: t.parent.clone(),
         phase: t.phase.clone(),
@@ -1172,6 +1195,9 @@ fn ticket_to_work_item(t: &Ticket) -> yah_kg::rpc::WorkItem {
         verify: t.verify.clone(),
         cleanup: t.cleanup.clone(),
         see_also: t.see_also.clone(),
+        think: t.think,
+        engine: t.engine.clone(),
+        agent_policy: Vec::new(),
     };
 
     // Lex-first anchor first so `anchors[0]` matches `Ticket::file/line`.
@@ -1344,6 +1370,8 @@ fn board_item_to_ticket(
         assumes: sc.assumes.clone(),
         depends_on: sc.depends_on.clone(),
         see_also: sc.see_also.clone(),
+        think: bi.item.anno.think,
+        engine: bi.item.anno.engine.clone(),
         file: PathBuf::from(&canonical.file),
         line: canonical.line as usize,
         target: sc.target.clone(),
@@ -1383,6 +1411,49 @@ pub mod voice_alloc;
         assert_eq!(ticket.status, TicketStatus::InProgress);
         assert_eq!(ticket.assignee.as_deref(), Some("agent:claude"));
         assert_eq!(ticket.phase.as_deref(), Some("P2"));
+    }
+
+    #[test]
+    fn test_think_and_engine_annotations_round_trip() {
+        let source = r#"
+//! @yah:ticket(R028-T9, "Agent runtime smoke")
+//! @yah:status(open)
+//! @yah:think(deep)
+//! @yah:engine(claude:opus-4-7)
+
+pub mod runtime;
+"#;
+        let annotations = extract_from_source(source, Path::new("test.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&annotations);
+        assert_eq!(board.tickets.len(), 1);
+        let ticket = &board.tickets[0];
+        assert_eq!(ticket.id, "R028-T9");
+        assert_eq!(ticket.think, Some(yah_kg::anno::ThinkBudget::Deep));
+        let engine = ticket.engine.as_ref().expect("engine present");
+        assert_eq!(engine.provider, "claude");
+        assert_eq!(engine.model.as_deref(), Some("opus-4-7"));
+        // JSON surface — verify scan reports these via `board tickets --format json`.
+        let json = serde_json::to_value(ticket).unwrap();
+        assert_eq!(json["think"]["mode"], "deep");
+        assert_eq!(json["engine"]["provider"], "claude");
+        assert_eq!(json["engine"]["model"], "opus-4-7");
+    }
+
+    #[test]
+    fn test_think_budget_with_explicit_token_count() {
+        let source = r#"
+//! @yah:ticket(R028-T9, "Long-context tuning")
+//! @yah:think(budget=8192)
+
+pub mod tuning;
+"#;
+        let annotations = extract_from_source(source, Path::new("test.rs")).unwrap();
+        let board = TicketBoard::from_annotations(&annotations);
+        let ticket = &board.tickets[0];
+        assert_eq!(
+            ticket.think,
+            Some(yah_kg::anno::ThinkBudget::Budget { tokens: 8192 })
+        );
     }
 
     #[test]

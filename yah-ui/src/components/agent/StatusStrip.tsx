@@ -71,12 +71,18 @@ export function StatusStrip({ session }: StatusStripProps) {
   );
 }
 
-const TOOL_ICON: Record<ToolKind, "code" | "file" | "search" | "terminal"> = {
+const TOOL_ICON: Record<ToolKind, "code" | "file" | "folder" | "search" | "terminal" | "atlas" | "branch" | "scroll"> = {
   read: "file",
   edit: "code",
   write: "code",
   grep: "search",
   bash: "terminal",
+  list_dir: "folder",
+  arch_node: "atlas",
+  arch_neighbors: "branch",
+  arch_subgraph: "atlas",
+  arch_lookup: "search",
+  read_arch_doc: "scroll",
 };
 
 function Divider() {

@@ -1,0 +1,34 @@
+[package]
+name = "yah-rpc-ssh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SSH transport for yah-rpc — runs `yah serve --stdio` on a remote host and pipes line-delimited JSON-RPC over the SSH channel"
+publish = false
+
+[lib]
+name = "yah_rpc_ssh"
+path = "src/lib.rs"
+
+[dependencies]
+yah-kg = { path = "../yah-kg" }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+
+tokio = { version = "1", features = [
+    "io-util",
+    "macros",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }

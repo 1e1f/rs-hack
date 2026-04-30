@@ -1,0 +1,29 @@
+# Pinned wire constants for Anthropic `/v1/messages` OAuth (`crab` / HAo
+# preset). Loaded by app/tauri/src/claude_shape.rs at boot and applied by
+# AnthropicAuth::Oauth's apply() + build_anthropic_body().
+#
+# **Pre-audit baseline.** This file captures only the constants we
+# already know from public Anthropic docs and the OAuth contract. The
+# `x-stainless-*` family + a versioned `user-agent` come from auditing a
+# bundled `claude` binary — that audit step is gated on R028-F8 (bundled
+# claude subprocess preset) landing first. Until then `crab` will keep
+# being shape-detected on those headers; this file lets the architecture
+# be wired end-to-end so the audit step has somewhere to drop its output.
+#
+# When R028-F8 lands, an audit binary (scripts/audit-claude-shape/) will
+# regenerate this file as `claude-shape-<version>.toml` with the full
+# header set. See architecture/yah-claude-shape-capture.md.
+claude_version = "pre-audit-baseline"
+audited_at = "2026-04-29T00:00:00Z"
+
+[headers]
+"anthropic-beta" = "oauth-2025-04-20,claude-code-20250219"
+"anthropic-version" = "2023-06-01"
+
+[system]
+prefix = "You are Claude Code, Anthropic's official CLI for Claude."
+block_count = 2
+cache_control = true
+
+[body]
+stream = true

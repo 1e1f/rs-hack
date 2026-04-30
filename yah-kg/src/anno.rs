@@ -28,6 +28,7 @@
 //! @yah:next("Cargo.toml [workspace.metadata.arch] section declares legal rule kinds + tag namespaces")
 //! @yah:next("Parser already handles @yah:rule(no-import-of: tag(view)); the type exists in the contract — wire validation")
 
+use crate::agent_policy::AgentPolicyRule;
 use crate::ids::NodeId;
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +95,13 @@ pub struct WorkItemAnno {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<TicketStatus>,
+    /// `@yah:at(<rfc3339>)` — wall-clock of the most recent
+    /// daemon-mediated mutation (currently: `move_ticket`). Written and
+    /// rewritten by the daemon, not by hand. UTC, always `Z`. Provides
+    /// per-ticket "last touched" precision so co-resident tickets in the
+    /// same file don't share a single file-mtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<String>,
     /// `@yah:parent(R001)` — for sub-tickets and zone (relay-of-relays)
@@ -129,6 +137,26 @@ pub struct WorkItemAnno {
     /// a property of the work-item, not of the structural anchor.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub see_also: Vec<String>,
+    /// `@yah:think(deep | standard | fast | budget=N)` — per-ticket
+    /// thinking budget for the agent runtime. Read by the R028-F2 prelude
+    /// assembler and translated into the Claude SDK's `thinking` config
+    /// on each turn. `None` means "use the workspace default".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub think: Option<ThinkBudget>,
+    /// `@yah:engine(provider:model)` — per-ticket model selection. Drives
+    /// runner dispatch (claude:* → Claude SDK runner; everything else →
+    /// yah-runner). `None` means "use the workspace default engine".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<EngineRef>,
+    /// Agent-policy rules folded onto this work-item from
+    /// `@yah:rule(agent-role|agent-do|agent-dont: ...)` directives in the
+    /// same doc block. The R028-F10 prelude assembler walks the parent
+    /// chain and concatenates these into the "Roles / Do / Don't"
+    /// CLAUDE.md section. Free-floating policy rules outside any work-item
+    /// block remain as standalone `RawAnnotation::Rule` annotations and
+    /// are collected by the daemon as workspace defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_policy: Vec<AgentPolicyRule>,
 }
 
 /// Discriminator between the two work-item header kinds. `@yah:relay(...)`
@@ -179,6 +207,123 @@ impl TicketStatus {
             Self::Handoff => "handoff",
             Self::Review => "review",
             Self::Done => "done",
+        }
+    }
+}
+
+/// Per-ticket thinking budget for the agent runtime (R028). Translated
+/// into the Claude Agent SDK's `thinking` config when the prelude is
+/// assembled. The named tiers (`Deep`/`Standard`/`Fast`) keep authoring
+/// terse; `Budget(tokens)` is the escape hatch for callers who need an
+/// explicit token cap (e.g. an experiment comparing two budgets).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ThinkBudget {
+    /// `@yah:think(deep)` — maximum thinking budget the runtime allows.
+    Deep,
+    /// `@yah:think(standard)` — workspace default thinking budget.
+    Standard,
+    /// `@yah:think(fast)` — minimal thinking; favour latency over depth.
+    Fast,
+    /// `@yah:think(budget=N)` — explicit token cap. The runtime clamps to
+    /// whatever the chosen engine supports.
+    Budget { tokens: u32 },
+}
+
+impl ThinkBudget {
+    /// Parse a `@yah:think(...)` payload. Accepts the named tiers
+    /// (`deep`/`standard`/`fast`, case-insensitive) or `budget=N` for an
+    /// explicit token count.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let trimmed = s.trim();
+        if let Some(rest) = trimmed.strip_prefix("budget=") {
+            let n: u32 = rest
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid budget token count {:?}", rest))?;
+            return Ok(Self::Budget { tokens: n });
+        }
+        match trimmed.to_ascii_lowercase().as_str() {
+            "deep" => Ok(Self::Deep),
+            "standard" => Ok(Self::Standard),
+            "fast" => Ok(Self::Fast),
+            "" => Err("empty think payload".into()),
+            other => Err(format!(
+                "unknown think mode {:?} (expected deep|standard|fast|budget=N)",
+                other
+            )),
+        }
+    }
+
+    /// Canonical string form, round-trips through `parse`.
+    pub fn as_payload(&self) -> String {
+        match self {
+            Self::Deep => "deep".to_string(),
+            Self::Standard => "standard".to_string(),
+            Self::Fast => "fast".to_string(),
+            Self::Budget { tokens } => format!("budget={}", tokens),
+        }
+    }
+}
+
+/// Per-ticket engine selection (R028). `provider` chooses the runner
+/// (`claude` → Claude Agent SDK; anything else → yah-runner); `model`
+/// names the specific model on that provider (e.g. `opus-4-7`,
+/// `gpt-5`, `qwen3-coder`). A bare `@yah:engine(provider)` form (no
+/// model) defers to the workspace's default model for that provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineRef {
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl EngineRef {
+    /// Parse a `@yah:engine(...)` payload. Canonical form is
+    /// `provider:model` (e.g. `claude:opus-4-7`); a bare `provider`
+    /// is also accepted and leaves `model` empty.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("empty engine payload".into());
+        }
+        if let Some((prov, model)) = trimmed.split_once(':') {
+            let prov = prov.trim();
+            let model = model.trim();
+            if prov.is_empty() {
+                return Err("missing provider before colon".into());
+            }
+            if model.is_empty() {
+                return Err("missing model after colon".into());
+            }
+            Ok(Self {
+                provider: prov.to_string(),
+                model: Some(model.to_string()),
+            })
+        } else {
+            Ok(Self {
+                provider: trimmed.to_string(),
+                model: None,
+            })
+        }
+    }
+
+    /// True for engines that route to one of the Claude cells in the
+    /// runtime matrix (`architecture/yah-agent-runtime.md`):
+    /// HTTP+Anthropic-native (R028, hand-rolled `/v1/messages` with
+    /// API-key auth) or Process+MCP (R028 P3, wraps `claude` CLI for
+    /// the policy-durable subscription path). Anything else routes
+    /// through yah-runner-openai-http (R018/R031). Used by the Tauri
+    /// command surface for dispatch.
+    pub fn is_claude(&self) -> bool {
+        self.provider.eq_ignore_ascii_case("claude")
+    }
+
+    /// Canonical string form, round-trips through `parse`.
+    pub fn as_payload(&self) -> String {
+        match &self.model {
+            Some(m) => format!("{}:{}", self.provider, m),
+            None => self.provider.clone(),
         }
     }
 }
@@ -250,5 +395,73 @@ mod tests {
         let a = AnnotationKind::Tag(TagRef::new("audio"));
         let json = serde_json::to_string(&a).unwrap();
         assert!(json.contains("\"anno\":\"tag\""), "got {json}");
+    }
+
+    #[test]
+    fn think_budget_parses_named_tiers() {
+        assert_eq!(ThinkBudget::parse("deep").unwrap(), ThinkBudget::Deep);
+        assert_eq!(
+            ThinkBudget::parse("Standard").unwrap(),
+            ThinkBudget::Standard
+        );
+        assert_eq!(ThinkBudget::parse("FAST").unwrap(), ThinkBudget::Fast);
+    }
+
+    #[test]
+    fn think_budget_parses_explicit_token_count() {
+        assert_eq!(
+            ThinkBudget::parse("budget=4096").unwrap(),
+            ThinkBudget::Budget { tokens: 4096 }
+        );
+    }
+
+    #[test]
+    fn think_budget_rejects_unknown_mode() {
+        assert!(ThinkBudget::parse("medium").is_err());
+        assert!(ThinkBudget::parse("budget=oops").is_err());
+        assert!(ThinkBudget::parse("").is_err());
+    }
+
+    #[test]
+    fn think_budget_round_trips_through_payload() {
+        for orig in [
+            ThinkBudget::Deep,
+            ThinkBudget::Standard,
+            ThinkBudget::Fast,
+            ThinkBudget::Budget { tokens: 2048 },
+        ] {
+            let s = orig.as_payload();
+            assert_eq!(ThinkBudget::parse(&s).unwrap(), orig, "round-trip {s:?}");
+        }
+    }
+
+    #[test]
+    fn engine_ref_parses_provider_model_form() {
+        let e = EngineRef::parse("claude:opus-4-7").unwrap();
+        assert_eq!(e.provider, "claude");
+        assert_eq!(e.model.as_deref(), Some("opus-4-7"));
+        assert!(e.is_claude());
+    }
+
+    #[test]
+    fn engine_ref_parses_bare_provider() {
+        let e = EngineRef::parse("claude").unwrap();
+        assert_eq!(e.provider, "claude");
+        assert!(e.model.is_none());
+        assert!(e.is_claude());
+    }
+
+    #[test]
+    fn engine_ref_rejects_malformed_payloads() {
+        assert!(EngineRef::parse("").is_err());
+        assert!(EngineRef::parse(":opus-4-7").is_err());
+        assert!(EngineRef::parse("claude:").is_err());
+    }
+
+    #[test]
+    fn engine_ref_is_claude_is_provider_only() {
+        assert!(EngineRef::parse("claude:haiku-4-5").unwrap().is_claude());
+        assert!(!EngineRef::parse("openai:gpt-5").unwrap().is_claude());
+        assert!(!EngineRef::parse("qwen3-coder").unwrap().is_claude());
     }
 }

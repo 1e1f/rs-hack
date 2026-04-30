@@ -7,18 +7,20 @@
 //! straight in; YAML values are converted via [`crate::visit::yaml_to_json`].
 //!
 //! @yah:ticket(R016-T7, "YAML per-key spans via yaml-rust2 Parser events")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:parent(R016)
 //! @yah:next("yaml-rust2 is already a dep; its Parser/EventReceiver exposes Marker(line, col) on each scalar/mapping start. Walk events in parallel with the value tree to build a PointerSpans, then pass into Walker::with_spans from YamlIndexer.")
 //! @yah:next("Flip yaml_and_toml_properties_still_use_file_wide_span_until_followup to assert per-key spans once landed (the test is a tripwire on purpose).")
 //!
 //! @yah:ticket(R016-T8, "TOML per-key spans via toml_edit")
-//! @yah:status(open)
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
 //! @yah:parent(R016)
-//! @yah:next("toml_edit 0.22 is already in the dep tree transitively via toml=0.8. DocumentMut exposes span() on each item; walk recursively to populate a PointerSpans and pass into Walker::with_spans from TomlIndexer.")
-//! @yah:next("Switching the parser from toml::Value to toml_edit::DocumentMut means refactoring toml_to_json to consume the edit form. Same tripwire test as the YAML follow-up.")
+//! @yah:verify("cargo test -p yah-kg-json-yaml -- toml")
+//! @yah:handoff("Side-band toml_edit::ImDocument pass in spans::extract_toml_spans builds a JSON-Pointer→Span map from Key/Item ranges; TomlIndexer wires it via Walker::with_spans. toml::Value remains the value tree (toml_to_json untouched). Tripwire test flipped to assert per-key spans (lines 2/3/4/7 in CARGO_TOML).")
 
-use crate::spans::extract_json_spans;
+use crate::spans::{extract_json_spans, extract_toml_spans, extract_yaml_spans};
 use crate::visit::{toml_to_json, yaml_to_json, Walker, YamlExtras};
 use std::path::Path;
 use yah_kg::indexer::{IndexError, IndexSink, LanguageIndexer};
@@ -110,7 +112,18 @@ impl LanguageIndexer for YamlIndexer {
         // them by scanning the same source through yaml-rust2's token
         // stream so the walker can emit Anchor nodes + RefersTo edges.
         let extras = YamlExtras::scan(src);
-        let mut walker = Walker::new(Lang::Yaml, &path_str, src, sink, extras);
+        // Per-key spans come from a second pass over yaml-rust2's
+        // event stream. Merge-resolved keys (`<<: *anchor`) aren't
+        // visible there and fall back to the file-wide span.
+        let spans = extract_yaml_spans(src);
+        let mut walker = Walker::with_spans(
+            Lang::Yaml,
+            &path_str,
+            src,
+            sink,
+            extras,
+            Box::new(spans),
+        );
         walker.run(&value);
         Ok(())
     }
@@ -153,7 +166,18 @@ impl LanguageIndexer for TomlIndexer {
             message: e.to_string(),
         })?;
         let json = toml_to_json(&value);
-        let mut walker = Walker::new(Lang::Toml, &path_str, src, sink, YamlExtras::default());
+        // Side-band toml_edit parse exposes per-key spans (the value
+        // tree above is consumed via `toml::Value` because the walker
+        // already speaks `serde_json::Value`).
+        let spans = extract_toml_spans(src);
+        let mut walker = Walker::with_spans(
+            Lang::Toml,
+            &path_str,
+            src,
+            sink,
+            YamlExtras::default(),
+            Box::new(spans),
+        );
         walker.run(&json);
         Ok(())
     }

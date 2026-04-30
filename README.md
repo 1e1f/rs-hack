@@ -60,6 +60,36 @@ top-level one. Two subcommands extend it with source-embedded metadata:
 Both subcommands read from source, so board/arch state is branch-scoped,
 diffable, and PR-reviewable. There's no separate database.
 
+## Agent runtime (yah-tauri)
+
+The desktop app (yah-tauri) hosts an agent pane that opens a per-ticket
+LLM session, pushes the per-ticket prelude (KG slice + arch context +
+ticket metadata) as the system prompt, and streams replies into the UI.
+
+The agent runtime is **composable along three axes** — Transport (`H`
+HTTP / `P` Process), Protocol (`A` Anthropic-native / `O`
+OpenAI-compat / `V` vendor-stdjson), Auth (`k` API key / `o` OAuth /
+`d` delegated). Five named presets cover the load-bearing
+combinations:
+
+| Preset | Triple | What it is |
+|---|---|---|
+| **`claude`** | `PVd` | **Recommended Anthropic default.** Wraps the official `claude` CLI as a subprocess; Claude Code manages its own login (Pro/Max OAuth or Console). Uses Anthropic's documented extension model — policy-durable. Tools exposed via MCP server (`yah-mcp`). |
+| **`anthropic`** | `HAk` | Direct `/v1/messages` with a Console API key (`sk-ant-…`). Pay-per-token. Use when you need full prompt-cache visibility, native `tool_use` control, or don't have a Pro/Max subscription. |
+| **`openai`** | `HOk` | Direct `/v1/chat/completions` with an OpenAI/Together/vLLM API key. Same triple covers Ollama (local fallback to `http://localhost:11434` when no key is set). |
+| **`mcp-connect`** | `HAk+M` | Anthropic API + remote MCP-connector tools (beta). Modifier on `anthropic` for users on the MCP-connector beta. |
+| **`crab`** | `HAo` | `/v1/messages` with a Pro/Max OAuth bearer token. **TOS-banned for third-party tools as of 2026-04-04** (Anthropic's Consumer Terms explicitly named the Agent SDK). The slot exists in the codebase as a header swap — yah ships it disabled-by-default and recommends `claude` (`PVd`) instead for the subscription path. |
+
+Pick a preset via the `@yah:engine(...)` annotation on a ticket, the
+yah-ui Settings → Agents panel, or the workspace default. The
+architecture is wired so any preset plugs into the same prelude
+assembler, the same `KgToolRegistry`, and the same `AgentEvent`
+stream — only the runner crate (`yah-runner-ha` / `yah-runner-ho` /
+`yah-runner-pv`) differs.
+
+Full design lives in
+[architecture/yah-agent-runtime.md](architecture/yah-agent-runtime.md).
+
 ## Installation
 
 `yah` is a single Cargo workspace member that publishes one crate with four

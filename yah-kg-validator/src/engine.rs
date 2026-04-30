@@ -124,6 +124,16 @@ fn evaluate(rule: &ParsedRule, ctx: &RuleContext, store: &Store, out: &mut Vec<V
         RuleKind::MustTag { namespace } => {
             check_must_tag(&rule.raw_kind, ctx, store, namespace, out)
         }
+        RuleKind::Unknown { raw } if raw.trim().to_ascii_lowercase().starts_with("agent-") => {
+            // Agent-policy rules (`agent-role`, `agent-do`, `agent-dont`,
+            // future `agent-*`) live in the CLAUDE.md prelude generator
+            // (R028-F10), not the graph validator. They reach this
+            // function only when authored at workspace scope (outside a
+            // relay/ticket block). Skip silently — emitting a "unknown
+            // rule kind" violation would force authors to choose between
+            // a working validator and workspace-level agent policy.
+            let _ = (raw, out);
+        }
         RuleKind::Unknown { raw } => {
             out.push(ctx.violate(
                 raw,

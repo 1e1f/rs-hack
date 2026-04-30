@@ -360,6 +360,27 @@ export interface WireRigDto {
   kind: WireRigKind;
   reachable: boolean;
   lastActiveAt?: number | null;
+  /** Remote-only: SSH host. Absent for local rigs. */
+  host?: string;
+  /** Remote-only: SSH port. `undefined` means "default 22". */
+  port?: number;
+  /** Remote-only: SSH user. */
+  user?: string;
+  /** Remote-only: explicit private key path (when set). */
+  keyPath?: string;
+}
+
+/** Connect-remote-rig modal payload. Mirrors `state::RemoteRigSpec` on
+ *  the Tauri side. `host`, `user`, and `workspacePath` are required;
+ *  the rest fall back to ssh defaults at connection time. `name`
+ *  defaults to `host` when blank. */
+export interface WireRemoteRigSpec {
+  host: string;
+  user: string;
+  workspacePath: string;
+  port?: number;
+  keyPath?: string;
+  name?: string;
 }
 
 export interface WalkSummary {
@@ -370,6 +391,29 @@ export interface WalkSummary {
 }
 
 export type IndexReason = "boot" | "file_watch" | "manual" | "agent_edit";
+
+// ---------- arch.list_authored_files / arch.read_authored_file ----------
+//
+// Mirrors the daemon's sandboxed view of `<rig_root>/.yah/arch/authored/`.
+// The renderer treats `rel_path` as opaque — it only ever round-trips back
+// to `read_authored_file`. `name` is the picker-display string (basename
+// without extension; nested subfolders surface as `subdir/foo`).
+
+export interface AuthoredFile {
+  rel_path: string;
+  name: string;
+  bytes: number;
+}
+
+export interface ListAuthoredFilesResult {
+  files: AuthoredFile[];
+}
+
+export interface ReadAuthoredFileResult {
+  rel_path: string;
+  content: string;
+  bytes: number;
+}
 
 // ---------- key-value store ----------
 //
@@ -385,6 +429,163 @@ export interface KVStore {
   /** Enumerate every key currently in the store. Used for LRU eviction. */
   keys(): Promise<string[]>;
 }
+
+// ---------- infra (R027-F6) ----------
+//
+// Mirrors `app/tauri/src/hetzner.rs::HetznerServer`. Fetched server-side
+// from `GET /v1/servers` so the token never reaches the renderer; the
+// Infra tab gets back only the parsed list. Subset of Hetzner's upstream
+// `Server` schema — extra fields land here as the UI grows.
+
+export interface HetznerServer {
+  id: number;
+  name: string;
+  status: string;
+  server_type: string;
+  location: string;
+  ipv4?: string | null;
+  created: string;
+}
+
+/** A key already known to the Hetzner project. Wired into a new server's
+ *  authorized_keys via `ssh_keys: [id]` on POST /v1/servers. */
+export interface HetznerSshKey {
+  id: number;
+  name: string;
+  fingerprint: string;
+  public_key: string;
+  created: string;
+}
+
+/** A key found in (or just written to) `~/.ssh/`. The provision form
+ *  surfaces these so the operator can pick a local key + upload it to
+ *  Hetzner without manually copy-pasting its public half. */
+export interface LocalSshKey {
+  name: string;
+  public_key_path: string;
+  public_key: string;
+  fingerprint: string;
+  algorithm: string;
+  has_private: boolean;
+}
+
+/** Renderer-supplied spec for `POST /v1/servers`. Field names mirror the
+ *  upstream Hetzner JSON. `ssh_keys` is a list of project-scoped key ids
+ *  returned by `listSshKeys` / `uploadSshKey`. */
+export interface HetznerCreateServerSpec {
+  name: string;
+  server_type: string;
+  location: string;
+  image: string;
+  ssh_keys: number[];
+}
+
+/** Per-location price for a server type. Strings are decimal EUR — the
+ *  upstream API returns them stringified to dodge float rounding. Net
+ *  matches the figures on hetzner.com/cloud; gross is incl-VAT. */
+export interface HetznerServerTypePrice {
+  location: string;
+  price_monthly_net: string;
+  price_monthly_gross: string;
+}
+
+/** Catalogue entry from `GET /v1/server_types`. The provision form
+ *  drives its Type dropdown from this list, filtered by whether
+ *  `prices[].location` includes the chosen location id. */
+export interface HetznerServerType {
+  id: number;
+  name: string;
+  description: string;
+  cores: number;
+  memory: number;
+  disk: number;
+  architecture: string;
+  cpu_type: string;
+  deprecated: boolean;
+  prices: HetznerServerTypePrice[];
+}
+
+export interface HetznerLocation {
+  id: number;
+  name: string;
+  description: string;
+  country: string;
+  city: string;
+  network_zone: string;
+}
+
+/** System image (no snapshots/backups). The API publishes one record
+ *  per (name, architecture); the form dedupes by name when picking,
+ *  because `POST /v1/servers` matches by name and auto-selects the
+ *  variant for the chosen server type's architecture. */
+export interface HetznerImage {
+  id: number;
+  name: string;
+  description: string;
+  os_flavor: string;
+  os_version: string | null;
+  architecture: string;
+  deprecated: boolean;
+}
+
+// ---------- terminal (R030) ----------
+//
+// Mirrors `app/tauri/src/terminal.rs`. The Tauri side runs the russh
+// SSH client and pumps PTY bytes through `terminal:event` payloads;
+// the renderer feeds keystrokes back via `terminal_input` and resizes
+// via `terminal_resize`.
+
+/** Spec for `terminal_open_ssh`. The Tauri side connects,
+ *  authenticates publickey using **only** `keyPath`, allocates a PTY,
+ *  and starts a shell. Auth failures resolve as a rejected Promise;
+ *  transport errors after auth surface as `error` events on the
+ *  stream. yah never auto-discovers `~/.ssh/id_*` and never speaks to
+ *  ssh-agent — the renderer must pin a key the operator authorized
+ *  for this server (see `App.openTerminalForServer` for the
+ *  fingerprint-intersection pick). */
+export interface TerminalOpenSpec {
+  host: string;
+  user?: string;
+  port?: number;
+  /** Required. Absolute or `~`-relative path to the private key file
+   *  yah is authorized to use against `host`. */
+  keyPath: string;
+  /** Initial PTY size; subsequent resizes go through `terminal_resize`. */
+  cols?: number;
+  rows?: number;
+  /** Display label for the session rail. Defaults to `user@host`. */
+  label?: string;
+}
+
+/** Spec for `terminal_open_local`. Spawns the user's shell in a local
+ *  PTY (no SSH) — useful for isolating renderer issues from
+ *  remote-shell quirks (MOTDs, prompt scripts, alt-charset bleed).
+ *  Defaults: shell=$SHELL || /bin/bash, cwd=$HOME. */
+export interface TerminalOpenLocalSpec {
+  shell?: string;
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  label?: string;
+}
+
+/** Mirror of `TerminalSessionSummary` (camelCase on the wire). */
+export interface WireTerminalSessionSummary {
+  sessionId: string;
+  host: string;
+  user: string;
+  label: string;
+  createdAtMs: number;
+}
+
+/** Discriminated stream from `terminal:event`. Field names follow the
+ *  Rust struct's snake_case (the variant fields aren't renamed). */
+export type WireTerminalEvent =
+  | { kind: "ready"; session_id: string }
+  | { kind: "host_key"; session_id: string; fingerprint: string }
+  | { kind: "data"; session_id: string; bytes_b64: string }
+  | { kind: "closed"; session_id: string; reason: string }
+  | { kind: "error"; session_id: string; message: string };
 
 // ---------- events ----------
 
@@ -425,3 +626,314 @@ export type ArchEvent =
       relay: string;
       ts: number;
     };
+
+// ---------- subprocess + service liveness probes ----------
+//
+// Backs the AgentProvidersPanel's "Claude (PVd)" card and the Ollama
+// "Local serve" subline. Mirrors `app/tauri/src/claude_cli.rs` —
+// camelCase on the wire matches the `serde(rename_all = "camelCase")`
+// derive on the Rust structs.
+
+export interface ClaudeCliProbe {
+  /** True iff `claude --version` exited successfully within the host timeout. */
+  installed: boolean;
+  /** First line of stdout from `claude --version` — verbatim. */
+  version?: string | null;
+  /** Resolved path from `which claude`. */
+  path?: string | null;
+  /** Failure reason for spawn errors / timeouts / non-zero exits. */
+  error?: string | null;
+}
+
+export interface OllamaServeProbe {
+  /** True iff `localhost:11434/api/tags` answered 2xx within the host timeout. */
+  running: boolean;
+  /** Populated only when the upstream answered a non-success status; the
+   *  common "nothing on 11434" case leaves this `null` so the UI can
+   *  render "not running" without a noisy error blob. */
+  error?: string | null;
+}
+
+// ---------- agent runtime ----------
+
+/** Stable id for an agent session. Format: `session:<8 hex>` (Tauri host
+ *  mints these). Other runners may pick another scheme — the contract is
+ *  "stable string, unique within the host process". */
+export type SessionId = string;
+
+/** One streamed event from an agent session. Mirrors
+ *  `yah_kg::agent::AgentEvent` (see yah-kg/src/agent.rs). The Tauri seam
+ *  prepends `rigId` for renderer routing — see [`WireRigAgentEvent`]. */
+export type WireAgentEvent =
+  | {
+      kind: "session_started";
+      sessionId: SessionId;
+      ticketId: string;
+      engine: string;
+      cacheKey: string;
+      estimatedTokens: number;
+      ringDepth: number;
+    }
+  | { kind: "turn_started"; sessionId: SessionId }
+  | { kind: "message_delta"; sessionId: SessionId; text: string }
+  | {
+      kind: "turn_ended";
+      sessionId: SessionId;
+      text: string;
+      stopReason?: string;
+    }
+  | {
+      kind: "turn_failed";
+      sessionId: SessionId;
+      text: string;
+      message: string;
+    }
+  | { kind: "session_ended"; sessionId: SessionId }
+  | { kind: "error"; sessionId: SessionId; message: string }
+  | {
+      kind: "tool_call";
+      sessionId: SessionId;
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+    }
+  | {
+      kind: "tool_result";
+      sessionId: SessionId;
+      toolCallId: string;
+      ok: boolean;
+      result: unknown;
+    }
+  /** Write tool needs user approval before it runs (R031-F5). The chat
+   *  pane renders an inline approval row keyed to `requestId`; the user
+   *  posts their reply through `agent.approval.decide`. The gate awaits
+   *  that reply before dispatching the tool — no `tool_call` /
+   *  `tool_result` is emitted until/unless the user clicks Apply or
+   *  AlwaysAllow. `bash` is set when the call is the bash tool — it
+   *  carries the parsed `{ env, cmd, args[] }` so the renderer can show
+   *  a structured row and pre-fill the AlwaysAllow rule. */
+  | {
+      kind: "approval_requested";
+      sessionId: SessionId;
+      requestId: string;
+      toolName: string;
+      args: unknown;
+      bash?: WireBashCall;
+    }
+  /** User resolved a pending approval. Mostly informational — the gate
+   *  reacts internally; this variant lets every chat pane drop the
+   *  inline approval row even when the click happened on a different
+   *  surface (e.g. a future "approve all" affordance). */
+  | {
+      kind: "approval_resolved";
+      sessionId: SessionId;
+      requestId: string;
+      decision: "apply" | "skip" | "always-allow";
+    };
+
+/** Parsed bash invocation. Mirrors `agent_approval::BashCall` —
+ *  `env: { KEY: VAL }`, `cmd`, `args[]`. The agent never sees the
+ *  re-synthesized command line; the gate rebuilds it from the
+ *  *approved* fields so an attacker can't sneak unapproved env or args
+ *  past a regex match. */
+export interface WireBashCall {
+  env: Record<string, string>;
+  cmd: string;
+  args: string[];
+}
+
+/** One approval rule. Matches the *parsed* tool call, never a rendered
+ *  string. Mirrors `agent_approval::ApprovalRule`. */
+export type WireApprovalRule =
+  | { kind: "tool"; name: string }
+  | { kind: "tool_path"; name: string; glob: string }
+  | { kind: "bash_cmd"; cmd: string }
+  | { kind: "bash_cmd_pattern"; cmd: string; args: WireArgPattern[] };
+
+/** Per-arg matcher inside `bash_cmd_pattern`. */
+export type WireArgPattern =
+  | { kind: "exact"; value: string }
+  | { kind: "any" };
+
+/** User's reply to an inline approval prompt. */
+export type WireApprovalChoice =
+  | { kind: "apply" }
+  | { kind: "skip" }
+  | { kind: "always-allow"; rule: WireApprovalRule };
+
+/** Versioned envelope for the persisted ruleset (matches
+ *  `agent_approval::ApprovalRuleset`). The Settings UI ignores
+ *  unknown `version` tags — those are produced by a future client
+ *  this build doesn't know how to render. */
+export interface WireApprovalRulesetV1 {
+  version: "1";
+  rules: WireApprovalRule[];
+}
+export type WireApprovalRuleset = WireApprovalRulesetV1;
+
+/** Versioned per-rig agent runtime settings (R031-F5 production flip).
+ *  Today: just `agentWritersEnabled`. Mirrors `agent_settings::AgentSettings`. */
+export interface WireAgentSettingsV1 {
+  version: "1";
+  agentWritersEnabled: boolean;
+}
+export type WireAgentSettings = WireAgentSettingsV1;
+
+/** Wire shape on the `agent:event` channel. Rig-tagged envelope around
+ *  the runtime AgentEvent so the renderer can fan one listener out
+ *  across multiple rigs. */
+export type WireRigAgentEvent = WireAgentEvent & { rigId: string };
+
+/** Carries the prelude's metadata so the renderer can show the budget
+ *  gauge / engine pill without a follow-up RPC. Mirrors
+ *  `app/tauri/src/agent.rs::StartSessionResult`. */
+export interface WireStartSessionResult {
+  sessionId: SessionId;
+  ticketId: string;
+  engine: string;
+  model: string;
+  cacheKey: string;
+  estimatedTokens: number;
+  ringDepth: number;
+  truncated: boolean;
+}
+
+/** Snapshot of one live session for the AgentView session-list rail. */
+export interface WireSessionSummary {
+  sessionId: SessionId;
+  rigId: string;
+  ticketId: string;
+  engine: string;
+  turns: number;
+  running: boolean;
+}
+
+/** Where the private half of an Identity lives. Mirror of
+ *  `identities::IdentitySource` — tagged on `kind`. */
+export type WireIdentitySource =
+  | { kind: "yahGenerated"; privateKeyPath: string }
+  | {
+      kind: "imported";
+      privateKeyPath?: string | null;
+      publicKeyPath: string;
+    };
+
+/** One "this identity is registered at <target>" record. Cache with
+ *  `lastSeen` timestamps — probes reconcile against ground truth. */
+export type WireAuthorization =
+  | {
+      kind: "hetzner";
+      projectId: string;
+      keyIdInHetzner: number;
+      name: string;
+      lastSeen: number;
+    }
+  | {
+      kind: "github";
+      account: string;
+      keyId: number;
+      title: string;
+      lastSeen: number;
+    }
+  | {
+      kind: "gitlab";
+      instance: string;
+      account: string;
+      keyId: number;
+      title: string;
+      lastSeen: number;
+    }
+  | {
+      kind: "sshHost";
+      userAtHost: string;
+      lastSeen: number;
+    };
+
+/** Single SSH keypair record. `id` = SHA256 fingerprint of the public
+ *  key. Mirror of `identities::Identity`. */
+export interface WireIdentity {
+  id: string;
+  name: string;
+  algorithm: string;
+  publicKey: string;
+  source: WireIdentitySource;
+  authorizedAt: WireAuthorization[];
+  createdAt: number;
+  lastUsedAt?: number | null;
+}
+
+/** Per-provider outcome inside a [`WireProbeReport`]. `ok` counts the
+ *  identities that got a (new or refreshed) Authorization; `skipped` is
+ *  the no-PAT path the UI surfaces as a configure-token nudge; `error`
+ *  is a real upstream failure. */
+export type WireProbeOutcome =
+  | { kind: "ok"; matches: number }
+  | { kind: "skipped"; reason: string }
+  | { kind: "error"; reason: string };
+
+/** Result of a fan-out probe pass — local discovery + per-provider
+ *  outcomes. Mirror of `identities::ProbeReport`. */
+export interface WireProbeReport {
+  identitiesTotal: number;
+  localAdded: number;
+  hetzner: WireProbeOutcome;
+  github: WireProbeOutcome;
+}
+
+/** Per-identity probe outcome for "re-check this row" actions. */
+export type WireSingleProbeResult =
+  | { kind: "found"; authorization: WireAuthorization }
+  | { kind: "notFound" }
+  | { kind: "skipped"; reason: string }
+  | { kind: "error"; reason: string };
+
+/* ---------- Files tab: dir.list / dir.watch / file.event wire types ---------- */
+
+/** Mirror of `yah_kg::rpc::DirEntryKind`. Symlinks-to-targets are
+ *  reported by the target's kind (`Dir`/`File`); broken symlinks come
+ *  back as `Other` with `is_symlink: true`. */
+export type WireDirEntryKind = "file" | "dir" | "other";
+
+/** Mirror of `yah_kg::rpc::DirEntry`. `name` is the basename only — the
+ *  parent path lives on the parent listing. */
+export interface WireDirEntry {
+  name: string;
+  kind: WireDirEntryKind;
+  /** File size in bytes for regular files; `0` for directories. */
+  size: number;
+  /** Modification time in milliseconds since the Unix epoch. `null` if
+   *  the platform / filesystem can't report it. */
+  mtime_ms?: number | null;
+  /** True when the source entry is a symlink (kind reflects the
+   *  target). */
+  is_symlink?: boolean;
+}
+
+/** Mirror of `yah_kg::rpc::DirListResult`. `path` is the rig-relative
+ *  parent path (empty when the rig root was listed). */
+export interface WireDirListResult {
+  path: string;
+  entries: WireDirEntry[];
+}
+
+/** Watch handle id returned by `dir.watch` / `file.watch`. Per-rig-process
+ *  stable until the daemon restarts; renderers re-watch on reconnect
+ *  rather than caching ids across sessions. */
+export type WireWatchId = number;
+
+/** Mirror of `yah_kg::event::FileEventKind`. `notify` events are
+ *  debounced and reclassified at emit; consumers should treat any event
+ *  as "this path may have changed". */
+export type WireFileEventKind = "created" | "modified" | "removed";
+
+/** Mirror of `yah_kg::event::FileEvent` after the Tauri side stamps
+ *  rig_id (event_bridge.rs::RigFileEvent). Path is rig-relative,
+ *  POSIX-separated. `mtime_ms` is `null` for `removed` events and on
+ *  platforms that can't report it. */
+export interface WireRigFileEvent {
+  rig_id: string;
+  watch_id: WireWatchId;
+  kind: WireFileEventKind;
+  path: string;
+  mtime_ms?: number | null;
+}

@@ -11,26 +11,31 @@ interface TabSpec {
 }
 
 const TABS: TabSpec[] = [
-  { id: "board", label: "Board", glyph: "g-board", group: "design", hint: "⌘1" },
-  { id: "arch", label: "Architecture", glyph: "g-arch", group: "design", hint: "⌘2" },
-  { id: "agent", label: "Agent", glyph: "g-talk", group: "design", hint: "⌘3" },
-  { id: "terminal", label: "Terminal", glyph: "g-pc", group: "run", hint: "⌘4" },
-  { id: "preview", label: "Preview", glyph: "g-preview", group: "run", hint: "⌘5" },
-  { id: "files", label: "Files", glyph: "g-files", group: "run", hint: "⌘6" },
-  { id: "services", label: "Services", glyph: "g-services", group: "run", hint: "⌘7" },
+  { id: "board", label: "Board", glyph: "g-board", group: "design", hint: "1" },
+  { id: "agent", label: "Agent", glyph: "g-talk", group: "design", hint: "2" },
+  { id: "arch", label: "Architecture", glyph: "g-arch", group: "design", hint: "3" },
+  { id: "files", label: "Files", glyph: "g-files", group: "test", hint: "4" },
+  { id: "terminal", label: "Terminal", glyph: "g-pc", group: "test", hint: "5" },
+  { id: "preview", label: "Preview", glyph: "g-preview", group: "test", hint: "6" },
+  { id: "infra", label: "Infra", glyph: "g-pc", group: "host", hint: "7" },
+  { id: "services", label: "Services", glyph: "g-services", group: "host", hint: "8" },
+  { id: "analytics", label: "Analytics", glyph: "g-scry", group: "host", hint: "9" },
 ];
+
+export const TAB_ORDER: Tab[] = TABS.map((t) => t.id);
 
 interface TabStripProps {
   active: Tab;
   onChange: (t: Tab) => void;
 }
 
-/* Tab strip below TitleBar. Two clusters (Design / Run) separated by a thin
-   divider; right-aligned keyboard hints. Active tab gets an accent underline
-   and accent-tinted glyph. */
+/* Tab strip below TitleBar. Three clusters (Design / Test / Host) separated
+   by thin dividers; right-aligned keyboard hints. Active tab gets an accent
+   underline and accent-tinted glyph. */
 export function TabStrip({ active, onChange }: TabStripProps) {
   const designTabs = TABS.filter((t) => t.group === "design");
-  const runTabs = TABS.filter((t) => t.group === "run");
+  const testTabs = TABS.filter((t) => t.group === "test");
+  const hostTabs = TABS.filter((t) => t.group === "host");
   return (
     <div className="relative flex items-stretch border-b border-rule/50 bg-paper-2/30 pl-1.5">
       <ClusterLabel>Design</ClusterLabel>
@@ -38,8 +43,13 @@ export function TabStrip({ active, onChange }: TabStripProps) {
         <TabButton key={t.id} t={t} active={active} onChange={onChange} />
       ))}
       <ClusterDivider />
-      <ClusterLabel>Run</ClusterLabel>
-      {runTabs.map((t) => (
+      <ClusterLabel>Test</ClusterLabel>
+      {testTabs.map((t) => (
+        <TabButton key={t.id} t={t} active={active} onChange={onChange} />
+      ))}
+      <ClusterDivider />
+      <ClusterLabel>Host</ClusterLabel>
+      {hostTabs.map((t) => (
         <TabButton key={t.id} t={t} active={active} onChange={onChange} />
       ))}
       <div className="flex-1" />
@@ -102,7 +112,7 @@ function KbdHint() {
   return (
     <div className="flex items-center gap-2 pr-2 text-[11px] text-ink-3">
       <span>
-        <kbd>⌘1/2/3</kbd> tabs
+        <kbd>1–9</kbd> tabs
       </span>
       <span className="h-3 w-px bg-rule/50" />
       <span>

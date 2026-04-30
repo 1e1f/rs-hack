@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArchToolbar } from "./ArchToolbar";
 import { GraphPane } from "./GraphPane";
+import { AuthoredMmdPane } from "./AuthoredMmdPane";
+import { AuthoredMdPane } from "./AuthoredMdPane";
 import { ALL_EDGE_KINDS } from "./constants";
 import type { PinnedView } from "./PinnedViews";
 import { useArchGraph, useRoots } from "../../env/hooks";
@@ -20,6 +22,11 @@ interface ArchViewProps {
   onDepthChange: (d: number) => void;
   onJumpToFile?: (fileColon: string) => void;
   onOpenInAgent?: (target: string) => void;
+  /* yah:// router — feeds inline links inside authored .md docs (e.g. a
+     prose link to `yah://arch/foo` jumps the graph; `yah://file/...`
+     dispatches to jumpToFile). Optional: graph-pane / .mmd render don't
+     use it, so callers without a router can omit. */
+  onYahLink?: (href: string) => void;
   /* Rule-validator output for the active rig — surfaced as red borders on
      offending+anchor nodes via GraphPane post-render styling. Lifted to App
      so the Board tab shares the same array. */
@@ -34,12 +41,20 @@ export function ArchView({
   onDepthChange,
   onJumpToFile,
   onOpenInAgent,
+  onYahLink,
   violations,
 }: ArchViewProps) {
   const [enabledKinds, setEnabledKinds] = useState<Set<EdgeKind>>(
     new Set(ALL_EDGE_KINDS),
   );
   const [pinned, setPinned] = useState<PinnedView[]>([]);
+  /* Selected authored mmd path (rig-relative). `null` = render the JIT
+     graph; non-null swaps the canvas to AuthoredMmdPane. Per-rig selection
+     resets when rigId changes — the previous rig's path doesn't apply. */
+  const [authoredMmd, setAuthoredMmd] = useState<string | null>(null);
+  useEffect(() => {
+    setAuthoredMmd(null);
+  }, [rigId]);
 
   /* Auto-pick the first available root when no valid one is selected so
      a fresh visit lands on a populated graph instead of the splash. The
@@ -108,6 +123,8 @@ export function ArchView({
         onSelectPin={selectPin}
         onPinCurrent={pinCurrent}
         onRemovePin={removePin}
+        authoredMmd={authoredMmd}
+        onAuthoredMmdChange={setAuthoredMmd}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -117,6 +134,24 @@ export function ArchView({
   );
 
   function renderCanvas() {
+    if (authoredMmd) {
+      /* Two flavors share the picker but render through different panes:
+         .md gets the markdown viewer (with mermaid-fence specialization
+         for inline diagrams); .mmd gets the raw-mermaid stage with
+         pan/zoom. Anything else slipped past the daemon sandbox falls
+         through to the JIT graph. */
+      if (authoredMmd.toLowerCase().endsWith(".md")) {
+        return (
+          <AuthoredMdPane
+            rigId={rigId}
+            relPath={authoredMmd}
+            onJumpToFile={onJumpToFile}
+            onYahLink={onYahLink}
+          />
+        );
+      }
+      return <AuthoredMmdPane rigId={rigId} relPath={authoredMmd} />;
+    }
     if (error) {
       return (
         <div className="flex flex-1 items-center justify-center">
@@ -133,7 +168,7 @@ export function ArchView({
       return (
         <div className="flex flex-1 items-center justify-center">
           <Splash
-            variant="scroll"
+            variant="architecture"
             caption={
               loading || stillResolvingRoot
                 ? "Drawing the realm…"

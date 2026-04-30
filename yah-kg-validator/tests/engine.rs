@@ -320,6 +320,44 @@ fn unknown_rule_kind_emits_violation_naming_the_typo() {
 }
 
 #[test]
+fn agent_policy_rule_kinds_are_silently_skipped() {
+    // Free-floating `@yah:rule(agent-*: ...)` is an authoring shape for
+    // workspace-level CLAUDE.md prelude policy (R028-F10), not a graph
+    // constraint. It must not surface as an "unknown rule kind"
+    // violation, otherwise authors can't keep both a clean validator
+    // run and workspace-level policy.
+    let mut g = GraphBuilder::new();
+    let module = g.node("foo", NodeKind::Common(CommonKind::Module));
+    let mut anno = AnnotationIndex::new();
+    anno.set(
+        module,
+        vec![
+            rule_anno("foo.rs", 1, module, "agent-do", &["\"Run cargo test.\""]),
+            rule_anno(
+                "foo.rs",
+                2,
+                module,
+                "agent-role",
+                &["\"Reviewer\"", "\"You verify, you don't write.\""],
+            ),
+            rule_anno(
+                "foo.rs",
+                3,
+                module,
+                "agent-future-shape",
+                &["\"forward-compat\""],
+            ),
+        ],
+    );
+    let violations = validate(&g.store, &anno, Scope::All);
+    assert!(
+        violations.is_empty(),
+        "expected no violations from agent-* rules, got {:?}",
+        violations
+    );
+}
+
+#[test]
 fn parse_error_in_args_surfaces_as_violation() {
     let mut g = GraphBuilder::new();
     let module = g.node("foo", NodeKind::Common(CommonKind::Module));

@@ -1,0 +1,54 @@
+[package]
+name = "yah-runner"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runner trait + session JSONL storage for non-Claude agent backends. Sister to the Claude SDK pane (R028)."
+publish = false
+
+[lib]
+name = "yah_runner"
+path = "src/lib.rs"
+
+[dependencies]
+yah-kg = { path = "../yah-kg" }
+
+async-stream = "0.3"
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+blake3 = "1.5"
+
+# OpenAI-compatible backend (also covers Ollama + Qwen + vLLM, all
+# speak `/v1/chat/completions` with SSE). `rustls-tls` keeps openssl off
+# our build matrix; `stream` lights up `bytes_stream()` for SSE folding.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+tokio = { version = "1", features = [
+    "fs",
+    "io-util",
+    "macros",
+    "net",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = [
+    "fs",
+    "io-util",
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "test-util",
+    "time",
+] }

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { getEnv, type Unlisten } from "./index";
 import type {
   ArchEvent,
+  AuthoredFile,
   EdgeOut,
   LookupParams,
   NodeFull,
@@ -618,6 +619,141 @@ export interface RootsState {
  *  the RootSelector can offer a pick-list instead of demanding a hex
  *  NodeId. Refetches on every index_finished — new files surface as
  *  new roots, removed ones drop out. */
+// ---------- useAuthoredFiles ----------
+//
+// Lists agent-authored mermaid under `<rig>/.yah/arch/authored/`. Refetches
+// on `index_finished` so dropping a new `.mmd` into the directory shows up
+// without a manual refresh — the daemon's reindex sweep covers `.yah/` even
+// though no annotation lives there. The two cases (no daemon support yet,
+// empty directory) both surface as `files: []` so the picker can render a
+// uniform "no diagrams" hint.
+
+export interface AuthoredFilesState {
+  files: AuthoredFile[];
+  loading: boolean;
+  error: Error | null;
+}
+
+export function useAuthoredFiles(rigId: string): AuthoredFilesState {
+  const [state, setState] = useState<AuthoredFilesState>({
+    files: [],
+    loading: true,
+    error: null,
+  });
+
+  useEffect(() => {
+    if (!rigId) {
+      setState({ files: [], loading: false, error: null });
+      return;
+    }
+    let cancelled = false;
+    let unlisten: Unlisten | null = null;
+
+    const fetchFiles = async () => {
+      try {
+        const env = await getEnv();
+        const result = await env.rpc.listAuthoredFiles(rigId);
+        if (cancelled) return;
+        setState({ files: result.files, loading: false, error: null });
+      } catch (err) {
+        if (cancelled) return;
+        setState({
+          files: [],
+          loading: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+      }
+    };
+
+    void (async () => {
+      await fetchFiles();
+      if (cancelled) return;
+      const env = await getEnv();
+      const off = await env.rpc.onEvent((event) => {
+        if (event.event === "index_finished") void fetchFiles();
+      });
+      if (cancelled) off();
+      else unlisten = off;
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [rigId]);
+
+  return state;
+}
+
+// ---------- useAuthoredFileContent ----------
+//
+// Fetches the raw .mmd source for one rig-relative path. `relPath = null`
+// is the "nothing selected" state (we keep the hook always-mounted so a
+// late selection doesn't tear down the previous load). Refetches when
+// `relPath` changes and on `index_finished` so an in-place edit reflects.
+
+export interface AuthoredFileContentState {
+  content: string | null;
+  loading: boolean;
+  error: Error | null;
+}
+
+export function useAuthoredFileContent(
+  rigId: string,
+  relPath: string | null,
+): AuthoredFileContentState {
+  const [state, setState] = useState<AuthoredFileContentState>({
+    content: null,
+    loading: false,
+    error: null,
+  });
+
+  useEffect(() => {
+    if (!rigId || !relPath) {
+      setState({ content: null, loading: false, error: null });
+      return;
+    }
+    let cancelled = false;
+    let unlisten: Unlisten | null = null;
+
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+
+    const fetchContent = async () => {
+      try {
+        const env = await getEnv();
+        const result = await env.rpc.readAuthoredFile(rigId, relPath);
+        if (cancelled) return;
+        setState({ content: result.content, loading: false, error: null });
+      } catch (err) {
+        if (cancelled) return;
+        setState({
+          content: null,
+          loading: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+      }
+    };
+
+    void (async () => {
+      await fetchContent();
+      if (cancelled) return;
+      const env = await getEnv();
+      const off = await env.rpc.onEvent((event) => {
+        if (event.event === "index_finished") void fetchContent();
+      });
+      if (cancelled) off();
+      else unlisten = off;
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [rigId, relPath]);
+
+  return state;
+}
+
 export function useRoots(rigId: string): RootsState {
   const [state, setState] = useState<RootsState>({
     roots: [],

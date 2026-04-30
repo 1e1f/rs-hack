@@ -8,10 +8,24 @@
 //! [`FileFingerprint`].
 //!
 //! The snapshot file lives wherever the caller asks. The conventional
-//! path is `<rig_root>/.yah/cache/snapshot.json` — see
+//! path is `<rig_root>/.yah/cache/snapshot.bin` — see
 //! [`default_snapshot_path`].
+//!
+//! Encoding: postcard (positional, non-self-describing). v1 used
+//! `serde_json` (~88ms parse), v2 swapped to MessagePack via `rmp-serde`
+//! named (~70ms parse — field names dominated), v3 swaps to postcard
+//! and a parallel set of [`crate::snapshot_wire`] wire types that
+//! re-derive serde without `skip_serializing_if` and with externally-
+//! tagged enums (postcard tolerates neither). v4 adds a top-level string
+//! interning table — high-redundancy fields (file paths, qualified
+//! names, ticket ids, property keys) become `u32` indices into a
+//! `Vec<String>`, cutting snapshot size and parse time roughly in half.
+//! RPC types are untouched — only the snapshot wire is positional.
+//! Older snapshot files trip a version mismatch and the daemon falls
+//! through to a full reindex.
 
 use crate::path::{canonicalize_root, is_eligible};
+use crate::snapshot_wire::KgSnapshotWire;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,7 +34,7 @@ use walkdir::WalkDir;
 use yah_kg_anno::AnnotationIndexSnapshot;
 use yah_kg_store::{IndexerRegistry, StoreSnapshot};
 
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 5;
 
 /// On-disk fingerprint of one source file. Mtime + size are sufficient
 /// for "did this file change while the daemon was offline?" — full
@@ -72,30 +86,46 @@ pub enum SnapshotError {
     Store(#[from] yah_kg_store::SnapshotError),
 }
 
-/// Conventional snapshot location: `<rig_root>/.yah/cache/snapshot.json`.
+/// Conventional snapshot location: `<rig_root>/.yah/cache/snapshot.bin`.
 pub fn default_snapshot_path(rig_root: &Path) -> PathBuf {
-    rig_root.join(".yah").join("cache").join("snapshot.json")
+    rig_root.join(".yah").join("cache").join("snapshot.bin")
 }
 
 /// Read and parse a snapshot file. Caller is responsible for verifying
 /// `rig_root` against the running service's bound rig.
 pub fn read_snapshot(path: &Path) -> Result<KgSnapshot, SnapshotError> {
+    let debug = std::env::var("YAH_SNAPSHOT_DEBUG").is_ok();
+    let t_io = std::time::Instant::now();
     let bytes = std::fs::read(path).map_err(|e| SnapshotError::Io(e.to_string()))?;
-    let snap: KgSnapshot =
-        serde_json::from_slice(&bytes).map_err(|e| SnapshotError::Parse(e.to_string()))?;
-    if snap.version != SNAPSHOT_VERSION {
+    if debug {
+        eprintln!("snapshot sub: file_io {}ms ({} bytes)", t_io.elapsed().as_millis(), bytes.len());
+    }
+    let t_parse = std::time::Instant::now();
+    let wire: KgSnapshotWire = postcard::from_bytes(&bytes)
+        .map_err(|e| SnapshotError::Parse(e.to_string()))?;
+    if debug {
+        eprintln!("snapshot sub: postcard_parse {}ms", t_parse.elapsed().as_millis());
+    }
+    if wire.version != SNAPSHOT_VERSION {
         return Err(SnapshotError::Version {
-            file: snap.version,
+            file: wire.version,
             expected: SNAPSHOT_VERSION,
         });
+    }
+    let t_unpack = std::time::Instant::now();
+    let snap = wire.unpack();
+    if debug {
+        eprintln!("snapshot sub: unpack {}ms", t_unpack.elapsed().as_millis());
     }
     Ok(snap)
 }
 
 /// Write a snapshot atomically: write to a sibling `*.tmp`, fsync, rename.
 /// Atomicity matters because a half-written snapshot would silently
-/// corrupt the next boot's replay.
-pub fn write_snapshot(path: &Path, snap: &KgSnapshot) -> Result<(), SnapshotError> {
+/// corrupt the next boot's replay. Takes the snapshot by value so the
+/// store/anno conversion to wire form can move out of it without
+/// double-cloning the payload (each is several MB).
+pub fn write_snapshot(path: &Path, snap: KgSnapshot) -> Result<(), SnapshotError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| SnapshotError::Io(e.to_string()))?;
     }
@@ -105,8 +135,20 @@ pub fn write_snapshot(path: &Path, snap: &KgSnapshot) -> Result<(), SnapshotErro
         None => ".snapshot.tmp".to_string(),
     };
     tmp.set_file_name(tmp_name);
+    let wire = KgSnapshotWire::pack(snap);
+    if std::env::var("YAH_SNAPSHOT_DEBUG").is_ok() {
+        eprintln!(
+            "snapshot pack: strings_table={} node_ids_table={} nodes={} edges={} docs={} props={}",
+            wire.strings.len(),
+            wire.node_ids.len(),
+            wire.store.nodes.len(),
+            wire.store.edges.len(),
+            wire.store.docs.len(),
+            wire.store.properties.len(),
+        );
+    }
     let bytes =
-        serde_json::to_vec(snap).map_err(|e| SnapshotError::Parse(e.to_string()))?;
+        postcard::to_stdvec(&wire).map_err(|e| SnapshotError::Parse(e.to_string()))?;
     std::fs::write(&tmp, &bytes).map_err(|e| SnapshotError::Io(e.to_string()))?;
     std::fs::rename(&tmp, path).map_err(|e| SnapshotError::Io(e.to_string()))?;
     Ok(())

@@ -8,11 +8,12 @@
 //!
 //! Spans flow in via a [`crate::spans::SpanLookup`] keyed by
 //! JSON-Pointer-style path. JSON wires
-//! [`crate::spans::extract_json_spans`] (tree-sitter-json) so every
-//! Property node lands on the exact `(line, col)` of its `key: value`
-//! pair. YAML and TOML still pass [`crate::spans::NoSpans`] in v1 —
-//! they fall back to the file-wide span until the per-format span
-//! sources land (yaml-rust2 events, `toml_edit`).
+//! [`crate::spans::extract_json_spans`] (tree-sitter-json), YAML wires
+//! [`crate::spans::extract_yaml_spans`] (yaml-rust2 events), and TOML
+//! wires [`crate::spans::extract_toml_spans`] (toml_edit `ImDocument`)
+//! so every Property node lands on the exact `(line, col)` of its
+//! `key: value` pair. Indexers without a span source can still pass
+//! [`crate::spans::NoSpans`] and fall back to the file-wide span.
 
 use std::collections::HashMap;
 use yah_kg::edge::{EdgeId, EdgeKind, EdgeOut};
@@ -150,9 +151,10 @@ pub struct Walker<'a> {
     file_span: Span,
     sink: &'a mut dyn IndexSink,
     extras: YamlExtras,
-    /// Per-key span lookup. JSON wires this from
-    /// [`crate::spans::extract_json_spans`]; YAML/TOML pass [`NoSpans`]
-    /// for v1 and rely on the file-wide fallback.
+    /// Per-key span lookup. Each indexer wires its format-specific
+    /// extractor (`extract_json_spans` / `extract_yaml_spans` /
+    /// `extract_toml_spans`); ad-hoc callers can pass [`NoSpans`] to
+    /// fall back to the file-wide span.
     spans: Box<dyn SpanLookup>,
     /// Anchor node ids keyed by anchor name, populated from
     /// [`YamlExtras::anchors`] up front so alias `*name` lookups can
@@ -219,8 +221,8 @@ impl<'a> Walker<'a> {
         });
 
         // Document node — qualified is `<file>#`. The root pointer
-        // (empty string) gets a precise span when JSON spans are
-        // wired; otherwise the file-wide fallback stands in.
+        // (empty string) gets a precise span from the format's span
+        // extractor; otherwise the file-wide fallback stands in.
         let doc_qualified = format!("{}#", self.file);
         let doc_id = self.make_id(&doc_qualified);
         let doc_span = self.spans.span_for("").unwrap_or(self.file_span);

@@ -3,7 +3,8 @@ import { Message } from "./Message";
 import { PromptBar } from "./PromptBar";
 import { SessionHeader } from "./SessionHeader";
 import { StreamingCursor } from "./StreamingCursor";
-import type { Session, SessionEvent } from "../../types";
+import { pairTools } from "./pairTools";
+import type { Session } from "../../types";
 
 interface SessionPaneProps {
   session: Session;
@@ -11,11 +12,7 @@ interface SessionPaneProps {
   onStop?: () => void;
   onSend?: (text: string) => void;
   onJumpToFile?: (fileColon: string) => void;
-}
-
-interface RenderedItem {
-  event: SessionEvent;
-  result?: SessionEvent;
+  onYahLink?: (href: string) => void;
 }
 
 export function SessionPane({
@@ -24,28 +21,9 @@ export function SessionPane({
   onStop,
   onSend,
   onJumpToFile,
+  onYahLink,
 }: SessionPaneProps) {
-  /* Pair each tool_use with its immediately-following tool result, and drop
-     standalone tool result events from the rendered list. The tool surface
-     (T3 ToolFrame + Read/Grep/Edit/Bash bodies) renders args + result as a
-     single card. */
-  const rendered = useMemo<RenderedItem[]>(() => {
-    const items: RenderedItem[] = [];
-    const evs = session.events;
-    for (let i = 0; i < evs.length; i++) {
-      const e = evs[i];
-      if (e.role === "tool") continue;
-      if (e.role === "assistant" && e.type === "tool_use") {
-        const next = evs[i + 1];
-        const result =
-          next && next.role === "tool" && next.tool === e.tool ? next : undefined;
-        items.push({ event: e, result });
-        continue;
-      }
-      items.push({ event: e });
-    }
-    return items;
-  }, [session.events]);
+  const rendered = useMemo(() => pairTools(session.events), [session.events]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -58,6 +36,7 @@ export function SessionPane({
               event={event}
               result={result}
               onJumpToFile={onJumpToFile}
+              onYahLink={onYahLink}
             />
           ))}
           {session.status === "streaming" && <StreamingCursor />}

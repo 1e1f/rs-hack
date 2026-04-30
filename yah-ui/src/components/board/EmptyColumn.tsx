@@ -5,31 +5,36 @@ interface EmptyColumnProps {
   columnKey: ColumnKey;
 }
 
-/* Per-column captions — folk-tale flavour (mirrors the wayfarer set in
-   the design return). The caption sets the mood; the sub line tells the
-   user what would actually populate this column. */
+/* Per-column captions — keyed to the column illustrations:
+     zones    war table         (general planning the campaign)
+     open     solo merchant     (waiting for callers at the stall)
+     active   merchant at camp  (work underway between waypoints)
+     handoff  pigeon at castle  (message awaiting dispatch)
+     review   alchemy table     (refining what was delivered)
+   The caption sets the mood; the sub line tells the user what would
+   actually populate this column. */
 const COLUMN_SPLASH: Record<
   ColumnKey,
   { caption: string; sub: string }
 > = {
   zones: {
-    caption: "Tomes lie shut",
-    sub: "Zones are coordinator tickets. Mark a relay with @yah:kind(epic) or give it bare-R children to promote it.",
+    caption: "War table dim",
+    sub: "Zones are coordinator tickets — the campaign maps that direct multi-relay work. Mark a relay with @yah:kind(epic) or give it bare-R children to promote it.",
   },
   open: {
-    caption: "No travelers tonight",
-    sub: "Nothing waiting in the queue. Pick a relay and write up a ticket.",
+    caption: "No callers at the stall",
+    sub: "Open tickets wait to be claimed. Pick a relay and write up a ticket.",
   },
   active: {
-    caption: "Sign hangs empty",
-    sub: "No tickets currently being worked. Drag one in from Open.",
+    caption: "Camp without smoke",
+    sub: "Active tickets live here while an agent works them. Drag one in from Open to claim.",
   },
   handoff: {
-    caption: "Cookpot's cold",
+    caption: "No wings at the sill",
     sub: "When an agent finishes a phase, tickets land here for your sign-off.",
   },
   review: {
-    caption: "Bottles all corked",
+    caption: "Alembic stilled",
     sub: "Reviewed work rests here. Archive when you're satisfied.",
   },
 };

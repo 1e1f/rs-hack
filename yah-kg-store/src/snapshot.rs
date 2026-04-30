@@ -60,6 +60,12 @@ impl Store {
     }
 
     /// Replace the store's contents with `snap`. Rejects unknown versions.
+    ///
+    /// Bypasses the `upsert_node` / `upsert_edge` round-trip used during
+    /// live indexing: the snapshot's node list is unique by `NodeId` (it
+    /// came from a `HashMap` on the way out), so we pre-allocate every
+    /// side map and write straight into them. Cuts per-node petgraph +
+    /// HashMap rehash overhead — see R017-T7's verify-gate work.
     pub fn restore(&mut self, snap: StoreSnapshot) -> Result<(), SnapshotError> {
         if snap.version != STORE_SNAPSHOT_VERSION {
             return Err(SnapshotError::VersionMismatch {
@@ -67,21 +73,7 @@ impl Store {
                 expected: STORE_SNAPSHOT_VERSION,
             });
         }
-        *self = Store::new();
-        for node in snap.nodes {
-            self.upsert_node(node);
-        }
-        for edge in snap.edges {
-            self.upsert_edge(edge);
-        }
-        for (id, doc) in snap.docs {
-            self.set_doc(id, doc);
-        }
-        for (id, props) in snap.properties {
-            for (k, v) in props {
-                self.set_property(id, k, v);
-            }
-        }
+        self.rebuild_from_parts(snap.nodes, snap.edges, snap.docs, snap.properties);
         Ok(())
     }
 }

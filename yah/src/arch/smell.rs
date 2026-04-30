@@ -220,6 +220,8 @@ mod tests {
             assumes: vec![],
             depends_on: vec![],
             see_also: vec![],
+            think: None,
+            engine: None,
             file: Default::default(),
             line: 0,
             target: crate::arch::annotation::AnnotationTarget::Module {

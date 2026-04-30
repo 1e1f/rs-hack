@@ -33,11 +33,13 @@ export function RelaySelector({
   }, [q, relays]);
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center">
       <button
         ref={ref}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-[5px] bg-vellum/55 px-2 py-1 hover:bg-vellum"
+        className={`flex items-center gap-2 bg-vellum/55 px-2 py-1 hover:bg-vellum ${
+          active ? "rounded-l-[5px]" : "rounded-[5px]"
+        }`}
       >
         {active ? (
           <>
@@ -59,6 +61,18 @@ export function RelaySelector({
         )}
         <Icon name="chevron-down" size={12} className="text-ink-3" />
       </button>
+      {active && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(null);
+          }}
+          title="Clear relay filter"
+          className="flex items-center justify-center self-stretch rounded-r-[5px] border-l border-rule/40 bg-vellum/55 px-1.5 text-ink-3 hover:bg-vellum hover:text-ink"
+        >
+          <Icon name="x" size={12} />
+        </button>
+      )}
       <Menu
         open={open}
         onClose={() => setOpen(false)}

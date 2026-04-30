@@ -75,6 +75,23 @@ cargo_metadata = "0.18"
 # Knowledge-graph contract types (shared with daemon, RPC, board recompute)
 yah-kg = { path = "../yah-kg" }
 
+# Daemon + indexers — load-bearing for `yah serve --stdio` (R019-F4).
+# The Tauri host also registers JsonIndexer/YamlIndexer/TomlIndexer from
+# yah-kg-json-yaml; that crate is currently mid-edit on a parallel track
+# (duplicate `walk_value` in spans.rs blocks `cargo build -p yah-kg-json-yaml`),
+# so the stdio daemon registers Rust + TS today and grows the rest once
+# the json/yaml WIP merges. Indexer registration lives in `serve::default_registry`.
+yah-kg-daemon = { path = "../yah-kg-daemon" }
+yah-kg-store = { path = "../yah-kg-store" }
+yah-kg-rust = { path = "../yah-kg-rust" }
+yah-kg-ts = { path = "../yah-kg-ts" }
+
+# Credential vault (`yah keys`): AES-256-GCM at-rest encryption with
+# per-host machine key under ProjectDirs::data_dir(). Defends against
+# dragnet exfil, not against same-user processes — see yah/src/keys.rs.
+aes-gcm = "0.10"
+rand = "0.8"
+
 # MCP server (stdio JSON-RPC)
 tokio = { version = "1.35", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }

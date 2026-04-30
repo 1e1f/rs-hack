@@ -43,14 +43,83 @@ export function TicketCard({ rigId, ticket: t, columnEyebrow, violations }: Tick
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
     "idle",
   );
+  const [archiveState, setArchiveState] = useState<
+    "idle" | "armed" | "archiving" | "error"
+  >("idle");
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [pathCopied, setPathCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
+  const archiveResetRef = useRef<number | null>(null);
+  const pathResetRef = useRef<number | null>(null);
   useEffect(
     () => () => {
       if (copyResetRef.current !== null)
         window.clearTimeout(copyResetRef.current);
+      if (archiveResetRef.current !== null)
+        window.clearTimeout(archiveResetRef.current);
+      if (pathResetRef.current !== null)
+        window.clearTimeout(pathResetRef.current);
     },
     [],
   );
+
+  /* Click-to-copy on the file chip — full rig-relative path + line, since
+     the chip itself only shows the last two path segments to keep the
+     footer compact. */
+  async function handleCopyPath(e: React.MouseEvent) {
+    e.stopPropagation();
+    const text = `${t.file}:${t.line}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setPathCopied(true);
+      if (pathResetRef.current !== null)
+        window.clearTimeout(pathResetRef.current);
+      pathResetRef.current = window.setTimeout(() => setPathCopied(false), 1500);
+    } catch (err) {
+      console.warn("[copy-path] clipboard write failed", err);
+    }
+  }
+
+  /* Two-stage archive: first click arms (3s window), second commits.
+     Mirrors the legacy hack-board behaviour the prompt copy still
+     references. The card disappears on success once the watcher's
+     reindex propagates; on failure we surface the daemon's error. */
+  async function handleArchive(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (archiveState === "armed") {
+      if (archiveResetRef.current !== null) {
+        window.clearTimeout(archiveResetRef.current);
+        archiveResetRef.current = null;
+      }
+      setArchiveState("archiving");
+      setArchiveError(null);
+      try {
+        const env = await getEnv();
+        await env.rpc.archiveTicket(rigId, t.id);
+        /* Card unmounts when the next refetch fires; if it doesn't (e.g.
+           archive succeeded but reindex stalled), drop back to idle. */
+        archiveResetRef.current = window.setTimeout(() => {
+          setArchiveState("idle");
+        }, 4000);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("[archive] failed", err);
+        setArchiveError(msg);
+        setArchiveState("error");
+        archiveResetRef.current = window.setTimeout(() => {
+          setArchiveState("idle");
+          setArchiveError(null);
+        }, 4000);
+      }
+      return;
+    }
+    setArchiveState("armed");
+    if (archiveResetRef.current !== null)
+      window.clearTimeout(archiveResetRef.current);
+    archiveResetRef.current = window.setTimeout(() => {
+      setArchiveState("idle");
+    }, 3000);
+  }
   const isRelay = t.itemType === "relay";
   const isZone = !!t.isZone;
   const isEpic = t.kind === "epic";
@@ -134,6 +203,7 @@ export function TicketCard({ rigId, ticket: t, columnEyebrow, violations }: Tick
       style={style}
       {...attributes}
       {...listeners}
+      onClick={() => setExpanded((v) => !v)}
       className={`lift relative rounded-md border bg-vellum text-[12px] shadow-[0_1px_2px_rgba(70,45,20,0.08)] ${
         isRelay
           ? "border-[color-mix(in_oklab,var(--color-accent)_22%,var(--color-rule))] pl-3.5"
@@ -191,8 +261,11 @@ export function TicketCard({ rigId, ticket: t, columnEyebrow, violations }: Tick
             <KindBadge kind={t.kind} itemType={t.itemType} isZone={isZone} />
             <span className="whitespace-nowrap font-mono text-[11px] text-ink-3">
               {t.id}
-              {t.parent && (
-                <span className="opacity-55"> ↪ {t.parent}</span>
+              {t.parent && !t.id.startsWith(`${t.parent}-`) && (
+                <span className="opacity-55">
+                  {" "}
+                  ↪ {t.parent.replace(/^R/, "")}
+                </span>
               )}
             </span>
             {!echoesColumn && !isZone && <StatusPill status={t.status} />}
@@ -236,20 +309,35 @@ export function TicketCard({ rigId, ticket: t, columnEyebrow, violations }: Tick
             <ZoneChildCounts counts={t.childCounts} />
           )}
         </div>
+        {/* Right-aligned freshness pill. mr-2 on relays so it doesn't sit
+            under the absolute bookmark notch at right-3. */}
+        <div className={`shrink-0 ${isRelay ? "mr-2" : ""} mt-0.5`}>
+          <RelativeTime ts={t.lastModifiedTs} />
+        </div>
       </header>
 
       {expanded && <CardExpanded ticket={t} />}
 
       <footer className="mt-2 flex items-center justify-end gap-1 border-t border-rule/50 pt-1.5">
-        <span
-          className="flex-1 truncate font-mono text-[11px] text-ink-3"
-          title={`${t.file}:${t.line}`}
+        <button
+          onClick={handleCopyPath}
+          onPointerDown={(e) => e.stopPropagation()}
+          title={
+            pathCopied
+              ? "Copied"
+              : `Click to copy: ${t.file}:${t.line}`
+          }
+          className={`min-w-0 flex-1 truncate rounded px-1 text-left font-mono text-[11px] hover:bg-vellum-2 ${
+            pathCopied ? "text-st-review" : "text-ink-3 hover:text-ink-2"
+          }`}
         >
-          {t.file}:{t.line}
-        </span>
-        <CardButton title="Open in Architecture">
-          <Glyph name="g-arch" size={12} /> graph
-        </CardButton>
+          {pathCopied ? "copied" : `${shortPath(t.file)}:${t.line}`}
+        </button>
+        {expanded && (
+          <CardButton title="Open in Architecture">
+            <Glyph name="g-arch" size={12} /> graph
+          </CardButton>
+        )}
         <CardButton title="Open in Agent">
           <Glyph name="g-agent" size={12} /> agent
         </CardButton>
@@ -281,6 +369,34 @@ export function TicketCard({ rigId, ticket: t, columnEyebrow, violations }: Tick
                 ? "review"
                 : "prompt"}
         </CardButton>
+        {isReviewMode && (
+          <CardButton
+            title={
+              archiveState === "armed"
+                ? "Click again to commit — strips @yah: lines from source"
+                : archiveState === "error"
+                  ? archiveError ?? "Archive failed"
+                  : archiveState === "archiving"
+                    ? "Archiving…"
+                    : "Archive ticket (two-stage: arms first, then commits)"
+            }
+            onClick={handleArchive}
+            tone={
+              archiveState === "armed" || archiveState === "error"
+                ? "danger"
+                : "default"
+            }
+          >
+            <Icon name="archive" size={11} />{" "}
+            {archiveState === "armed"
+              ? "confirm"
+              : archiveState === "archiving"
+                ? "…"
+                : archiveState === "error"
+                  ? "failed"
+                  : "archive"}
+          </CardButton>
+        )}
       </footer>
     </article>
   );
@@ -298,6 +414,76 @@ function ZoneChildCounts({
       <CountChip n={counts.handoff} label="handoff" hue="handoff" />
     </div>
   );
+}
+
+/* Module-level minute ticker — every mounted RelativeTime subscribes to one
+   shared interval so we don't fan out fifty setIntervals across a busy
+   board. The interval starts on first subscriber and stops when the last
+   unsubscribes. */
+const tickSubs = new Set<() => void>();
+let tickHandle: number | null = null;
+
+function ensureTicker() {
+  if (tickHandle === null && tickSubs.size > 0) {
+    tickHandle = window.setInterval(() => {
+      tickSubs.forEach((fn) => fn());
+    }, 60_000);
+  }
+}
+
+function useMinuteTick(): void {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    const fn = () => setN((n) => n + 1);
+    tickSubs.add(fn);
+    ensureTicker();
+    return () => {
+      tickSubs.delete(fn);
+      if (tickSubs.size === 0 && tickHandle !== null) {
+        window.clearInterval(tickHandle);
+        tickHandle = null;
+      }
+    };
+  }, []);
+}
+
+/* Relative time pill — `lastModifiedTs` is unix seconds (not ms) so we
+   convert before diffing. The daemon falls back to source mtime when no
+   `.yah/events/<shard>.jsonl` exists, so brand-new rigs still get a
+   sensible timestamp; a 0 ts means neither was resolvable, hide the pill. */
+function RelativeTime({ ts }: { ts?: number }) {
+  useMinuteTick();
+  if (!ts) return null;
+  const ms = ts * 1000;
+  return (
+    <span
+      className="shrink-0 font-mono text-[11px] text-ink-3"
+      title={new Date(ms).toLocaleString()}
+    >
+      {formatRelative(ms)}
+    </span>
+  );
+}
+
+/* Render a rig-relative path as the last two segments — short enough to
+   fit in the footer without truncation in the common case, long enough to
+   disambiguate (e.g. board/TicketCard.tsx vs shell/TicketCard.tsx). The
+   click-handler still copies the full path. */
+function shortPath(file: string): string {
+  const parts = file.split("/").filter(Boolean);
+  if (parts.length <= 2) return file;
+  return parts.slice(-2).join("/");
+}
+
+function formatRelative(ms: number): string {
+  const diff = Math.max(0, Date.now() - ms);
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
 }
 
 function CardButton({

@@ -14,6 +14,11 @@ interface SessionListProps {
   sessions: SessionRow[];
   activeRelayId: string | null;
   onSelect?: (relayId: string) => void;
+  /* Open the engine/model picker (deselects the current pane). The
+     picker lives in NoSession; the parent AgentView gates visibility
+     by `activeChatId === null`. Wired today; relay-anchored "start
+     agent on this relay" CTA will share this same handler. */
+  onNewChat?: () => void;
 }
 
 function relativeTime(t: number): string {
@@ -31,6 +36,7 @@ export function SessionList({
   sessions,
   activeRelayId,
   onSelect,
+  onNewChat,
 }: SessionListProps) {
   return (
     <aside className="flex w-[260px] shrink-0 flex-col border-r border-rule/60 bg-paper-2/50">
@@ -80,9 +86,13 @@ export function SessionList({
             </button>
           );
         })}
-        <button className="mt-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-display text-[12px] italic text-ink-3 hover:bg-vellum/60">
+        <button
+          onClick={onNewChat}
+          disabled={!onNewChat}
+          className="mt-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-display text-[12px] italic text-ink-3 hover:bg-vellum/60 disabled:cursor-not-allowed disabled:opacity-50"
+        >
           <Icon name="plus" size={11} />
-          start session on selected relay
+          new chat
         </button>
       </div>
     </aside>

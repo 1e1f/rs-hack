@@ -1,14 +1,39 @@
+//! @yah:relay(R027, "Settings modal + API keys infrastructure")
+//! @yah:status(open)
+//! @yah:parent(R013)
+//! @arch:see(architecture/settings-api-keys.md)
+//!
+//! @yah:ticket(R027-F1, "SettingsModal shell + gear wire-up + sectioned layout (general / API keys / future)")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R027)
+//!
+//! @yah:ticket(R027-F2, "API Keys panel: provider list (Cloudflare + Hetzner), Add/Delete/Test, mock in-memory storage + 'not yet persisted' banner")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R027)
+
 import { Glyph, Icon } from "../shared/Glyph";
-import { RigSelector } from "./RigSelector";
+import { PinnedRigChip, RigSelector } from "./RigSelector";
 import { RelaySelector } from "./RelaySelector";
 import { SplitModeToggle } from "./SplitModeToggle";
 import type { ConnectionState } from "../../env/hooks";
+import type { WireRemoteRigSpec } from "../../env/types";
 import type { Rig, Tab, Theme, Ticket } from "../../types";
 
 interface TitleBarProps {
   rigs: Rig[];
   activeRigId: string;
   onRigChange: (id: string) => void;
+  onAttachLocalRig?: () => Promise<void> | void;
+  onAttachRemoteRig?: (spec: WireRemoteRigSpec) => Promise<void> | void;
+  /** Rig IDs the user has pinned for quick-switch. Active rig is filtered
+   *  out — it's already the main pill. Detached rigs are silently dropped. */
+  pinnedRigIds: string[];
+  onTogglePinRig: (id: string) => void;
+  maxPinnedRigs: number;
   connectionState: ConnectionState;
   relays: Ticket[];
   activeRelayId: string | null;
@@ -18,6 +43,7 @@ interface TitleBarProps {
   activeTab: Tab;
   splitMode: Tab | null;
   onSplitModeChange: (t: Tab | null) => void;
+  onOpenSettings: () => void;
 }
 
 /* Top chrome bar: traffic-light spacer (78px), wordmark, rig › relay
@@ -31,6 +57,11 @@ export function TitleBar({
   rigs,
   activeRigId,
   onRigChange,
+  onAttachLocalRig,
+  onAttachRemoteRig,
+  pinnedRigIds,
+  onTogglePinRig,
+  maxPinnedRigs,
   connectionState,
   relays,
   activeRelayId,
@@ -40,7 +71,11 @@ export function TitleBar({
   activeTab,
   splitMode,
   onSplitModeChange,
+  onOpenSettings,
 }: TitleBarProps) {
+  const pinnedRigs = pinnedRigIds
+    .map((id) => rigs.find((r) => r.id === id))
+    .filter((r): r is Rig => !!r && r.id !== activeRigId);
   return (
     <header
       data-tauri-drag-region
@@ -71,7 +106,21 @@ export function TitleBar({
         activeId={activeRigId}
         onChange={onRigChange}
         connectionState={connectionState}
+        onAttachLocal={onAttachLocalRig}
+        onAttachRemote={onAttachRemoteRig}
+        pinnedRigIds={pinnedRigIds}
+        onTogglePin={onTogglePinRig}
+        maxPinned={maxPinnedRigs}
       />
+
+      {pinnedRigs.map((rig) => (
+        <PinnedRigChip
+          key={rig.id}
+          rig={rig}
+          onSelect={() => onRigChange(rig.id)}
+          onUnpin={() => onTogglePinRig(rig.id)}
+        />
+      ))}
 
       <span
         data-tauri-drag-region
@@ -102,6 +151,7 @@ export function TitleBar({
         <Glyph name={theme === "light" ? "g-moon" : "g-sun"} size={17} />
       </button>
       <button
+        onClick={onOpenSettings}
         title="Settings"
         className="flex items-center justify-center rounded p-1.5 text-ink-2 hover:bg-vellum/55"
       >

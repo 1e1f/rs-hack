@@ -133,7 +133,7 @@ body {
 
 ::selection { background: color-mix(in oklab, var(--color-accent) 35%, transparent); color: var(--color-ink); }
 
-button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+button { font: inherit; color: inherit; background: none; cursor: pointer; padding: 0; }
 input, textarea, select { font: inherit; color: inherit; }
 
 /* ─── scrollbars */
@@ -236,6 +236,78 @@ kbd {
 
 /* dnd-kit drag state */
 .dragging { opacity: 0.55; transform: rotate(0.6deg); }
+
+/* ─── xterm overrides
+   Tailwind v4 preflight no longer zeros browser focus rings, so the
+   xterm helper textarea (and other internal focusable elements xterm
+   uses for IME / a11y) can render the macOS blue focus ring at the
+   cursor when the terminal is focused. xterm.css sets outline:none on
+   .xterm but doesn't cover the inner focus targets — clamp them here
+   so the only visible focus indicator is the xterm cursor itself. */
+.xterm,
+.xterm *,
+.xterm-helper-textarea,
+.xterm-accessibility-tree,
+.xterm-accessibility-tree * {
+  outline: none !important;
+}
+
+/* Tailwind v4 preflight gives <textarea> default sizing that overrides
+   xterm's `width:0;height:0` on the IME helper, leaving an invisible
+   block that pushes downstream layers (selection overlay) off by a
+   few rows. Force the helper back to zero in every dimension. */
+.xterm-helper-textarea {
+  width: 0 !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  field-sizing: fixed;
+}
+
+/* The .xterm-helpers parent is `position:absolute; top:0; z-index:5`
+   per xterm.css with no explicit dimensions — it should collapse to
+   the size of its (zeroed) children, but in practice some browser
+   defaults give it intrinsic height that pushes the first rows of
+   text below it. Force-collapse the container too. */
+.xterm-helpers {
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* xterm 6's DOM renderer paints selection in two layers: per-cell
+   background tint via `.xterm-decoration-top` (which already picks
+   up our translucent gold from `theme.selectionBackground`) AND a
+   rectangle overlay in `.xterm-selection` whose `<div>` children
+   render as opaque coloured boxes. Both following the same drag is
+   what produces the doubled "opaque mouse-aligned + translucent
+   selection-aligned" highlight. Hide the rectangle layer; the
+   per-cell decoration is the better-aligned of the two and remains
+   the visible selection. */
+.xterm-selection {
+  display: none !important;
+}
+
+/* xterm's accessibility tree is an invisible (transparent text) overlay
+   covering the screen so screen readers can read terminal contents.
+   Its `user-select: text` setting means a sighted user dragging across
+   the terminal *also* selects the underlying invisible text — which our
+   global `::selection` rule then paints with the oxblood tint, on top
+   of xterm's own gold selection rectangle. Disable native selection on
+   the a11y tree (xterm's own selection layer still handles copy) and
+   neutralise its ::selection styling defensively. */
+.xterm-accessibility-tree,
+.xterm-accessibility-tree * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+.xterm-accessibility-tree::selection,
+.xterm-accessibility-tree *::selection {
+  background: transparent !important;
+  color: inherit !important;
+}
 
 /* ─── arch graph (mermaid HTML node labels)
    Two-line label per node: shortName in mono, role in italic serif.

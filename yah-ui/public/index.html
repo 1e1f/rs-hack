@@ -6,6 +6,10 @@
     <title>yah</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/dist/app.css" />
+    <!-- Asset bundle CSS extracted by `bun build` from JS-side @import
+         statements (xterm, monaco-editor). Loaded after app.css so its
+         widget-internal styles win over our token defaults. -->
+    <link rel="stylesheet" href="/dist/main.css" />
   </head>
   <body>
     <div id="root"></div>

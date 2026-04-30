@@ -5,6 +5,7 @@ import { DepthControl } from "./DepthControl";
 import { EdgeKindFilters } from "./EdgeKindFilters";
 import { PinnedViews, type PinnedView } from "./PinnedViews";
 import { Legend } from "./Legend";
+import { AuthoredFilesPicker } from "./AuthoredFilesPicker";
 
 interface ArchToolbarProps {
   rigId: string;
@@ -18,6 +19,10 @@ interface ArchToolbarProps {
   onSelectPin: (pin: PinnedView) => void;
   onPinCurrent: () => void;
   onRemovePin?: (pin: PinnedView) => void;
+  /* Manual mermaid selection. `null` = JIT live graph; any other value
+     swaps the canvas to render that authored .mmd raw. */
+  authoredMmd: string | null;
+  onAuthoredMmdChange: (relPath: string | null) => void;
 }
 
 /* Left rail of the Architecture view. Composes the five sections — Root,
@@ -36,7 +41,10 @@ export function ArchToolbar({
   onSelectPin,
   onPinCurrent,
   onRemovePin,
+  authoredMmd,
+  onAuthoredMmdChange,
 }: ArchToolbarProps) {
+  const showLiveSections = authoredMmd === null;
   return (
     <aside
       className="flex w-[260px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-rule/50 p-3.5"
@@ -45,33 +53,46 @@ export function ArchToolbar({
       }}
     >
       <section>
-        <SectionHeader>Root</SectionHeader>
-        <RootSelector rigId={rigId} value={rootId} onChange={onRootChange} />
-        <div className="mt-1.5 text-[11px] italic text-ink-4">
-          Graph rebuilt from <span className="font-mono">@arch:</span> annotations
-          on demand.
-        </div>
-      </section>
-
-      <section>
-        <SectionHeader>Depth</SectionHeader>
-        <DepthControl value={depth} onChange={onDepthChange} />
-      </section>
-
-      <section>
-        <SectionHeader>Edges</SectionHeader>
-        <EdgeKindFilters enabled={enabledKinds} onToggle={onToggleKind} />
-      </section>
-
-      <section>
-        <SectionHeader>Pinned views</SectionHeader>
-        <PinnedViews
-          pins={pinned}
-          onSelect={onSelectPin}
-          onPinCurrent={onPinCurrent}
-          onRemove={onRemovePin}
+        <SectionHeader>Source</SectionHeader>
+        <AuthoredFilesPicker
+          rigId={rigId}
+          value={authoredMmd}
+          onChange={onAuthoredMmdChange}
         />
       </section>
+
+      {showLiveSections && (
+        <>
+          <section>
+            <SectionHeader>Root</SectionHeader>
+            <RootSelector rigId={rigId} value={rootId} onChange={onRootChange} />
+            <div className="mt-1.5 text-[11px] italic text-ink-4">
+              Graph rebuilt from <span className="font-mono">@arch:</span> annotations
+              on demand.
+            </div>
+          </section>
+
+          <section>
+            <SectionHeader>Depth</SectionHeader>
+            <DepthControl value={depth} onChange={onDepthChange} />
+          </section>
+
+          <section>
+            <SectionHeader>Edges</SectionHeader>
+            <EdgeKindFilters enabled={enabledKinds} onToggle={onToggleKind} />
+          </section>
+
+          <section>
+            <SectionHeader>Pinned views</SectionHeader>
+            <PinnedViews
+              pins={pinned}
+              onSelect={onSelectPin}
+              onPinCurrent={onPinCurrent}
+              onRemove={onRemovePin}
+            />
+          </section>
+        </>
+      )}
 
       <section className="mt-auto">
         <SectionHeader>Legend</SectionHeader>

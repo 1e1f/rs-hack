@@ -52,6 +52,44 @@
 //!
 //!
 //!
+//!
+//! @yah:ticket(R019-F4, "yah serve --stdio: JSON-RPC daemon over stdio")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R019)
+//! @yah:next("New yah subcommand 'serve' with --stdio transport — line-delimited JSON-RPC frames over stdin/stdout")
+//! @yah:next("Reuses the same serde shapes the Tauri commands speak today (formalized into yah-rpc once R019-T1 lands; until then, depend directly on yah-kg DTOs)")
+//! @yah:next("ArchEvent stream surfaces as JSON-RPC notifications — same 'arch:event' shape Tauri emits, just framed for stdio")
+//! @yah:next("This binary is what 'yah ssh-install' (R019-T2 below) puts on the remote box, and what SshRpcClient (R019-F2) launches over SSH")
+//! @yah:next("Verify: echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"arch.stats\",\"params\":{\"rigId\":...}}' | yah serve --stdio returns a sane stats result")
+//! @arch:see(architecture/rig-backend-dispatch.md)
+//!
+//! @yah:ticket(R019-F6, "yah ssh-install: bootstrap yah onto a remote box over SSH")
+//! @yah:assignee(agent:claude)
+//! @yah:status(handoff)
+//! @yah:phase(P5)
+//! @yah:parent(R019)
+//! @yah:next("New CLI: yah ssh-install --host user@box --target ~/yah/yah")
+//! @yah:next("Probe remote arch via 'uname -sm' over SSH; scp matching prebuilt yah binary if available, else rsync src + cargo build on remote")
+//! @yah:next("Optional register flag (off by default) appends a remote-rig entry to local ~/.yah/rigs.json")
+//! @yah:next("Independent of R019-T1/F2 — needs only R019-F4 (yah serve stdio binary surface) so the installed binary actually does something")
+//! @arch:see(architecture/rig-backend-dispatch.md)
+//! @yah:handoff("Dev-time cross-compile workflow landed: .cargo/config.toml maps the x86_64-unknown-linux-musl target to musl-cross's linker, scripts/deploy-remote.sh builds + scps + chmods to user@host (default ~/.local/bin/yah). Pure-Rust dep tree on the yah binary side — no openssl/ring drama, static binary runs on any glibc. Prereqs documented in script header (rustup target add + brew install FiloSottile/musl-cross/musl-cross). Unblocks the 'install daemon on Hetzner box' loop today without needing a yah ssh-install subcommand or release infra.")
+//! @yah:next("Promote scripts/deploy-remote.sh into a 'yah ssh-install' subcommand once it stabilizes (R019-F6 proper): probe remote uname -sm, support optional --register that appends to ~/.yah/rigs.json")
+//! @yah:next("Follow-up sub-ticket: GitHub Actions release workflow that publishes yah-x86_64-unknown-linux-{gnu,musl} + yah-darwin-{x86_64,aarch64} on tag push, then ssh-install can curl the asset directly on the remote (skips the local build round-trip)")
+//! @yah:next("First-time test: run scripts/deploy-remote.sh against a hetzner box and confirm 'yah serve --stdio' starts cleanly under SshRpcClient")
+//!
+//! @yah:ticket(R032-T1, "yah keys CLI + AES-GCM credential vault under ~/.config/yah/")
+//! @yah:status(review)
+//! @yah:assignee(agent:claude)
+//! @yah:parent(R032)
+//! @yah:handoff("Self-contained: per-host random 32-byte machine.key (mode 0600) at ~/.config/yah/machine.key, credentials.enc is AES-256-GCM blob (nonce || ciphertext) of a JSON map provider→token. CLI: yah keys {init,set,get,list,delete}. directories crate (already a dep) gives the right config path on linux + mac; aes-gcm + rand crates are the new deps.")
+//! @yah:next("Add new keys.rs module under yah/src/; wire into Cli enum as Commands::Keys { sub }")
+//! @yah:next("Cargo deps: aes-gcm 0.10, rand 0.8 (already transitively present? double-check)")
+//! @yah:next("init creates machine.key if absent, idempotent. set takes --from-stdin or prompts.")
+//! @yah:next("list shows providers only — never values. get prints to stdout (used by agent runner internally too).")
+//! @yah:next("Verify: yah keys init && echo 'sk-test-123' | yah keys set anthropic --from-stdin && yah keys list && yah keys get anthropic")
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -62,6 +100,7 @@ use glob::glob;
 mod operations;
 mod visitor;
 mod editor;
+mod keys;
 mod state;
 mod diff;
 mod path_resolver;
@@ -69,6 +108,7 @@ mod surgical;
 mod worktrees;
 mod arch;
 mod mcp;
+mod serve;
 
 #[cfg(test)]
 mod tests;
@@ -155,9 +195,38 @@ enum Commands {
         transport: String,
     },
 
+    /// Daemon server — JSON-RPC arch.* surface over stdio (R019-F4)
+    ///
+    /// Speaks the same `yah_kg::rpc::*` shapes the Tauri host serves
+    /// today, framed as line-delimited JSON-RPC 2.0. `SshRpcClient`
+    /// (R019-F2) launches one of these on the remote box per attached
+    /// remote rig; locally you can drive it by hand:
+    ///
+    ///     echo '{"jsonrpc":"2.0","id":1,"method":"arch.stats"}' | yah serve --stdio
+    Serve {
+        /// Speak line-delimited JSON-RPC 2.0 on stdin/stdout. Required
+        /// today (the only supported transport); kept as an explicit
+        /// flag so future `--http`, `--unix-socket`, etc. land cleanly.
+        #[arg(long)]
+        stdio: bool,
+
+        /// Pre-boot the daemon against this rig path before reading
+        /// requests. Optional: clients can also call `arch.open_rig`
+        /// over the wire. `YAH_RIG_ROOT` is consulted as a fallback.
+        #[arg(long)]
+        rig: Option<PathBuf>,
+    },
+
     /// Install yah skills (slash commands + MCP config) into an agent harness
     #[command(subcommand)]
     Skills(SkillsCommands),
+
+    /// Manage encrypted credentials (Anthropic/OpenAI/Ollama tokens) on this host.
+    ///
+    /// AES-256-GCM with a per-host random key under `ProjectDirs::data_dir()`.
+    /// Defends against dragnet exfil; see `keys.rs` for the threat model.
+    #[command(subcommand)]
+    Keys(KeysCommands),
 
     /// One-shot migration: rewrite legacy `@hack:` → `@yah:` in source, rename `.hack/` → `.yah/`
     Migrate {
@@ -4039,6 +4108,13 @@ fn main() -> Result<()> {
             handle_mcp_command()?;
         }
 
+        Commands::Serve { stdio, rig } => {
+            if !stdio {
+                bail!("`yah serve` requires --stdio (the only supported transport today)");
+            }
+            serve::run_stdio(rig)?;
+        }
+
         Commands::Skills(skills_cmd) => {
             handle_skills_command(skills_cmd)?;
         }
@@ -4046,8 +4122,96 @@ fn main() -> Result<()> {
         Commands::Migrate { path, apply } => {
             handle_migrate_command(&path, apply)?;
         }
+
+        Commands::Keys(keys_cmd) => {
+            handle_keys_command(keys_cmd)?;
+        }
     }
 
+    Ok(())
+}
+
+#[derive(Subcommand)]
+enum KeysCommands {
+    /// Generate the per-host machine key (idempotent unless --force).
+    /// Auto-runs on first `keys set` if absent — explicit init is for
+    /// scripts that want to fail fast if storage isn't writable.
+    Init {
+        /// Overwrite an existing machine key. Orphans any prior
+        /// credentials.enc — they become undecryptable.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Store a token for a provider (e.g. anthropic, openai, ollama).
+    Set {
+        /// Provider name ([a-zA-Z0-9_-]+).
+        provider: String,
+        /// Token value. Omit to read from stdin (recommended for shell history hygiene).
+        token: Option<String>,
+    },
+    /// Print a token to stdout. No newline appended; pipe to `cat`/`tr -d '\n'`-aware consumers.
+    Get {
+        provider: String,
+    },
+    /// List configured provider names (values are never printed).
+    List,
+    /// Remove a provider's token. Exit 0 whether or not it was present.
+    Delete {
+        provider: String,
+    },
+}
+
+fn handle_keys_command(cmd: KeysCommands) -> Result<()> {
+    use std::io::{IsTerminal, Read};
+    let store = keys::KeysStore::open()?;
+    match cmd {
+        KeysCommands::Init { force } => {
+            let created = store.init(force)?;
+            if created {
+                eprintln!("==> machine key written to {}", store.dir().display());
+            } else {
+                eprintln!("==> machine key already present at {}; pass --force to rotate", store.dir().display());
+            }
+        }
+        KeysCommands::Set { provider, token } => {
+            let token = match token {
+                Some(t) => t,
+                None => {
+                    if std::io::stdin().is_terminal() {
+                        bail!("no token provided — pass it as a positional arg or pipe via stdin");
+                    }
+                    let mut s = String::new();
+                    std::io::stdin().read_to_string(&mut s)?;
+                    s.trim_end_matches(['\n', '\r']).to_string()
+                }
+            };
+            if token.is_empty() {
+                bail!("token is empty");
+            }
+            store.set(&provider, &token)?;
+            eprintln!("==> set {provider}");
+        }
+        KeysCommands::Get { provider } => match store.get(&provider)? {
+            Some(t) => {
+                use std::io::Write;
+                std::io::stdout().write_all(t.as_bytes())?;
+            }
+            None => bail!("no token for provider: {provider}"),
+        },
+        KeysCommands::List => {
+            for name in store.list()? {
+                println!("{name}");
+            }
+        }
+        KeysCommands::Delete { provider } => {
+            let removed = store.delete(&provider)?;
+            if removed {
+                eprintln!("==> deleted {provider}");
+            } else {
+                eprintln!("==> {provider} was not configured");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -6153,6 +6317,18 @@ fn handle_move(args: MoveArgs) -> Result<()> {
     if ticket.is_epic {
         anyhow::bail!(
             "'{}' is an epic; its status is derived from children and cannot be set directly.",
+            args.id
+        );
+    }
+    // Any relay with children — bare-R epic children OR compound
+    // sub-tickets — has its column derived (`yah_kg::board::apply_derived_relay_fields`).
+    // Direct mutation would silently revert the next time list_relays runs.
+    if matches!(ticket.item_type, arch::ticket::ItemType::Relay)
+        && !board.children_of(&ticket.id).is_empty()
+    {
+        anyhow::bail!(
+            "'{}' is a relay with children; its column is derived from sub-tickets. \
+             Move the children to drive the relay's column.",
             args.id
         );
     }

@@ -19,18 +19,21 @@ interface PartnerSpec {
 
 const PARTNERS: PartnerSpec[] = [
   { id: "board", label: "Board", glyph: "g-board", group: "design" },
-  { id: "arch", label: "Architecture", glyph: "g-arch", group: "design" },
   { id: "agent", label: "Agent", glyph: "g-talk", group: "design" },
-  { id: "terminal", label: "Terminal", glyph: "g-pc", group: "run" },
-  { id: "preview", label: "Preview", glyph: "g-preview", group: "run" },
-  { id: "files", label: "Files", glyph: "g-files", group: "run" },
-  { id: "services", label: "Services", glyph: "g-services", group: "run" },
+  { id: "arch", label: "Architecture", glyph: "g-arch", group: "design" },
+  { id: "files", label: "Files", glyph: "g-files", group: "test" },
+  { id: "terminal", label: "Terminal", glyph: "g-pc", group: "test" },
+  { id: "preview", label: "Preview", glyph: "g-preview", group: "test" },
+  { id: "infra", label: "Infra", glyph: "g-pc", group: "host" },
+  { id: "services", label: "Services", glyph: "g-services", group: "host" },
+  { id: "analytics", label: "Analytics", glyph: "g-scry", group: "host" },
 ];
 
 /* Right-of-TitleBar split-pane control. Closed: shows split/single icon plus
    the partner tab when active. Open: a menu offering "Single pane" plus a
-   list of partner tabs (cross-cluster pairings listed first since the design
-   favors design+run pairings over same-cluster). */
+   list of partner tabs. Cross-cluster pairings are listed first since the
+   design favors mixing clusters (e.g. Design+Test, Design+Host) over
+   same-cluster pairings. */
 export function SplitModeToggle({
   activeTab,
   value,

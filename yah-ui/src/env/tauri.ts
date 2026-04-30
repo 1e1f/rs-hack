@@ -2,16 +2,28 @@
 // under the Tauri host. Calls into yah-tauri's #[tauri::command] handlers.
 
 import type {
+  AgentEventListener,
   ArchEventListener,
+  FileEventListener,
   Rpc,
+  TerminalEventListener,
   Unlisten,
 } from "./index";
 import type {
+  ClaudeCliProbe,
   GetTicketParams,
   GetTicketResult,
+  HetznerCreateServerSpec,
+  HetznerImage,
+  HetznerLocation,
+  HetznerServer,
+  HetznerServerType,
+  HetznerSshKey,
   IndexReason,
   KVStore,
   Lang,
+  LocalSshKey,
+  ListAuthoredFilesResult,
   ListRelaysParams,
   ListRelaysResult,
   ListTicketsParams,
@@ -22,17 +34,37 @@ import type {
   NeighborsResult,
   NodeFull,
   NodeId,
+  OllamaServeProbe,
+  ReadAuthoredFileResult,
   RootsParams,
   RootsResult,
+  SessionId,
   StatsResult,
   Subgraph,
   SubgraphParams,
+  TerminalOpenSpec,
+  TerminalOpenLocalSpec,
   TicketPromptParams,
   TicketPromptResult,
   ValidateResult,
   WalkSummary,
+  WireAgentSettings,
+  WireApprovalChoice,
+  WireApprovalRule,
+  WireApprovalRuleset,
+  WireAuthorization,
+  WireDirListResult,
+  WireIdentity,
+  WireProbeReport,
+  WireRemoteRigSpec,
   WireRigDto,
+  WireRigFileEvent,
   WireScope,
+  WireWatchId,
+  WireSessionSummary,
+  WireSingleProbeResult,
+  WireStartSessionResult,
+  WireTerminalSessionSummary,
 } from "./types";
 
 // `@tauri-apps/api` and `@tauri-apps/plugin-store` are runtime dependencies
@@ -41,8 +73,12 @@ import type {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 const ARCH_EVENT = "arch:event";
+const AGENT_EVENT = "agent:event";
+const TERMINAL_EVENT = "terminal:event";
+const FILE_EVENT = "file:event";
 
 export const rpc: Rpc = {
   openRig(rigId: string) {
@@ -75,6 +111,15 @@ export const rpc: Rpc = {
   rigList() {
     return invoke<WireRigDto[]>("rig_list");
   },
+  rigAttach(path: string, name: string) {
+    return invoke<WireRigDto>("rig_attach", { path, name });
+  },
+  rigAttachRemote(spec: WireRemoteRigSpec) {
+    return invoke<WireRigDto>("rig_attach_remote", { spec });
+  },
+  rigDetach(rigId: string) {
+    return invoke<boolean>("rig_detach", { rigId });
+  },
   rigSetActive(rigId: string) {
     return invoke<boolean>("rig_set_active", { rigId });
   },
@@ -102,6 +147,43 @@ export const rpc: Rpc = {
   ticketPrompt(rigId: string, params: TicketPromptParams) {
     return invoke<TicketPromptResult>("arch_ticket_prompt", { rigId, params });
   },
+  listAuthoredFiles(rigId: string) {
+    return invoke<ListAuthoredFilesResult>("arch_list_authored_files", { rigId });
+  },
+  readAuthoredFile(rigId: string, relPath: string) {
+    return invoke<ReadAuthoredFileResult>("arch_read_authored_file", {
+      rigId,
+      params: { rel_path: relPath },
+    });
+  },
+  dirList(rigId: string, path: string) {
+    return invoke<WireDirListResult>("dir_list", {
+      rigId,
+      params: { path },
+    });
+  },
+  async dirWatch(rigId: string, path: string) {
+    const r = await invoke<{ id: WireWatchId }>("dir_watch", {
+      rigId,
+      params: { path },
+    });
+    return r.id;
+  },
+  fileUnwatch(rigId: string, id: WireWatchId) {
+    return invoke<void>("file_unwatch", {
+      rigId,
+      params: { id },
+    });
+  },
+  async onFileEvent(listener: FileEventListener): Promise<Unlisten> {
+    const off = await listen(FILE_EVENT, (e) => {
+      listener(e.payload as WireRigFileEvent);
+    });
+    return () => off();
+  },
+  archiveTicket(rigId: string, id: string) {
+    return invoke<void>("arch_archive_ticket", { rigId, id });
+  },
   reindexPath(rigId: string, path: string, reason: IndexReason) {
     return invoke<void>("arch_reindex_path", { rigId, path, reason });
   },
@@ -116,7 +198,212 @@ export const rpc: Rpc = {
     });
     return () => off();
   },
+  agent: {
+    startSession(rigId: string, ticketId: string) {
+      return invoke<WireStartSessionResult>("agent_start_session", {
+        rigId,
+        ticketId,
+      });
+    },
+    startChatSession(rigId: string, engine: string, model?: string) {
+      return invoke<WireStartSessionResult>("agent_start_chat_session", {
+        rigId,
+        engine,
+        model: model ?? null,
+      });
+    },
+    send(sessionId: SessionId, text: string) {
+      return invoke<void>("agent_send", { sessionId, text });
+    },
+    stop(sessionId: SessionId) {
+      return invoke<boolean>("agent_stop", { sessionId });
+    },
+    listSessions() {
+      return invoke<WireSessionSummary[]>("agent_list_sessions");
+    },
+    listModels(provider: string) {
+      return invoke<string[]>("agent_list_models", { provider });
+    },
+    async onEvent(listener: AgentEventListener): Promise<Unlisten> {
+      const off = await listen(AGENT_EVENT, (e) => {
+        listener(e.payload as Parameters<AgentEventListener>[0]);
+      });
+      return () => off();
+    },
+    approval: {
+      decide(
+        rigId: string,
+        sessionId: SessionId,
+        requestId: string,
+        choice: WireApprovalChoice,
+      ) {
+        return invoke<boolean>("agent_approval_decide", {
+          rigId,
+          sessionId,
+          requestId,
+          choice,
+        });
+      },
+      rulesList(rigId: string) {
+        return invoke<WireApprovalRuleset>("agent_approval_rules_list", { rigId });
+      },
+      rulesAdd(rigId: string, rule: WireApprovalRule) {
+        return invoke<WireApprovalRuleset>("agent_approval_rules_add", {
+          rigId,
+          rule,
+        });
+      },
+      rulesRemove(rigId: string, index: number) {
+        return invoke<WireApprovalRuleset>("agent_approval_rules_remove", {
+          rigId,
+          index,
+        });
+      },
+    },
+    settings: {
+      get(rigId: string) {
+        return invoke<WireAgentSettings>("agent_settings_get", { rigId });
+      },
+      set(rigId: string, settings: WireAgentSettings) {
+        return invoke<WireAgentSettings>("agent_settings_set", {
+          rigId,
+          settings,
+        });
+      },
+    },
+  },
+  apiKey: {
+    set(provider: string, token: string) {
+      return invoke<void>("api_key_set", { provider, token });
+    },
+    has(provider: string) {
+      return invoke<boolean>("api_key_has", { provider });
+    },
+    delete(provider: string) {
+      return invoke<boolean>("api_key_delete", { provider });
+    },
+  },
+  identity: {
+    list() {
+      return invoke<WireIdentity[]>("identity_list");
+    },
+    create(name: string) {
+      return invoke<WireIdentity>("identity_create", { name });
+    },
+    import(publicKeyPath: string, name?: string) {
+      return invoke<WireIdentity>("identity_import", {
+        publicKeyPath,
+        name: name ?? null,
+      });
+    },
+    remove(id: string) {
+      return invoke<boolean>("identity_remove", { id });
+    },
+    probeAll() {
+      return invoke<WireProbeReport>("identity_probe_all");
+    },
+    probeHetzner(id: string) {
+      return invoke<WireSingleProbeResult>("identity_probe_hetzner", { id });
+    },
+    probeGithub(id: string) {
+      return invoke<WireSingleProbeResult>("identity_probe_github", { id });
+    },
+    authorizeHetzner(id: string, name: string) {
+      return invoke<WireAuthorization>("identity_authorize_hetzner", {
+        id,
+        name,
+      });
+    },
+    deauthorizeHetzner(id: string) {
+      return invoke<boolean>("identity_deauthorize_hetzner", { id });
+    },
+    authorizeGithub(id: string, title: string) {
+      return invoke<WireAuthorization>("identity_authorize_github", {
+        id,
+        title,
+      });
+    },
+    deauthorizeGithub(id: string) {
+      return invoke<boolean>("identity_deauthorize_github", { id });
+    },
+  },
+  probe: {
+    claudeCli() {
+      return invoke<ClaudeCliProbe>("claude_cli_probe");
+    },
+    ollamaServe() {
+      return invoke<OllamaServeProbe>("ollama_serve_probe");
+    },
+  },
+  hetzner: {
+    listServers() {
+      return invoke<HetznerServer[]>("hetzner_list_servers");
+    },
+    listSshKeys() {
+      return invoke<HetznerSshKey[]>("hetzner_list_ssh_keys");
+    },
+    uploadSshKey(name: string, publicKey: string) {
+      return invoke<HetznerSshKey>("hetzner_upload_ssh_key", {
+        name,
+        publicKey,
+      });
+    },
+    createServer(spec: HetznerCreateServerSpec) {
+      return invoke<HetznerServer>("hetzner_create_server", { spec });
+    },
+    listServerTypes() {
+      return invoke<HetznerServerType[]>("hetzner_list_server_types");
+    },
+    listLocations() {
+      return invoke<HetznerLocation[]>("hetzner_list_locations");
+    },
+    listImages() {
+      return invoke<HetznerImage[]>("hetzner_list_images");
+    },
+  },
+  ssh: {
+    listLocal() {
+      return invoke<LocalSshKey[]>("ssh_key_list_local");
+    },
+    generate(name: string) {
+      return invoke<LocalSshKey>("ssh_key_generate", { name });
+    },
+  },
+  terminal: {
+    openSsh(spec: TerminalOpenSpec) {
+      return invoke<string>("terminal_open_ssh", { spec });
+    },
+    openLocal(spec: TerminalOpenLocalSpec) {
+      return invoke<string>("terminal_open_local", { spec });
+    },
+    input(sessionId: string, bytesB64: string) {
+      return invoke<void>("terminal_input", { sessionId, bytesB64 });
+    },
+    resize(sessionId: string, cols: number, rows: number) {
+      return invoke<void>("terminal_resize", { sessionId, cols, rows });
+    },
+    close(sessionId: string) {
+      return invoke<boolean>("terminal_close", { sessionId });
+    },
+    listSessions() {
+      return invoke<WireTerminalSessionSummary[]>("terminal_list_sessions");
+    },
+    async onEvent(listener: TerminalEventListener): Promise<Unlisten> {
+      const off = await listen(TERMINAL_EVENT, (e) => {
+        listener(e.payload as Parameters<TerminalEventListener>[0]);
+      });
+      return () => off();
+    },
+  },
 };
+
+/** Native folder picker via the Tauri dialog plugin. Returns the chosen
+ *  absolute path, or `null` if the user cancelled. */
+export async function pickFolder(): Promise<string | null> {
+  const result = await openDialog({ directory: true, multiple: false });
+  if (result === null) return null;
+  return Array.isArray(result) ? (result[0] ?? null) : result;
+}
 
 // Single store file in the platform app-data dir; keys are namespaced
 // inside the file so different subsystems can share it without colliding.

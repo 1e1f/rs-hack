@@ -8,9 +8,16 @@ repository.workspace = true
 description = "Annotation overlay (tags, flows, rules) on top of the yah knowledge graph"
 publish = false
 
+[features]
+default = ["apply"]
+# `apply` brings in the graph-mutating Pass-4 driver and the side
+# AnnotationIndex; turn it off when you only need the doc-string parser
+# (e.g. the wasm build for in-editor live diagnostics).
+apply = ["dep:yah-kg-store"]
+
 [dependencies]
 yah-kg = { path = "../yah-kg" }
-yah-kg-store = { path = "../yah-kg-store" }
+yah-kg-store = { path = "../yah-kg-store", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 

@@ -243,7 +243,9 @@ impl ArchGraph {
                     | ArchKind::Cleanup(_)
                     | ArchKind::Verify(_)
                     | ArchKind::Gotcha(_)
-                    | ArchKind::Assumes(_) => {}
+                    | ArchKind::Assumes(_)
+                    | ArchKind::Think(_)
+                    | ArchKind::Engine(_) => {}
                 }
             }
 

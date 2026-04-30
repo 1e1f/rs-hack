@@ -50,7 +50,63 @@
 //! @yah:parent(R016)
 //! @yah:next("app/tauri/src/state.rs:331 currently registers only RustIndexer + TsIndexer; add Json/Yaml/Toml so config files appear in the architecture tab at runtime, not just in unit tests.")
 //! @yah:next("Mirror the same registration in yah-kg-daemon/tests/e2e.rs to cover the multi-language walk.")
+//!
+//! @yah:ticket(R019-F3, "RigBackend enum + dispatch layer (Local/Remote)")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R019)
+//! @yah:next("Replace RigEntry.svc: Arc<KgService> with backend: RigBackend (enum Local/Remote) in app/tauri/src/state.rs")
+//! @yah:next("RigBackend exposes the same async surface as KgService — every arch_* command in app/tauri/src/commands.rs dispatches via state.backend_for(&rig_id) instead of svc_by_id")
+//! @yah:next("Remote arm = unimplemented!() stub; Local arm keeps existing semantics byte-identical")
+//! @yah:next("Boot/attach flow unchanged for Local; remote attach stores spec without connecting (lazy)")
+//! @yah:next("Verify: cargo build -p yah-tauri && cargo test -p yah-tauri (every existing arch_* test passes through Local arm)")
+//! @arch:see(architecture/rig-backend-dispatch.md)
+//! @yah:handoff("RigBackend dispatch landed end-to-end. New module app/tauri/src/backend.rs owns the enum (Local(Arc<KgService>) / Remote(SshRpcClient)) + every method mirroring KgService surface (subgraph, lookup, node, neighbors, roots, stats, languages, list_authored_files, read_authored_file, list_tickets, list_relays, get_ticket, validate, ticket_prompt, move_ticket, reindex_path, touch) + open_rig/close_rig lifecycle. Local arm zero-cost direct calls; Remote arm forwards via yah-rpc-ssh::SshRpcClient (lazy first-call connect, exponential reconnect inside .call()). state.rs: RigEntry.svc: Arc<KgService> -> backend: RigBackend; attach_rig builds Local; attach_remote_rig builds Remote(SshRpcClient::new(SshRpcConfig{...})); svc_for / active_svc kept as local-only accessors (return None on remote) for the agent runtime which still needs direct KgService access. event_bridge.rs: spawn_for now takes RigBackend and branches — Local arm subscribes to KgService broadcast as before; Remote arm calls client.subscribe_events() in an outer loop that resubscribes after session-close (matches KgService's resubscribe-after-restart contract). commands.rs: every arch_* command resolves via backend_by_id (was svc_by_id) and dispatches through RigBackend; arch_open_rig's 'remote not wired yet' early-return is gone — RigBackend::open_rig handles both arms (Local: boot_with_snapshot+start_watching+save_default; Remote: client.open_rig() RPC). WalkSummaryDto and IndexReasonDto moved from commands.rs to backend.rs since both arms produce/consume them. yah-rpc-ssh re-exports OpenRigResult + ReindexReasonWire from lib.rs. cargo build -p yah-tauri green; cargo test -p yah-tauri --lib 27/27 green; cargo test -p yah-rpc-ssh 8/8 green; cargo test -p yah-kg-daemon --lib 2/2 green.")
+//! @yah:next("Real-host smoke test: with a daemon installed on a Hetzner box (R019-F6 dev workflow), Connect remote rig... in the UI -> click open. Expect arch.open_rig to fire over SSH, the workspace to walk on the remote, a WalkSummary dto back, and arch:event notifications to start streaming. The sub-tickets at this point all flip to review-archive: F2 (transport), T5 (modal), F3 (this).")
+//! @yah:next("Gap: serve.rs dispatch is missing arch.list_authored_files + arch.read_authored_file + arch.archive_ticket. SshRpcClient already has the first two methods on its surface, so on remote rigs they will fail with method-not-found until the daemon side is wired. Add the two trivial cases to yah/src/serve.rs::dispatch (list_authored_files + read_authored_file). archive_ticket is harder — local commands.rs shells out to the yah CLI; for remote it needs a KgService::archive_ticket method (mirror move_ticket pattern). Track as a follow-up sub-ticket of R019 or under R017.")
+//! @yah:next("Polish: agent runtime is local-only — agent_start_session etc. call svc_for (returns None for remote rigs). Decide whether remote agents need a separate path (agent process running on the remote box, started via SSH) or whether the local agent calls remote rigs through SshRpcClient for KG queries. The user's mental model in this conversation suggested 'sometimes a local agent, sometimes a remote agent' which lines up with running a separate agent on the remote box. Track as a new ticket under R013/R028.")
+//! @yah:next("Polish: Test connection button on Connect-remote-rig modal — modal already has the field set; rpc.rigTestRemote(spec) -> a new Tauri command that constructs an ephemeral SshRpcClient + calls ensure_connected().await + reports back true/error string. Skip until users ask.")
+//! @yah:next("UX: local-vs-remote agent visual distinction (icons + names) — the user flagged this at the top of the R019-F3 conversation. Now that remote rigs activate, design the rig-pill / agent-shell affordances. New ticket under R013 (rig UX) or R024 (multi-rig).")
+//!
+//! @yah:ticket(R033-T17, "RigBackend::Remote arms for file/dir/lsp methods (after R019-F2)")
+//! @yah:status(open)
+//! @yah:phase(P6)
+//! @yah:parent(R033)
+//! @arch:see(architecture/yah-files-tab.md)
+//! @arch:see(architecture/rig-backend-dispatch.md)
+//!
+//! @yah:ticket(R033-T18, "e2e: open file on remote rig + rust-analyzer hover over SSH")
+//! @yah:status(open)
+//! @yah:phase(P6)
+//! @yah:parent(R033)
+//! @arch:see(architecture/yah-files-tab.md)
+//!
+//! @yah:relay(R034, "Identity registry: SSH-key first-class object + cross-target authorization")
+//! @yah:status(open)
+//! @yah:parent(R013)
+//! @arch:see(architecture/yah-identities.md)
+//!
+//! @yah:ticket(R034-T1, "Identity registry foundation: types + identities.json + 4 Tauri commands (no probes)")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P1)
+//! @yah:parent(R034)
+//! @arch:see(architecture/yah-identities.md)
+//! @yah:handoff("Identity registry foundation landed. New module app/tauri/src/identities.rs owns: Identity (id=SHA256 fingerprint, name, algorithm, public_key, source, authorized_at, created_at, last_used_at), IdentitySource (YahGenerated{private_key_path} | Imported{private_key_path?, public_key_path}), Authorization (Hetzner | Github | Gitlab | SshHost variants — caches with last_seen timestamps; unused at T1, populated by P2 probes), IdentitiesFile, IdentityError. Storage at $YAH_HOME/identities.json (default ~/.yah/identities.json), camelCase + tagged-enum serde matching the architecture doc. yah-managed private keys go under $YAH_HOME/keys/<name> (mode 0600 on Unix; dir 0700). Imported keys are referenced by path only — yah never reads or copies private bytes. Four Tauri commands wired through invoke_handler in lib.rs: identity_list, identity_create(name), identity_import(public_key_path, name?), identity_remove(id). Each command takes a per-process tokio Mutex (IdentitiesState, Tauri-managed) so concurrent invokes don't race the load->mutate->save sequence. De-dup is by fingerprint: re-creating or re-importing the same key refreshes display name/source path on the canonical record without losing authorized_at. Tests: 6/6 in identities::tests — name validator (accept + reject), JSON round-trip with both enum tags asserted, create+remove deletes keyfile, import does not copy private bytes (original file untouched after remove), duplicate import returns canonical record. cargo build -p yah-tauri green; cargo test -p yah-tauri --lib 65/65 green.")
+//! @yah:next("T2 (P2 probes): identity_probe_local walks ~/.ssh + $YAH_HOME/keys, fingerprints, merges into the registry; identity_probe_hetzner reuses hetzner_list_ssh_keys + matches fingerprints; identity_probe_github needs a new GET /user/keys client (allowlist 'github' provider in api_keys::validate_provider first).")
+//! @yah:next("Probe results update Identity.authorized_at + last_used_at. Missing PAT for forge probes is a no-op (skip silently with a tracing::info that the row will appear unchecked). identity_probe_all fans out the three.")
+//! @yah:next("Renderer (R034-F4) can start mock-driven against this surface today: rpc.identity.list/create/import/remove on env/index.ts; tauri.ts invokes the four commands; browser.ts can return a fixed mock list for component inspection.")
+//! @yah:next("Open question for the user before P5 lands: should yah-managed keys move into the OS keychain (R027-T7's vault under identity:<fingerprint>) or stay as files at $YAH_HOME/keys/? Doc currently picks files for ssh -i compat; revisit once T1 is in real use.")
+//!
+//! @yah:ticket(R034-T6, "Migrate rigs.json keyPath \\u2192 identityId via fingerprint match on first identities.json boot")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P5)
+//! @yah:parent(R034)
+//! @arch:see(architecture/yah-identities.md)
 
+use crate::backend::RigBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -63,6 +119,7 @@ use yah_kg_json_yaml::{JsonIndexer, TomlIndexer, YamlIndexer};
 use yah_kg_rust::RustIndexer;
 use yah_kg_store::IndexerRegistry;
 use yah_kg_ts::TsIndexer;
+use yah_rpc_ssh::{SshRpcClient, SshRpcConfig};
 
 /// Stable id for a rig — derived from the canonical absolute path so
 /// renaming the rig (changing `name`) leaves the id alone, while
@@ -83,6 +140,19 @@ impl RigId {
         Self(format!("rig:{}", &hex.as_str()[..12]))
     }
 
+    /// Stable id for a remote rig — derived from the spec the user typed
+    /// in the Connect modal. Re-attaching the same `(user, host, port,
+    /// workspace)` returns the same id even though no canonical local
+    /// path exists. Port defaults to 22 in the hash so users who omit
+    /// the field don't get a different id from users who type `22`.
+    pub fn from_remote(user: &str, host: &str, port: Option<u16>, workspace: &Path) -> Self {
+        let p = port.unwrap_or(22);
+        let s = format!("ssh://{}@{}:{}{}", user, host, p, workspace.display());
+        let h = blake3::hash(s.as_bytes());
+        let hex = h.to_hex();
+        Self(format!("rig:{}", &hex.as_str()[..12]))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -91,6 +161,14 @@ impl RigId {
 /// Persisted rig metadata. The runtime [`KgService`] is *not* stored
 /// here — it gets reconstructed on attach so a freshly-loaded rigs
 /// file produces a clean daemon.
+///
+/// For [`RigKind::Remote`], the SSH spec lives directly on the rig
+/// (`host`, `port`, `user`, `key_path`) and `path` holds the *remote*
+/// workspace path the daemon will index. This keeps `path_for(...)` /
+/// `Rig.path` semantics uniform across local + remote — both answer
+/// "the folder this rig points at" — and the renderer's RigSelector
+/// can show the remote workspace under the host pill without any
+/// kind-specific branching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rig {
@@ -104,6 +182,28 @@ pub struct Rig {
     /// until the user has ever activated this rig.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_active_at: Option<i64>,
+    /// Remote-only: SSH host (DNS or IP). `None` for local rigs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Remote-only: SSH port. `None` means "default 22".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Remote-only: SSH user. Required for remote rigs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// Remote-only: path to a private key file. `None` falls back to
+    /// SSH agent / `~/.ssh/id_*` defaults at connection time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_path: Option<PathBuf>,
+    /// Identity-registry id (SHA256 fingerprint) of the keypair this
+    /// rig connects with. Populated by the keyPath→identityId migration
+    /// (R034-T6) on boot when only `key_path` was set; once populated,
+    /// the registry is the canonical source for the public key + auth
+    /// state and the renderer renders the rig's identity row from it.
+    /// `key_path` stays alongside for one release as a fallback for any
+    /// connection path that hasn't been switched over yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,14 +213,35 @@ pub enum RigKind {
     Remote,
 }
 
-/// In-memory entry: persisted metadata + a running daemon + the
-/// JoinHandle for the per-rig event-bridge task. Detaching a rig
-/// drops the entry, which aborts the bridge and drops the daemon's
-/// Arc count to zero (any in-flight watcher task observes the
-/// channel close).
+/// Wire shape for the renderer's "Connect remote rig…" modal. The
+/// payload is stored as-is on the `Rig` (no SSH connection happens
+/// here — the spec sits dormant until activation, at which point an
+/// `SshRpcClient` is constructed lazily; that piece lands with R019-F2).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteRigSpec {
+    pub host: String,
+    pub user: String,
+    pub workspace_path: PathBuf,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub key_path: Option<PathBuf>,
+    /// Display name in the rig selector. Defaults to `host` when the
+    /// renderer leaves it blank.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// In-memory entry: persisted metadata + a [`RigBackend`] (an in-process
+/// daemon for local rigs, or an `SshRpcClient` for remote rigs) + the
+/// JoinHandle for the per-rig event-bridge task. Detaching a rig drops
+/// the entry, which aborts the bridge; the Local arm's daemon Arc count
+/// drops to zero (watcher observes the channel close), and the Remote
+/// arm's `SshRpcClient` drops, killing the `ssh` child via `kill_on_drop`.
 pub struct RigEntry {
     pub rig: Rig,
-    pub svc: Arc<KgService>,
+    pub backend: RigBackend,
     pub bridge: Option<JoinHandle<()>>,
 }
 
@@ -162,6 +283,21 @@ pub struct RigDto {
     /// (SSH-RPC) will set this from the transport's last heartbeat.
     pub reachable: bool,
     pub last_active_at: Option<i64>,
+    /// Remote-only: SSH host (renderer shows this in the rig pill).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Remote-only: SSH port. `None` means default 22.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Remote-only: SSH user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// Remote-only: explicit private-key path (when set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_path: Option<PathBuf>,
+    /// Identity-registry id this rig connects with — see `Rig.identity_id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -181,19 +317,31 @@ impl AppState {
         }
     }
 
-    /// Clone of the active rig's [`KgService`], or `None` if no rig is
-    /// attached / activated. Existing `arch_*` commands route through
-    /// this for backward compatibility while R024-T2 introduces
-    /// explicit `rig_id` parameters.
+    /// Clone of the active rig's local [`KgService`], if any. Returns
+    /// `None` for remote rigs (they have no in-process daemon) and when
+    /// nothing is active. Used only by the `YAH_RIG_ROOT` auto-boot dev
+    /// path; runtime command dispatch goes through [`backend_for`]
+    /// instead.
     pub async fn active_svc(&self) -> Option<Arc<KgService>> {
         let active = self.active.read().await.clone()?;
         let rigs = self.rigs.read().await;
-        rigs.get(&active).map(|e| e.svc.clone())
+        rigs.get(&active).and_then(|e| e.backend.local())
     }
 
-    /// Look up a rig's daemon by id without changing the active pointer.
+    /// Look up a rig's [`RigBackend`] by id without changing the active
+    /// pointer. Every `arch_*` Tauri command resolves the rig this way
+    /// and dispatches through the returned backend.
+    pub async fn backend_for(&self, id: &RigId) -> Option<RigBackend> {
+        self.rigs.read().await.get(id).map(|e| e.backend.clone())
+    }
+
+    /// Look up a rig's local [`KgService`] by id. Returns `None` for
+    /// remote rigs (which have no in-process daemon) and for unknown
+    /// ids. Used by callers that genuinely need direct daemon access —
+    /// today, the agent runtime (assemble_prelude / yah-runner session
+    /// construction), which doesn't have a remote analogue yet.
     pub async fn svc_for(&self, id: &RigId) -> Option<Arc<KgService>> {
-        self.rigs.read().await.get(id).map(|e| e.svc.clone())
+        self.rigs.read().await.get(id).and_then(|e| e.backend.local())
     }
 
     /// Look up the on-disk path for a rig — needed by `arch_open_rig`
@@ -223,7 +371,8 @@ impl AppState {
             return id;
         }
         let svc = Arc::new(make_kg_service());
-        let bridge = crate::event_bridge::spawn_for(id.clone(), svc.clone(), app_handle);
+        let backend = RigBackend::Local(svc);
+        let bridge = crate::event_bridge::spawn_for(id.clone(), backend.clone(), app_handle);
         rigs.insert(
             id.clone(),
             RigEntry {
@@ -233,12 +382,75 @@ impl AppState {
                     path,
                     kind: RigKind::Local,
                     last_active_at: None,
+                    host: None,
+                    port: None,
+                    user: None,
+                    key_path: None,
+                    identity_id: None,
                 },
-                svc,
+                backend,
                 bridge: Some(bridge),
             },
         );
         id
+    }
+
+    /// Idempotent attach for a remote rig. Stores the SSH spec and
+    /// constructs a lazy [`SshRpcClient`] — no SSH connection is opened
+    /// here; the client connects on the first call (typically the
+    /// `arch_open_rig` triggered when the user activates the rig).
+    pub async fn attach_remote_rig(&self, spec: RemoteRigSpec, app_handle: AppHandle) -> RigId {
+        let id =
+            RigId::from_remote(&spec.user, &spec.host, spec.port, &spec.workspace_path);
+        let display_name = spec.name.clone().unwrap_or_else(|| spec.host.clone());
+        let mut rigs = self.rigs.write().await;
+        if let Some(existing) = rigs.get_mut(&id) {
+            existing.rig.name = display_name;
+            existing.rig.path = spec.workspace_path.clone();
+            existing.rig.host = Some(spec.host.clone());
+            existing.rig.user = Some(spec.user.clone());
+            existing.rig.port = spec.port;
+            existing.rig.key_path = spec.key_path.clone();
+            return id;
+        }
+        let cfg = SshRpcConfig {
+            host: spec.host.clone(),
+            user: spec.user.clone(),
+            port: spec.port,
+            key_path: spec.key_path.clone(),
+            remote_workspace: spec.workspace_path.clone(),
+            remote_yah_bin: None,
+            extra_ssh_args: vec![],
+        };
+        let client = SshRpcClient::new(cfg);
+        let backend = RigBackend::Remote(client);
+        let bridge = crate::event_bridge::spawn_for(id.clone(), backend.clone(), app_handle);
+        rigs.insert(
+            id.clone(),
+            RigEntry {
+                rig: Rig {
+                    id: id.clone(),
+                    name: display_name,
+                    path: spec.workspace_path,
+                    kind: RigKind::Remote,
+                    last_active_at: None,
+                    host: Some(spec.host),
+                    port: spec.port,
+                    user: Some(spec.user),
+                    key_path: spec.key_path,
+                    identity_id: None,
+                },
+                backend,
+                bridge: Some(bridge),
+            },
+        );
+        id
+    }
+
+    /// Look up the kind of a rig — used by `arch_open_rig` to refuse
+    /// remote rigs until `RigBackend` dispatch (R019-F3) lands.
+    pub async fn kind_for(&self, id: &RigId) -> Option<RigKind> {
+        self.rigs.read().await.get(id).map(|e| e.rig.kind)
     }
 
     /// Remove a rig: aborts its bridge, drops its daemon, clears the
@@ -324,6 +536,11 @@ fn rig_dto_from_entry(entry: &RigEntry) -> RigDto {
         // remote-rig branch will derive this from the SSH-RPC heartbeat.
         reachable: matches!(entry.rig.kind, RigKind::Local),
         last_active_at: entry.rig.last_active_at,
+        host: entry.rig.host.clone(),
+        port: entry.rig.port,
+        user: entry.rig.user.clone(),
+        key_path: entry.rig.key_path.clone(),
+        identity_id: entry.rig.identity_id.clone(),
     }
 }
 
@@ -410,6 +627,11 @@ mod tests {
                 path: PathBuf::from("/tmp/rs-hack"),
                 kind: RigKind::Local,
                 last_active_at: Some(1_700_000_000_000),
+                host: None,
+                port: None,
+                user: None,
+                key_path: None,
+                identity_id: None,
             }],
             last_active: Some(RigId("rig:abc123".into())),
         };
@@ -434,10 +656,68 @@ mod tests {
             kind: RigKind::Local,
             reachable: true,
             last_active_at: Some(1_700_000_000_000),
+            host: None,
+            port: None,
+            user: None,
+            key_path: None,
+            identity_id: None,
         };
         let json = serde_json::to_string(&dto).unwrap();
         assert!(json.contains("lastActiveAt"), "{json}");
         assert!(json.contains("\"reachable\":true"), "{json}");
         assert!(json.contains("\"kind\":\"local\""), "{json}");
+        // Remote-only fields are skipped when absent so local rigs
+        // don't carry dead `host: null` keys around.
+        assert!(!json.contains("host"), "{json}");
+    }
+
+    #[test]
+    fn rig_id_from_remote_is_deterministic() {
+        let a = RigId::from_remote(
+            "agent",
+            "box.example.com",
+            Some(2222),
+            &PathBuf::from("/srv/code"),
+        );
+        let b = RigId::from_remote(
+            "agent",
+            "box.example.com",
+            Some(2222),
+            &PathBuf::from("/srv/code"),
+        );
+        assert_eq!(a, b);
+        assert!(a.as_str().starts_with("rig:"));
+    }
+
+    #[test]
+    fn rig_id_from_remote_treats_port_default_as_22() {
+        // Users who type nothing in the port field shouldn't get a
+        // different id from users who type "22".
+        let omitted = RigId::from_remote(
+            "agent",
+            "box.example.com",
+            None,
+            &PathBuf::from("/srv/code"),
+        );
+        let explicit = RigId::from_remote(
+            "agent",
+            "box.example.com",
+            Some(22),
+            &PathBuf::from("/srv/code"),
+        );
+        assert_eq!(omitted, explicit);
+    }
+
+    #[test]
+    fn rig_id_from_remote_differs_across_specs() {
+        let base = RigId::from_remote("a", "h", Some(22), &PathBuf::from("/p"));
+        let other_user = RigId::from_remote("b", "h", Some(22), &PathBuf::from("/p"));
+        let other_host = RigId::from_remote("a", "g", Some(22), &PathBuf::from("/p"));
+        let other_port = RigId::from_remote("a", "h", Some(2200), &PathBuf::from("/p"));
+        let other_path = RigId::from_remote("a", "h", Some(22), &PathBuf::from("/q"));
+        assert_ne!(base, other_user);
+        assert_ne!(base, other_host);
+        assert_ne!(base, other_port);
+        assert_ne!(base, other_path);
     }
 }

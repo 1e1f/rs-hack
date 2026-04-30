@@ -50,9 +50,12 @@
 //!
 //! JSON Property nodes carry per-key spans pulled from a side-band
 //! tree-sitter-json parse — see [`spans::extract_json_spans`]. YAML
-//! and TOML still pin to the file-wide span; their per-key sources
-//! (`yaml-rust2` parser events / `toml_edit`) are tracked as
-//! follow-ups on R016-F5.
+//! Property nodes carry per-key spans from a parallel pass over
+//! `yaml-rust2`'s event stream — see [`spans::extract_yaml_spans`].
+//! TOML Property nodes carry per-key spans from a side-band
+//! `toml_edit::ImDocument` parse — see [`spans::extract_toml_spans`].
+//! Merge-resolved YAML keys (`<<: *anchor`) aren't physically present
+//! in source and fall back to the file-wide span.
 //!
 //! ## What this crate intentionally does NOT do
 //!
