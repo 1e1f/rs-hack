@@ -1,0 +1,23 @@
+[package]
+name = "kg-json-yaml"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "JSON / YAML config-file indexer for the yah knowledge graph"
+publish = false
+
+[dependencies]
+kg = { path = "../kg" }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+toml_edit = "0.22"
+yaml-rust2 = "0.10"
+tree-sitter = "0.23"
+tree-sitter-json = "0.24"
+
+[dev-dependencies]
+kg-store = { path = "../kg-store" }
+rpc = { path = "../rpc" }

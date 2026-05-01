@@ -1,0 +1,42 @@
+[package]
+name = "lsp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Language server pool: spawns rust-analyzer / typescript-language-server as managed children of `yah serve`, multiplexed via lsp.request / lsp.notification (R033 P4)."
+publish = false
+
+[lib]
+name = "lsp"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+
+tokio = { version = "1", features = [
+    "io-util",
+    "macros",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = [
+    "io-util",
+    "macros",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "test-util",
+    "time",
+] }

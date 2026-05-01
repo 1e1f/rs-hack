@@ -1140,6 +1140,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop"
+version = "0.7.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "blake3",
+ "futures-util",
+ "glob",
+ "keyring",
+ "kg",
+ "kg-daemon",
+ "kg-json-yaml",
+ "kg-rust",
+ "kg-store",
+ "kg-ts",
+ "portable-pty",
+ "regex",
+ "reqwest 0.12.28",
+ "rpc",
+ "rpc-ssh",
+ "runner",
+ "russh",
+ "serde",
+ "serde_json",
+ "ssh-key",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-store",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2692,6 +2731,131 @@ dependencies = [
 ]
 
 [[package]]
+name = "kg"
+version = "0.7.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "kg-anno"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "kg-rust",
+ "kg-store",
+ "kg-ts",
+ "rpc",
+ "serde",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "kg-anno-wasm"
+version = "0.7.0"
+dependencies = [
+ "kg-anno",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "kg-daemon"
+version = "0.7.0"
+dependencies = [
+ "base64 0.22.1",
+ "kg",
+ "kg-anno",
+ "kg-json-yaml",
+ "kg-rust",
+ "kg-store",
+ "kg-ts",
+ "kg-validator",
+ "notify",
+ "postcard",
+ "rpc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "kg-json-yaml"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "kg-store",
+ "rpc",
+ "serde_json",
+ "serde_yaml",
+ "toml 0.8.23",
+ "toml_edit 0.22.27",
+ "tree-sitter",
+ "tree-sitter-json",
+ "yaml-rust2",
+]
+
+[[package]]
+name = "kg-rust"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "kg-store",
+ "proc-macro2",
+ "quote",
+ "rpc",
+ "syn 2.0.109",
+]
+
+[[package]]
+name = "kg-store"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "kg-rust",
+ "petgraph",
+ "rpc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "walkdir",
+]
+
+[[package]]
+name = "kg-ts"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "kg-store",
+ "rpc",
+ "tempfile",
+ "tree-sitter",
+ "tree-sitter-typescript",
+]
+
+[[package]]
+name = "kg-validator"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "kg-anno",
+ "kg-store",
+ "rpc",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "kqueue"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2835,6 +2999,18 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "lsp"
+version = "0.7.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "mac"
@@ -4369,6 +4545,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpc"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "serde",
+]
+
+[[package]]
+name = "rpc-ssh"
+version = "0.7.0"
+dependencies = [
+ "kg",
+ "rpc",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4387,6 +4584,25 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "runner"
+version = "0.7.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "blake3",
+ "bytes",
+ "futures",
+ "kg",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7455,12 +7671,20 @@ dependencies = [
  "clap",
  "directories",
  "futures",
+ "futures-util",
  "glob",
+ "kg",
+ "kg-daemon",
+ "kg-rust",
+ "kg-store",
+ "kg-ts",
  "petgraph",
  "prettyplease",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
+ "rpc",
+ "runner",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -7476,210 +7700,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "yah-kg",
- "yah-kg-daemon",
- "yah-kg-rust",
- "yah-kg-store",
- "yah-kg-ts",
-]
-
-[[package]]
-name = "yah-kg"
-version = "0.7.0"
-dependencies = [
- "blake3",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "yah-kg-anno"
-version = "0.7.0"
-dependencies = [
- "serde",
- "tempfile",
- "thiserror 1.0.69",
- "yah-kg",
- "yah-kg-rust",
- "yah-kg-store",
- "yah-kg-ts",
-]
-
-[[package]]
-name = "yah-kg-anno-wasm"
-version = "0.7.0"
-dependencies = [
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
- "yah-kg-anno",
-]
-
-[[package]]
-name = "yah-kg-daemon"
-version = "0.7.0"
-dependencies = [
- "base64 0.22.1",
- "notify",
- "postcard",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "walkdir",
- "yah-kg",
- "yah-kg-anno",
- "yah-kg-json-yaml",
- "yah-kg-rust",
- "yah-kg-store",
- "yah-kg-ts",
- "yah-kg-validator",
-]
-
-[[package]]
-name = "yah-kg-json-yaml"
-version = "0.7.0"
-dependencies = [
- "serde_json",
- "serde_yaml",
- "toml 0.8.23",
- "toml_edit 0.22.27",
- "tree-sitter",
- "tree-sitter-json",
- "yah-kg",
- "yah-kg-store",
- "yaml-rust2",
-]
-
-[[package]]
-name = "yah-kg-rust"
-version = "0.7.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
- "yah-kg",
- "yah-kg-store",
-]
-
-[[package]]
-name = "yah-kg-store"
-version = "0.7.0"
-dependencies = [
- "petgraph",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "walkdir",
- "yah-kg",
- "yah-kg-rust",
-]
-
-[[package]]
-name = "yah-kg-ts"
-version = "0.7.0"
-dependencies = [
- "tempfile",
- "tree-sitter",
- "tree-sitter-typescript",
- "yah-kg",
- "yah-kg-store",
-]
-
-[[package]]
-name = "yah-kg-validator"
-version = "0.7.0"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
- "yah-kg",
- "yah-kg-anno",
- "yah-kg-store",
-]
-
-[[package]]
-name = "yah-lsp"
-version = "0.7.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "yah-rpc-ssh"
-version = "0.7.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "yah-kg",
-]
-
-[[package]]
-name = "yah-runner"
-version = "0.7.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "blake3",
- "bytes",
- "futures",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "yah-kg",
-]
-
-[[package]]
-name = "yah-tauri"
-version = "0.7.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "blake3",
- "futures-util",
- "glob",
- "keyring",
- "portable-pty",
- "regex",
- "reqwest 0.12.28",
- "russh",
- "serde",
- "serde_json",
- "ssh-key",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-store",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "tracing-subscriber",
- "walkdir",
- "yah-kg",
- "yah-kg-daemon",
- "yah-kg-json-yaml",
- "yah-kg-rust",
- "yah-kg-store",
- "yah-kg-ts",
- "yah-rpc-ssh",
- "yah-runner",
 ]
 
 [[package]]

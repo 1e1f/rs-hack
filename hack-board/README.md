@@ -271,7 +271,7 @@ with `blockingChildren` list). Archive children first.
 <workspace>/
 ├── src/**/*.rs                    # Source — the authoritative board state.
 │                                  # All @yah: annotations live here.
-├── architecture/**/*.md           # Referenced by @arch:see(...) annotations.
+├── .yah/arch/authored/**/*.md           # Referenced by @arch:see(...) annotations.
 ├── .yah/
 │   ├── todo.md                    # Pre-ticket inbox (structured markdown).
 │   ├── summaries/*.md             # Progress notes from /comment.
@@ -301,7 +301,7 @@ with `blockingChildren` list). Archive children first.
 //! @yah:assumes("untested claim baked into the handoff")           // repeatable; rendered as risks
 //! @yah:cleanup("deferred debt")    // repeatable
 //! @yah:depends_on(T02)             // repeatable
-//! @arch:see(architecture/doc.md)    // repeatable
+//! @arch:see(.yah/arch/authored/doc.md)    // repeatable
 ```
 
 ---

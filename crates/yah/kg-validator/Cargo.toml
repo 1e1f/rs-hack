@@ -1,0 +1,17 @@
+[package]
+name = "kg-validator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Architecture rule validator over the yah knowledge graph"
+publish = false
+
+[dependencies]
+kg = { path = "../kg" }
+rpc = { path = "../rpc" }
+kg-store = { path = "../kg-store" }
+kg-anno = { path = "../kg-anno" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"

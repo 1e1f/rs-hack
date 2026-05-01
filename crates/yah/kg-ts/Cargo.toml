@@ -1,0 +1,19 @@
+[package]
+name = "kg-ts"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "TypeScript / TSX language indexer for the yah knowledge graph"
+publish = false
+
+[dependencies]
+kg = { path = "../kg" }
+tree-sitter = "0.23"
+tree-sitter-typescript = "0.23"
+
+[dev-dependencies]
+kg-store = { path = "../kg-store" }
+rpc = { path = "../rpc" }
+tempfile = "3.0"

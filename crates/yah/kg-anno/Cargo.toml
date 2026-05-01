@@ -1,0 +1,28 @@
+[package]
+name = "kg-anno"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Annotation overlay (tags, flows, rules) on top of the yah knowledge graph"
+publish = false
+
+[features]
+default = ["apply"]
+# `apply` brings in the graph-mutating Pass-4 driver and the side
+# AnnotationIndex; turn it off when you only need the doc-string parser
+# (e.g. the wasm build for in-editor live diagnostics).
+apply = ["dep:kg-store"]
+
+[dependencies]
+kg = { path = "../kg" }
+rpc = { path = "../rpc" }
+kg-store = { path = "../kg-store", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+kg-rust = { path = "../kg-rust" }
+kg-ts = { path = "../kg-ts" }
+tempfile = "3"

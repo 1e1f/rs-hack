@@ -10,49 +10,88 @@
 # @yah:status(open)
 # @yah:phase(P3)
 # @yah:parent(R020)
-# @yah:next("Mechanical: yah-kg, yah-kg-store, yah-kg-rust, yah-kg-ts, yah-kg-anno, yah-kg-daemon → crates/")
+# @yah:next("Mechanical: kg, kg-store, kg-rust, kg-ts, kg-anno, kg-daemon → crates/")
 # @yah:next("yah-ui can stay top-level or move to packages/yah-ui")
 # @yah:next("Update Cargo.toml workspace.members + any path = entries")
 # @yah:next("Do this once before the codebase grows further (user's call)")
-
+#
+#
+# @yah:relay(R038, "Release pipeline: CLI + desktop + kg-daemon × N platforms via tag-triggered GitHub Releases")
+# @yah:assignee(agent:claude)
+# @yah:status(in-progress)
+# @arch:see(.yah/arch/authored/release-pipeline.md)
+#
+# @yah:ticket(R038-B1, "Fix stale -p yah-tauri reference in ci.yml (package renamed to desktop)")
+# @yah:assignee(agent:claude)
+# @yah:status(review)
+# @yah:phase(P1)
+# @yah:parent(R038)
+# @yah:next("Changed `cargo build -p yah-tauri` → `-p desktop` in ci.yml:54-55; verified with `cargo check -p desktop --locked`")
+# @arch:see(.yah/arch/authored/release-pipeline.md)
+#
+# @yah:ticket(R038-F2, "Hand-rolled release.yml: cli + kg-daemon + tauri-action jobs writing to one GitHub Release on v*.*.* tags")
+# @yah:status(open)
+# @yah:phase(P2)
+# @yah:parent(R038)
+# @yah:assumes("macOS bundle is signed + notarized; six APPLE_* repo secrets must exist before this ticket lands")
+# @yah:next("User: enroll in Apple Developer Program, create Developer ID Application cert, export .p12, generate app-specific password, set six APPLE_* GitHub secrets")
+# @yah:next("Workflow: cli-release matrix (linux/macos/windows), daemon-release musl static (x86_64+aarch64), desktop-release via tauri-action with APPLE_* env")
+# @yah:next("Fail fast on missing APPLE_* secrets in macOS leg — never silently ship unsigned")
+# @yah:next("All three jobs upload to the same release via softprops/action-gh-release using github.ref_name")
+# @arch:see(.yah/arch/authored/release-pipeline.md)
+#
+# @yah:ticket(R038-F3, "release-plz: conventional-commit-driven release PR + workspace version bump (lerna loop)")
+# @yah:status(open)
+# @yah:phase(P3)
+# @yah:parent(R038)
+# @arch:see(.yah/arch/authored/release-pipeline.md)
+#
+# @yah:ticket(R038-T4, "Polish parking lot: cargo-dist migration, Tauri updater, Homebrew tap, self-hosted Hetzner runner")
+# @yah:status(open)
+# @yah:phase(P4)
+# @yah:parent(R038)
+# @arch:see(.yah/arch/authored/release-pipeline.md)
+#
 [workspace]
 members = [
-    "yah",
-    "yah-kg",
-    "yah-kg-store",
-    "yah-kg-rust",
-    "yah-kg-ts",
-    "yah-kg-json-yaml",
-    "yah-kg-daemon",
-    "yah-kg-anno",
-    "yah-kg-anno-wasm",
-    "yah-kg-validator",
-    "yah-lsp",
-    "yah-rpc-ssh",
-    "yah-runner",
-    "app/tauri",
+    "app/yah/cli",
+    "app/yah/desktop",
+    "crates/yah/kg",
+    "crates/yah/kg-store",
+    "crates/yah/kg-rust",
+    "crates/yah/kg-ts",
+    "crates/yah/kg-json-yaml",
+    "crates/yah/kg-daemon",
+    "crates/yah/kg-anno",
+    "crates/yah/kg-anno-wasm",
+    "crates/yah/kg-validator",
+    "crates/yah/lsp",
+    "crates/yah/rpc",
+    "crates/yah/rpc-ssh",
+    "crates/yah/runner",
 ]
-# `app/tauri` requires libwebkit2gtk-4.1 on Linux; `yah-kg-anno-wasm` is a
-# `cdylib` only useful built for `wasm32-unknown-unknown` via wasm-pack.
+# `app/yah/desktop` requires libwebkit2gtk-4.1 on Linux; `crates/yah/kg-anno-wasm`
+# is a `cdylib` only useful built for `wasm32-unknown-unknown` via wasm-pack.
 # default-members keeps `cargo build --workspace` and `cargo test
 # --workspace` working on hosts without webkit and without forcing a wasm
 # toolchain on every contributor. Build the wasm crate explicitly with
-# `wasm-pack build yah-kg-anno-wasm` (or `cargo build -p yah-kg-anno-wasm
+# `wasm-pack build crates/yah/kg-anno-wasm` (or `cargo build -p kg-anno-wasm
 # --target wasm32-unknown-unknown`); build the Tauri app explicitly with
-# `cargo build -p yah-tauri`.
+# `cargo build -p desktop`.
 default-members = [
-    "yah",
-    "yah-kg",
-    "yah-kg-store",
-    "yah-kg-rust",
-    "yah-kg-ts",
-    "yah-kg-json-yaml",
-    "yah-kg-daemon",
-    "yah-kg-anno",
-    "yah-kg-validator",
-    "yah-lsp",
-    "yah-rpc-ssh",
-    "yah-runner",
+    "app/yah/cli",
+    "crates/yah/kg",
+    "crates/yah/kg-store",
+    "crates/yah/kg-rust",
+    "crates/yah/kg-ts",
+    "crates/yah/kg-json-yaml",
+    "crates/yah/kg-daemon",
+    "crates/yah/kg-anno",
+    "crates/yah/kg-validator",
+    "crates/yah/lsp",
+    "crates/yah/rpc",
+    "crates/yah/rpc-ssh",
+    "crates/yah/runner",
 ]
 resolver = "2"
 
@@ -65,7 +104,7 @@ repository = "https://github.com/1e1f/yah"
 
 [workspace.metadata.arch]
 
-# yah-kg-validator vocabulary v1. The validator does not currently consult
+# kg-validator vocabulary v1. The validator does not currently consult
 # this section at runtime — it's documentation for authors writing
 # `@yah:rule(...)` directives. Rule kinds outside this list still trigger
 # an "unknown rule kind" violation; tag namespaces outside `tag_namespaces`
@@ -78,7 +117,7 @@ max-depth        = "Annotated subtree must not nest deeper than N hops via Conta
 must-tag         = "Every non-synthetic node in the annotated subtree must carry — or inherit via a Contains ancestor — at least one tag in the named namespace."
 
 # Selector grammar: tag(name) | tag(ns:name) | ns(namespace) |
-# node(qualified::name) | kind(common::module). See yah-kg-validator/src/lib.rs.
+# node(qualified::name) | kind(common::module). See kg-validator/src/lib.rs.
 
 [workspace.metadata.arch.tag_namespaces]
 layer = "Logical layer the node belongs to (e.g. layer:kg, layer:kg_store, layer:cli)."

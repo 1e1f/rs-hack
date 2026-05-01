@@ -6,7 +6,7 @@
 //! @yah:verify("cargo test -p rs-hack-arch status — passes, new sharded + legacy + prefers-shards tests")
 //! @yah:verify("Smoke: HACK_WORKSPACE=<new> bun run hack-board/src/server.ts; check .yah/events/ contains per-relay files and that second run emits no new events")
 //! @yah:verify("Legacy .yah/events.jsonl was migrated to .yah/events.jsonl.legacy; this repo's real workspace did so successfully")
-//! @arch:see(architecture/multi-worktree-sync.md)
+//! @arch:see(.yah/arch/authored/multi-worktree-sync.md)
 
 /**
  * hack-board server
@@ -158,7 +158,7 @@ const RENAMED_SHARD = "_renamed";
 // board state; `.yah/events/*.jsonl` is a derivative audit history. One file
 // per relay (or per standalone ticket). Orphan events (todos, renames) live
 // in `_todos.jsonl` / `_renamed.jsonl`. See
-// architecture/multi-worktree-sync.md §2 for the full design.
+// .yah/arch/authored/multi-worktree-sync.md §2 for the full design.
 type EventType =
   | "scan" // first-in-shard = created; hash-changed vs tail = modified
   | "archived"

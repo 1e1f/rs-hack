@@ -1,0 +1,32 @@
+[package]
+name = "kg-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime composition of the yah knowledge-graph: store + watcher + event bus, exposing the arch.* surface as in-process Rust calls"
+publish = false
+
+[dependencies]
+kg = { path = "../kg" }
+rpc = { path = "../rpc" }
+kg-store = { path = "../kg-store" }
+kg-anno = { path = "../kg-anno" }
+kg-validator = { path = "../kg-validator" }
+notify = "8.2"
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
+thiserror = "1.0"
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+walkdir = "2.0"
+postcard = { version = "1.1", features = ["use-std"] }
+base64 = "0.22"
+
+[dev-dependencies]
+kg-rust = { path = "../kg-rust" }
+kg-ts = { path = "../kg-ts" }
+kg-json-yaml = { path = "../kg-json-yaml" }
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time", "test-util"] }

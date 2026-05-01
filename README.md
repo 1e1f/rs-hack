@@ -88,7 +88,7 @@ stream — only the runner crate (`yah-runner-ha` / `yah-runner-ho` /
 `yah-runner-pv`) differs.
 
 Full design lives in
-[architecture/yah-agent-runtime.md](architecture/yah-agent-runtime.md).
+[.yah/arch/authored/yah-agent-runtime.md](.yah/arch/authored/yah-agent-runtime.md).
 
 ## Installation
 
