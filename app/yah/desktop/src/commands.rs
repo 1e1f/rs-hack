@@ -106,12 +106,6 @@
 //! @yah:next("FileTree highlights selectedPath when it matches a file row but the current FilesView only sets selectedPath on click — files opened from arch.jumpToFile or KG-overlay won't auto-expand-and-reveal. Reveal-in-tree needs an effect that walks the path, expands each ancestor, and triggers loadDir() until the leaf row is rendered. Sub-ticket once useFile lands.")
 //! @yah:gotcha("dir.watch is recursive on the rig root. Big repos with active build outputs (target/, node_modules/) will spam file:event. Skip rules in the daemon's walker do NOT apply to the watcher — every modify event fires. If event spam shows up under big rigs, debounce the loadDir() call by parent path on the renderer side, or push a skip-rules flag into dir.watch on the daemon side.")
 //!
-//! @yah:ticket(R033-T8, "Monaco theme port: scriptorium + vellum-by-candlelight tokens")
-//! @yah:status(open)
-//! @yah:phase(P2)
-//! @yah:parent(R033)
-//! @arch:see(.yah/arch/authored/yah-files-tab.md)
-//!
 //! @yah:ticket(R033-F9, "KG-overlay extension: hover + CodeLens providers (vscode API)")
 //! @yah:assignee(agent:claude)
 //! @yah:status(open)

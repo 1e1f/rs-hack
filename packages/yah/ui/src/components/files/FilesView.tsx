@@ -10,6 +10,20 @@
 //! @yah:next("main.css link added to public/index.html — the file existed before this change (xterm extracts there too) but was never linked. Verify nothing else regressed by visiting the Terminal tab.")
 //! @yah:gotcha("After bun add monaco-editor, bun.lock and package.json are dirty in addition to the source changes. Pre-existing main.css generation in bun build is now exposed via the new <link> tag — if any xterm style was being patched programmatically that conflicts with main.css, the Terminal tab might shift visually.")
 //!
+//! @yah:ticket(R033-T8, "Monaco theme port: scriptorium + vellum-by-candlelight tokens")
+//! @yah:assignee(agent:claude)
+//! @yah:status(review)
+//! @yah:phase(P2)
+//! @yah:parent(R033)
+//! @arch:see(.yah/arch/authored/yah-files-tab.md)
+//! @yah:handoff("Monaco theme port landed. New file packages/yah/ui/src/components/files/theme.ts exports SCRIPTORIUM_THEME (light, base 'vs') and VELLUM_BY_CANDLELIGHT_THEME (dark, base 'vs-dark') keyed off the design tokens in styles/globals.css — hex literals (Monaco's theme JSON does not resolve CSS custom properties), names match the --color-* leaves so a future refactor is one grep. Token mapping is role-based rather than syntax-category-based: oxblood = keywords/control flow/tags (the loud verb), forest = strings/attribute values (the quoted noun), midnight = numbers/constants/namespaces/predefined (the cool literal), plum = functions/regexp (the named doer), brass = types/annotations/attribute names (the structural frame). Brass on light uses #8a5e1f rather than --color-brass (#b08438) for legibility on parchment; forest on dark uses #8eb88e rather than the dark-mode --color-forest (#6e9a6e) for contrast on candlelit ink. Token list covers the basic-languages tokenizer outputs we hit today: rust + typescript (keyword/string/number/comment/operator/delimiter/type/identifier/function/variable/annotation), json (key.json/string.value.json), html-ish (tag/attribute.name/attribute.value). Workbench colors override the editor.* keys that visibly drift from the parchment chrome — selectionBackground/lineHighlightBackground/cursor/indent guides/scrollbar slider — built with brass-tinted alpha overlays so selection feels heraldic rather than VS Code blue. registerYahThemes(monaco) defines both up front (cheap, idempotent in monaco's own dedupe). themeNameFor(mode) returns the right id for the active theme. FilesView now uses a useEditorTheme() hook (mirrors Splash/GraphPane/AuthoredMmdPane MutationObserver pattern) tracking <html data-theme=...>; a separate effect calls monaco.editor.setTheme(themeNameFor(mode)) on flip so the dark/light toggle re-themes Monaco without remounting. Dropped the YAH_PARCHMENT_THEME placeholder. Build: cargo check -p desktop green; bun run typecheck green; bun build:js 2913 modules / 8.68MB JS / 0.31MB CSS.")
+//! @yah:next("Theme tweaks land here as token deltas — adjust the SCRIPTORIUM/VELLUM_BY_CANDLELIGHT palette objects in theme.ts. The role-to-color map is the docstring at the top; if the role assignments themselves want to move, change makeRules() once and both themes track.")
+//! @yah:verify("cd packages/yah/ui && bun run typecheck")
+//! @yah:verify("cd packages/yah/ui && bun run build")
+//! @yah:verify("cargo check -p desktop")
+//! @yah:gotcha("monaco.editor.setTheme is global — Monaco only knows about one editor's theme at a time. Today FilesView mounts a single editor so this is fine; if a second Monaco instance ever lands (e.g. diff view, secondary side panel) the theme flip will affect both.")
+//! @yah:gotcha("The brass token uses different hex on light (#8a5e1f) vs the documented --color-brass (#b08438). Reason: --color-brass at the document level reads fine against the page background but not against the editor.background vellum at small monospace sizes. If you change globals.css's brass, also re-eyeball the editor brass — they intentionally drift.")
+//!
 //! @yah:ticket(R033-T7, "useFile hook: file.read + Monaco model swap on URI change")
 //! @yah:assignee(agent:claude)
 //! @yah:status(review)
@@ -29,37 +43,29 @@
 import { useEffect, useRef, useState } from "react";
 import { Splash } from "../shared/Splash";
 import { FileTree } from "./FileTree";
+import { registerYahThemes, themeNameFor } from "./theme";
 import { languageForPath, useFile } from "./useFile";
 import type * as Monaco from "monaco-editor";
 
-/* yah's parchment theme on Monaco. Background + token colors are pulled
-   from the design tokens in globals.css (oklch literals here because
-   Monaco's theme JSON does not resolve CSS custom properties). The
-   proper port — full token table tied to scriptorium /
-   vellum-by-candlelight — lands in R033-T8. This is the "good enough"
-   placeholder so the editor doesn't look like default VS Code dark in
-   the parchment chrome. */
-const YAH_PARCHMENT_THEME: Monaco.editor.IStandaloneThemeData = {
-  base: "vs",
-  inherit: true,
-  rules: [
-    { token: "comment", foreground: "8a7256", fontStyle: "italic" },
-    { token: "keyword", foreground: "7a3d2a" },
-    { token: "string", foreground: "5e4a25" },
-    { token: "number", foreground: "5e4a25" },
-    { token: "type", foreground: "8a4a1f" },
-  ],
-  colors: {
-    "editor.background": "#f4ecd6",
-    "editor.foreground": "#3a2f1d",
-    "editorLineNumber.foreground": "#a89372",
-    "editorLineNumber.activeForeground": "#7a6240",
-    "editor.selectionBackground": "#d4c39a",
-    "editor.lineHighlightBackground": "#ece2c4",
-    "editorCursor.foreground": "#7a3d2a",
-    "editorIndentGuide.background1": "#d8c9a8",
-  },
-};
+/* Track <html data-theme="..."> so a dark/light flip re-themes the
+   editor without remounting Monaco. Mirrors the same pattern used by
+   Splash, GraphPane, AuthoredMmdPane, AuthoredMdPane. */
+function useEditorTheme(): "light" | "dark" {
+  const get = (): "light" | "dark" => {
+    if (typeof document === "undefined") return "light";
+    return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  };
+  const [mode, setMode] = useState<"light" | "dark">(get);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setMode(get()));
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, []);
+  return mode;
+}
 
 const EMPTY_PLACEHOLDER = `// No file selected.
 //
@@ -119,6 +125,7 @@ export function FilesView({ rigId }: FilesViewProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const file = useFile(rigId, selectedPath);
+  const themeMode = useEditorTheme();
 
   useEffect(() => {
     let disposed = false;
@@ -131,11 +138,11 @@ export function FilesView({ rigId }: FilesViewProps) {
         const monaco = await import("monaco-editor");
         if (disposed || !containerRef.current) return;
 
-        monaco.editor.defineTheme("yah-parchment", YAH_PARCHMENT_THEME);
+        registerYahThemes(monaco);
         const editor = monaco.editor.create(containerRef.current, {
           value: EMPTY_PLACEHOLDER,
           language: "plaintext",
-          theme: "yah-parchment",
+          theme: themeNameFor(themeMode),
           readOnly: true,
           automaticLayout: true,
           fontSize: 13,
@@ -165,6 +172,15 @@ export function FilesView({ rigId }: FilesViewProps) {
       modelCacheRef.current.clear();
     };
   }, []);
+
+  /* React to dark/light flips on <html data-theme=...>. Monaco's
+     setTheme is a global (Monaco only knows about one editor's theme at
+     a time) — fine here because we mount one editor. */
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+    monaco.editor.setTheme(themeNameFor(themeMode));
+  }, [themeMode, ready]);
 
   /* Wipe per-path model cache on rig switch — paths under one rig don't
      necessarily exist (or have the same content) under another. */

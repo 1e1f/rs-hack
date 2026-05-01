@@ -1,0 +1,288 @@
+name: release
+
+# Tag-driven release pipeline.
+#
+# Three jobs each upload artifacts to one GitHub Release keyed on the pushed
+# tag. softprops/action-gh-release@v2 and tauri-apps/tauri-action@v0 both
+# create-or-reuse a release by tag_name, so concurrent jobs converge on a
+# single release rather than racing to clobber each other.
+#
+# Spec: .yah/arch/authored/release-pipeline.md
+# Ticket: R038-F2
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  # Manual trigger for dry-running the workflow against a hand-picked tag
+  # without having to push a real `v*.*.*`.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.0.1-test). Must already exist on the repo.'
+        required: true
+        type: string
+
+# Releases need contents:write to create-or-update the GitHub Release object
+# and upload assets. No other permissions are needed.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 — cli-release
+  #
+  # Builds the four `yah` binaries (yah, yahh, yahb, yaha) on each host OS and
+  # ships one archive per OS.
+  #
+  # macOS choice: build BOTH x86_64 and aarch64 targets and `lipo` them into a
+  # universal binary inside one tarball. Two-tarball alternative was rejected:
+  # one universal artifact keeps install instructions ("download the macOS
+  # tarball") simple and matches what `tauri-action` produces for the desktop
+  # bundle on the same release.
+  #
+  # Version naming: github.ref_name is the literal tag (e.g. `v0.7.0`). We
+  # keep the leading `v` in artifact names so they sort lexically next to the
+  # GitHub Release tag and so dispatched runs against `v0.0.1-test` produce
+  # consistent names. The Tauri bundle naming is controlled by tauri.conf.json
+  # and is independent.
+  # ---------------------------------------------------------------------------
+  cli-release:
+    name: cli / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: universal-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS targets
+        if: matrix.os == 'macos-latest'
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (Linux/Windows)
+        if: matrix.os != 'macos-latest'
+        run: cargo build --release -p yah --locked
+
+      - name: Build (macOS x86_64 + aarch64)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo build --release -p yah --locked --target x86_64-apple-darwin
+          cargo build --release -p yah --locked --target aarch64-apple-darwin
+
+      - name: Lipo macOS binaries into universal
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          for bin in yah yahh yahb yaha; do
+            lipo -create \
+              "target/x86_64-apple-darwin/release/$bin" \
+              "target/aarch64-apple-darwin/release/$bin" \
+              -output "target/universal-apple-darwin/release/$bin"
+          done
+
+      - name: Package archive (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          STAGE="yah-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$STAGE"
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            SRC="target/universal-apple-darwin/release"
+          else
+            SRC="target/release"
+          fi
+          for bin in yah yahh yahb yaha; do
+            cp "$SRC/$bin" "$STAGE/"
+          done
+          tar -czf "$STAGE.tar.gz" "$STAGE"
+          ls -la "$STAGE.tar.gz"
+
+      - name: Package archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $stage = "yah-${{ github.ref_name }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          foreach ($bin in @('yah.exe','yahh.exe','yahb.exe','yaha.exe')) {
+            Copy-Item "target/release/$bin" "$stage/"
+          }
+          Compress-Archive -Path "$stage/*" -DestinationPath "$stage.zip"
+          Get-ChildItem "$stage.zip"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: yah-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+          fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — daemon-release
+  #
+  # Static musl builds of `kg-daemon` for x86_64 + aarch64. Static binaries
+  # land on any Linux rig (Hetzner, etc.) without libc concerns. Cross-compile
+  # via `cross` so we don't have to babysit an aarch64-musl toolchain on the
+  # GH Linux runner.
+  # ---------------------------------------------------------------------------
+  daemon-release:
+    name: daemon / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: daemon-${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Build kg-daemon (static musl)
+        run: cross build --release -p kg-daemon --locked --target ${{ matrix.target }}
+
+      - name: Package archive
+        shell: bash
+        run: |
+          STAGE="kg-daemon-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/kg-daemon" "$STAGE/"
+          tar -czf "$STAGE.tar.gz" "$STAGE"
+          ls -la "$STAGE.tar.gz"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: kg-daemon-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # Job 3 — desktop-release
+  #
+  # Tauri 2 bundles via `tauri-apps/tauri-action@v0`. The action drives
+  # `tauri build`, packages platform-native installers (`.dmg`, `.deb`,
+  # `.AppImage`), and uploads them to the same release as the other jobs by
+  # `tagName`.
+  #
+  # macOS leg is signed + notarized via the six APPLE_* secrets. We hard-fail
+  # the macOS leg if any secret is missing so unsigned bundles never ship.
+  # Linux leg ignores the APPLE_* env entirely.
+  #
+  # Windows is deferred per the arch doc (release-pipeline.md non-goals).
+  # ---------------------------------------------------------------------------
+  desktop-release:
+    name: desktop / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Match the Linux GUI dep block from ci.yml's tauri-build job so the
+      # bundle step can find webkit, gtk, etc. Keep this block in sync with
+      # .github/workflows/ci.yml:39-49 if either grows.
+      - name: Install Linux GUI deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend deps
+        working-directory: packages/yah/ui
+        run: bun install --frozen-lockfile || bun install
+
+      # Fail-fast guard: tauri-action will silently produce an unsigned
+      # bundle if APPLE_* env vars are missing (it warns but doesn't fail).
+      # Refuse to ship unsigned. Runs only on the macOS leg.
+      - name: Verify Apple signing secrets present
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          missing=()
+          [ -z "$APPLE_CERTIFICATE" ] && missing+=("APPLE_CERTIFICATE")
+          [ -z "$APPLE_CERTIFICATE_PASSWORD" ] && missing+=("APPLE_CERTIFICATE_PASSWORD")
+          [ -z "$APPLE_SIGNING_IDENTITY" ] && missing+=("APPLE_SIGNING_IDENTITY")
+          [ -z "$APPLE_ID" ] && missing+=("APPLE_ID")
+          [ -z "$APPLE_PASSWORD" ] && missing+=("APPLE_PASSWORD")
+          [ -z "$APPLE_TEAM_ID" ] && missing+=("APPLE_TEAM_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing Apple signing secret(s): ${missing[*]}"
+            echo "::error::Set all six APPLE_* secrets under Settings → Secrets and variables → Actions."
+            echo "::error::See .yah/arch/authored/release-pipeline.md for the secret table."
+            exit 1
+          fi
+          echo "All six APPLE_* secrets present."
+
+      - name: Build + bundle desktop app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Apple signing + notarization. tauri-action picks these up
+          # directly from the env (they are not action inputs). The
+          # preceding step guarantees they are non-empty on macOS.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # GITHUB_TOKEN is what tauri-action uses to attach the bundle
+          # to the release identified by tagName below.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app/yah/desktop
+          # Same tag the other two jobs upload to → one merged release.
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseDraft: false
+          prerelease: false

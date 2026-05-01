@@ -23,6 +23,7 @@
 use crate::spans::{extract_json_spans, extract_toml_spans, extract_yaml_spans};
 use crate::visit::{toml_to_json, yaml_to_json, Walker, YamlExtras};
 use std::path::Path;
+use kg::ids::NodeId;
 use kg::indexer::{IndexError, IndexSink, LanguageIndexer};
 use kg::kind::Lang;
 
@@ -170,15 +171,58 @@ impl LanguageIndexer for TomlIndexer {
         // tree above is consumed via `toml::Value` because the walker
         // already speaks `serde_json::Value`).
         let spans = extract_toml_spans(src);
-        let mut walker = Walker::with_spans(
-            Lang::Toml,
-            &path_str,
-            src,
-            sink,
-            YamlExtras::default(),
-            Box::new(spans),
-        );
-        walker.run(&json);
+        {
+            let mut walker = Walker::with_spans(
+                Lang::Toml,
+                &path_str,
+                src,
+                sink,
+                YamlExtras::default(),
+                Box::new(spans),
+            );
+            walker.run(&json);
+        }
+        // TOML's value walker is comment-blind, but `@yah:` annotations
+        // live in leading `#` comments (Cargo.toml header block). Lift
+        // the leading comment run onto the File node as `doc` so kg-anno
+        // apply_pass sees it on the same path RustIndexer's `//!` does.
+        if let Some(doc) = leading_hash_doc(src) {
+            let file_id = NodeId::compute(Lang::Toml, &path_str, &path_str);
+            sink.push_doc(file_id, &doc);
+        }
         Ok(())
     }
+}
+
+/// Strip `#` markers from the file's leading comment run and return the
+/// inner text, preserving blank lines so kg-anno's parser sees the same
+/// block boundaries the source author wrote. Returns `None` once the
+/// first non-comment, non-blank line is reached if no comments preceded
+/// it.
+fn leading_hash_doc(src: &str) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut saw_comment = false;
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix('#') {
+            saw_comment = true;
+            // Strip one optional space after `#` to mirror the
+            // shape kg-anno's parser sees from `///`/`//!` doc.
+            let body = rest.strip_prefix(' ').unwrap_or(rest);
+            lines.push(body.to_string());
+            continue;
+        }
+        break;
+    }
+    if !saw_comment {
+        return None;
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    Some(lines.join("\n"))
 }

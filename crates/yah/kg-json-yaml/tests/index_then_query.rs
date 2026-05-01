@@ -788,3 +788,58 @@ fn malformed_toml_returns_parse_error() {
         other => panic!("expected Parse error, got {other:?}"),
     }
 }
+
+#[test]
+fn cargo_toml_leading_hash_comments_attach_to_file_doc() {
+    // `@yah:` annotations live in `#`-prefixed comments at the top of
+    // Cargo.toml; the value walker is comment-blind by design, so the
+    // indexer lifts the leading comment run onto the File node as
+    // `doc` — same path RustIndexer's `//!` doc takes — so kg-anno
+    // apply_pass can parse work-item annotations from it.
+    let src = "# @yah:relay(R042, \"Demo relay\")\n\
+               # @yah:status(open)\n\
+               #\n\
+               # @yah:ticket(R042-T1, \"Demo ticket\")\n\
+               # @yah:parent(R042)\n\
+               \n\
+               [package]\n\
+               name = \"demo\"\n\
+               version = \"0.1.0\"\n";
+    let store = build_toml("demo/Cargo.toml", src);
+    let file_id = store
+        .lookup("demo/Cargo.toml", None)
+        .into_iter()
+        .find(|id| {
+            store
+                .node_ref(*id)
+                .map(|n| matches!(n.kind, NodeKind::Common(CommonKind::File)))
+                .unwrap_or(false)
+        })
+        .expect("file node");
+    let full = store.node_full(file_id).unwrap();
+    let doc = full.doc.expect("file doc carries leading comment run");
+    assert!(doc.contains("@yah:relay(R042"), "doc should carry the relay header: {doc:?}");
+    assert!(doc.contains("@yah:ticket(R042-T1"), "doc should carry the ticket header: {doc:?}");
+    // Blank-line block boundary survives so kg-anno's parser sees two
+    // separate work-item blocks.
+    assert!(doc.contains("\n\n"), "blank line between blocks preserved: {doc:?}");
+    // `# ` prefix stripped to mirror `///`/`//!` doc shape.
+    assert!(!doc.contains("# @yah:"), "leading `# ` markers stripped: {doc:?}");
+}
+
+#[test]
+fn toml_without_leading_comments_leaves_file_doc_unset() {
+    let store = build_toml("demo/Cargo.toml", CARGO_TOML);
+    let file_id = store
+        .lookup("demo/Cargo.toml", None)
+        .into_iter()
+        .find(|id| {
+            store
+                .node_ref(*id)
+                .map(|n| matches!(n.kind, NodeKind::Common(CommonKind::File)))
+                .unwrap_or(false)
+        })
+        .expect("file node");
+    let full = store.node_full(file_id).unwrap();
+    assert!(full.doc.is_none(), "no leading `#` comments → no file doc");
+}
