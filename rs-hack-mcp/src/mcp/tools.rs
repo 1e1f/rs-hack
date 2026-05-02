@@ -33,8 +33,8 @@ impl ToolRegistry {
                             "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"},
                             "node_type": {
                                 "type": "string",
-                                "enum": ["struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref", "struct", "enum", "function", "impl-method", "trait", "const", "static", "type-alias", "mod"],
-                                "description": "Type of AST node to inspect. Omit to search ALL types with grouped output."
+                                "enum": ["struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref", "struct", "enum", "function", "impl-method", "trait", "trait-impl", "const", "static", "type-alias", "mod"],
+                                "description": "Type of AST node to inspect. Omit to search ALL types with grouped output. v0.5.5: 'trait-impl' lists implementors of a trait (filter via --name)."
                             },
                             "name": {"type": "string", "description": "Optional name filter (e.g., \"Shadow\", \"Operator::Error\", \"unwrap\", \"View::Rectangle\"). v0.5.3: Use '*::StructName' wildcard to match all qualified paths."},
                             "variant": {"type": "string", "description": "Filter enum variants by name (only valid with --node-type enum)"},
@@ -42,7 +42,8 @@ impl ToolRegistry {
                             "field_name": {"type": "string", "description": "Find all occurrences of a field across struct definitions, enum variants, and struct literals"},
                             "include_comments": {"type": "boolean", "default": true, "description": "Include preceding comments (doc and regular) in output"},
                             "format": {"type": "string", "enum": ["snippets", "locations", "json"], "default": "snippets"},
-                            "limit": {"type": "integer", "description": "Limit number of results (like 'head -N')"}
+                            "limit": {"type": "integer", "description": "Limit number of results (like 'head -N')"},
+                            "context": {"type": "integer", "description": "v0.5.5: prepend N raw lines before each snippet match, like 'grep -B N'"}
                         },
                         "required": ["paths"]
                     }),
@@ -220,6 +221,69 @@ impl ToolRegistry {
                     }),
                 },
 
+                // ============================================================
+                // DISCOVERY COMMANDS (5) - v0.5.5
+                // Read-only summary/audit views over the AST. Each shells out
+                // to the matching CLI subcommand.
+                // ============================================================
+                Tool {
+                    name: "impls",
+                    description: "List trait implementors (one row per impl block). Equivalent to `find --node-type trait-impl --name <Trait>` but with focused output.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "trait": {"type": "string", "description": "Trait name to find implementors for (e.g., \"HistoryCell\")"},
+                            "paths": {"type": "string", "description": "File path or glob pattern (e.g., \"src/**/*.rs\")"}
+                        },
+                        "required": ["trait", "paths"]
+                    }),
+                },
+                Tool {
+                    name: "match_audit",
+                    description: "Per-`match`-site missing-variant report for an enum. A `match` is treated as 'for enum X' iff at least one arm uses `X::Variant` syntax; wildcard arms count as covering. Pure syntactic — no typecheck.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "enum": {"type": "string", "description": "Enum name to audit (e.g., \"Status\")"},
+                            "paths": {"type": "string", "description": "File path or glob pattern; must include the enum's defining file"}
+                        },
+                        "required": ["enum", "paths"]
+                    }),
+                },
+                Tool {
+                    name: "doc_coverage",
+                    description: "Count missing-doc items across the scanned files; lists top offenders. With fields=true also descends into struct fields, enum variants, and impl/trait methods.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string", "description": "File path or glob pattern"},
+                            "fields": {"type": "boolean", "default": false, "description": "Also report missing docs on struct fields, enum variants, impl/trait methods"}
+                        },
+                        "required": ["paths"]
+                    }),
+                },
+                Tool {
+                    name: "summary",
+                    description: "Single-file inventory: public items, type counts (structs/enums/aliases), function names, public re-exports, module-level doc.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Single .rs file to summarize"}
+                        },
+                        "required": ["path"]
+                    }),
+                },
+                Tool {
+                    name: "neighbors",
+                    description: "Pure-filesystem neighbor lookup for a path: siblings (same dir), twin dirs (e.g. `tui` → `tui2`), and matching test files. No AST parsing.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "File path to find neighbors for"}
+                        },
+                        "required": ["path"]
+                    }),
+                },
             ],
         }
     }
@@ -254,7 +318,10 @@ impl ToolRegistry {
 
             // If operation completed and apply was false, add reminder
             // (skip for read-only tools that don't have an apply parameter)
-            let is_read_only = name == "find" || name == "history";
+            let is_read_only = matches!(
+                name,
+                "find" | "history" | "impls" | "match_audit" | "doc_coverage" | "summary" | "neighbors"
+            );
             if !is_read_only && !self.get_bool(&arguments, "apply") && !result.is_empty() {
                 Ok(format!("{}\n\n💡 This was a DRY RUN. Use apply=true to make actual changes.", result))
             } else {
@@ -299,7 +366,7 @@ impl ToolRegistry {
             content_filter: str_arg("content_filter"),
             field_name: str_arg("field_name"),
             include_comments,
-            context: None,
+            context: arguments.get("context").and_then(|v| v.as_u64()).map(|n| n as usize),
         };
 
         let result = run(&args)?;
@@ -497,7 +564,7 @@ impl ToolRegistry {
                 match value {
                     Value::Bool(true) => {
                         // Handle boolean true values as flags
-                        if key == "apply" || key == "literal_only" || key == "summary" || key == "force" || key == "auto_detect" {
+                        if key == "apply" || key == "literal_only" || key == "summary" || key == "force" || key == "auto_detect" || key == "fields" {
                             args.push(flag);
                         }
                     }

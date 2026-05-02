@@ -31,7 +31,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # rs-hack lib: in-process tool dispatch (find, execute) without shelling out
-rs-hack = { path = "../rs-hack", version = "0.5.4" }
+rs-hack = { path = "../rs-hack", version = "0.5.5" }
 
 [dev-dependencies]
 tokio-test = "0.4"

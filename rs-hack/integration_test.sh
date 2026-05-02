@@ -1,5 +1,5 @@
 #!/bin/bash
-# Integration test for rs-hack v0.5.0
+# Integration test for rs-hack v0.5.5
 # Tests all operations + state management + advanced features + transform/inspect + rename + path resolution + discovery mode + variant filtering
 
 set -e
@@ -15,10 +15,11 @@ BINARY="$PROJECT_DIR/target/debug/rs-hack"
 # Sample input file is in the rs-hack subdirectory
 INPUT="$SCRIPT_DIR/examples/sample.rs"
 TEMP_DIR="$PROJECT_DIR/target/test-output"
-STATE_DIR="$TEMP_DIR/.rs-hack"  # State in test output directory
+STATE_BASE="$TEMP_DIR/state"     # The `.hack/` base; the binary appends `rs/`
+STATE_DIR="$STATE_BASE/rs"       # Actual state location
 
 # Export environment variable for all commands
-export RS_HACK_STATE_DIR="$STATE_DIR"
+export HACK_STATE_DIR="$STATE_BASE"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -43,7 +44,7 @@ cd "$PROJECT_DIR" && ~/.cargo/bin/cargo build 2>&1 | grep -v "warning:" || true
 
 echo ""
 echo "======================================"
-echo "   rs-hack v0.5.3 Integration Tests  "
+echo "   rs-hack v0.5.5 Integration Tests  "
 echo "======================================"
 echo ""
 
@@ -387,7 +388,7 @@ run_test "diff-output-enum-variant" \
 section "STATE MANAGEMENT & REVERT"
 # ============================================================================
 
-# Test 18: State tracking (using RS_HACK_STATE_DIR environment variable)
+# Test 18: State tracking (using HACK_STATE_DIR environment variable)
 run_test "state-tracking" \
     "$BINARY add-struct-field --paths $TEMP_DIR/test.rs --struct-name User --field 'tracked_field: bool' --apply" \
     "[ -d $STATE_DIR ] && [ -f $STATE_DIR/runs.json ]" \
@@ -940,7 +941,7 @@ run_test "remove-doc-comment" \
     "! grep -q '///' $TEMP_DIR/doc_test.rs"
 
 # ============================================================================
-section "STRUCT LITERAL BASE OPERATIONS (NEW v0.5.4)"
+section "STRUCT LITERAL BASE OPERATIONS (NEW v0.5.5)"
 # ============================================================================
 
 # Test --default-rest with multiline struct literal
@@ -1027,6 +1028,54 @@ run_test "base-default-shorthand" \
     "true"
 
 # ============================================================================
+section "DISCOVERY COMMANDS (NEW v0.5.5)"
+# ============================================================================
+
+# Test: find --context N prepends raw lines before each match
+run_test "find-context-flag" \
+    "$BINARY find --paths $INPUT --node-type struct --name User --context 2 > $TEMP_DIR/context_out.txt" \
+    "grep -qE '^[0-9]+: ' $TEMP_DIR/context_out.txt && grep -q 'pub struct User' $TEMP_DIR/context_out.txt" \
+    "true"
+
+# Test: impls --trait lists implementors
+# Use the rs-hack source itself as the scan target — guaranteed Visit impls.
+run_test "impls-discovery" \
+    "$BINARY impls --trait Visit --paths $PROJECT_DIR/rs-hack/src > $TEMP_DIR/impls_out.txt" \
+    "grep -q 'Trait Visit implemented by:' $TEMP_DIR/impls_out.txt && grep -q '\\.rs:[0-9]\\+' $TEMP_DIR/impls_out.txt" \
+    "true"
+
+# Test: trait-impl is also reachable via find --node-type
+run_test "find-trait-impl-node-type" \
+    "$BINARY find --paths $PROJECT_DIR/rs-hack/src --node-type trait-impl --name Visit > $TEMP_DIR/find_trait_impl_out.txt" \
+    "grep -q 'Visit for' $TEMP_DIR/find_trait_impl_out.txt" \
+    "true"
+
+# Test: match-audit reports per-site coverage
+run_test "match-audit-complete" \
+    "$BINARY match-audit --enum Status --paths $INPUT > $TEMP_DIR/match_audit_out.txt" \
+    "grep -q 'Match audit for enum Status:' $TEMP_DIR/match_audit_out.txt && grep -q 'complete' $TEMP_DIR/match_audit_out.txt" \
+    "true"
+
+# Test: doc-coverage reports missing-doc counts and offenders
+run_test "doc-coverage-report" \
+    "$BINARY doc-coverage --paths $INPUT > $TEMP_DIR/doc_coverage_out.txt" \
+    "grep -q 'Missing docs (items):' $TEMP_DIR/doc_coverage_out.txt && grep -q 'Top offenders:' $TEMP_DIR/doc_coverage_out.txt" \
+    "true"
+
+# Test: summary prints module inventory for one file
+run_test "summary-module-inventory" \
+    "$BINARY summary --path $INPUT > $TEMP_DIR/summary_out.txt" \
+    "grep -q 'Module: ' $TEMP_DIR/summary_out.txt && grep -q 'Public items:' $TEMP_DIR/summary_out.txt && grep -q 'Types:' $TEMP_DIR/summary_out.txt" \
+    "true"
+
+# Test: neighbors reports siblings/twin-dirs/tests for a file
+# Use the rs-hack source — sample.rs has no siblings in examples/.
+run_test "neighbors-siblings" \
+    "$BINARY neighbors --path $PROJECT_DIR/rs-hack/src/main.rs > $TEMP_DIR/neighbors_out.txt" \
+    "grep -q 'Neighbors for ' $TEMP_DIR/neighbors_out.txt && grep -q 'Siblings:' $TEMP_DIR/neighbors_out.txt && grep -q 'editor.rs' $TEMP_DIR/neighbors_out.txt" \
+    "true"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 
@@ -1063,9 +1112,10 @@ if [ $FAILED -eq 0 ]; then
     echo "  ✅ 2 YAML batch operations tests (yaml, json-backwards-compat) ⭐ NEW Sprint 3"
     echo "  ✅ 7 Find discovery & variant filtering (all-types, variant-flag, ::, wildcard, hints, canonical, grouped) ⭐ NEW v0.5.0"
     echo "  ✅ 3 Doc comment operations (add, update, remove) ⭐ NEW"
-    echo "  ✅ 5 Struct literal base operations (multiline, skip-existing, custom-base, single-line, shorthand) ⭐ NEW v0.5.4"
+    echo "  ✅ 5 Struct literal base operations (multiline, skip-existing, custom-base, single-line, shorthand) ⭐ NEW v0.5.5"
+    echo "  ✅ 7 Discovery commands (find --context, impls, trait-impl, match-audit, doc-coverage, summary, neighbors) ⭐ NEW v0.5.5"
     echo ""
-    printf "Total: %b66 tests%b\n" "$BLUE" "$NC"
+    printf "Total: %b73 tests%b\n" "$BLUE" "$NC"
 
     # STATE AUDIT
     section "STATE AUDIT"
@@ -1077,7 +1127,7 @@ if [ $FAILED -eq 0 ]; then
         echo "  cat $STATE_DIR/runs.json"
         echo ""
         echo "  # View history with rs-hack"
-        echo "  RS_HACK_STATE_DIR=$STATE_DIR cargo run --quiet -- history"
+        echo "  HACK_STATE_DIR=$STATE_BASE cargo run --quiet -- history"
         echo ""
         echo "  # List backup files"
         echo "  ls -la $STATE_DIR/*/"
