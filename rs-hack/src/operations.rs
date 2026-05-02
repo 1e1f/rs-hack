@@ -1,6 +1,3 @@
-//! @arch:layer(core)
-//! @arch:role(refactor)
-//!
 //! Data types for all refactoring operations: add, remove, rename,
 //! update, transform, and batch. Defines EditMode, BackupNode,
 //! and the operation result types.
@@ -73,6 +70,38 @@ pub enum Operation {
     AddCallArg(AddCallArgOp),
     UpdateCallArg(UpdateCallArgOp),
     RemoveCallArg(RemoveCallArgOp),
+}
+
+impl Operation {
+    /// Stable string identifier for this operation, used in run metadata
+    /// and for telemetry. Matches the variant name.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Operation::AddStructField(_) => "AddStructField",
+            Operation::UpdateStructField(_) => "UpdateStructField",
+            Operation::RemoveStructField(_) => "RemoveStructField",
+            Operation::AddStructLiteralField(_) => "AddStructLiteralField",
+            Operation::AddEnumVariant(_) => "AddEnumVariant",
+            Operation::UpdateEnumVariant(_) => "UpdateEnumVariant",
+            Operation::RemoveEnumVariant(_) => "RemoveEnumVariant",
+            Operation::RenameEnumVariant(_) => "RenameEnumVariant",
+            Operation::AddMatchArm(_) => "AddMatchArm",
+            Operation::UpdateMatchArm(_) => "UpdateMatchArm",
+            Operation::RemoveMatchArm(_) => "RemoveMatchArm",
+            Operation::AddImplMethod(_) => "AddImplMethod",
+            Operation::AddUseStatement(_) => "AddUseStatement",
+            Operation::AddDerive(_) => "AddDerive",
+            Operation::Transform(_) => "Transform",
+            Operation::RenameFunction(_) => "RenameFunction",
+            Operation::AddDocComment(_) => "AddDocComment",
+            Operation::UpdateDocComment(_) => "UpdateDocComment",
+            Operation::RemoveDocComment(_) => "RemoveDocComment",
+            Operation::SetStructLiteralBase(_) => "SetStructLiteralBase",
+            Operation::AddCallArg(_) => "AddCallArg",
+            Operation::UpdateCallArg(_) => "UpdateCallArg",
+            Operation::RemoveCallArg(_) => "RemoveCallArg",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

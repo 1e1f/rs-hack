@@ -1,6 +1,3 @@
-//! @arch:layer(core)
-//! @arch:role(diff)
-//!
 //! Unified diff generation and display for showing changes
 //! before applying them (dry-run mode).
 

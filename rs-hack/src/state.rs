@@ -1,9 +1,5 @@
-//! @arch:layer(core)
-//! @arch:role(state)
-//! @arch:note(Run IDs, backup nodes, and revert history enable safe undo)
-//!
 //! State management: tracks run history with unique IDs, stores
-//! backup nodes for revert, and manages the .rs-hack state directory.
+//! backup nodes for revert, and manages the .hack/rs state directory.
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc, Duration};
@@ -30,26 +26,25 @@ pub fn generate_run_id() -> String {
 
 /// Get the state directory path
 ///
+/// All paths land under a `.hack/` namespace with `rs/` reserved for this
+/// tool, leaving room for siblings (`.hack/ts/`, `.hack/shared/`, ...).
+///
 /// Priority order:
-/// 1. Environment variable RS_HACK_STATE_DIR (highest priority)
-/// 2. --local-state flag (uses ./.rs-hack)
-/// 3. Global default (uses system data directory)
+/// 1. Environment variable HACK_STATE_DIR (treated as the `.hack/` base; `rs` is appended)
+/// 2. --local-state flag (uses ./.hack/rs)
+/// 3. Global default (system data directory under com.hack.hack/rs)
 pub fn get_state_dir(local: bool) -> Result<PathBuf> {
-    // Priority 1: Check environment variable
-    if let Ok(custom_dir) = std::env::var("RS_HACK_STATE_DIR") {
-        return Ok(PathBuf::from(custom_dir));
+    if let Ok(base) = std::env::var("HACK_STATE_DIR") {
+        return Ok(PathBuf::from(base).join("rs"));
     }
 
-    // Priority 2: Local state flag
     if local {
-        // Use project-local .rs-hack directory
         let current_dir = std::env::current_dir()?;
-        Ok(current_dir.join(".rs-hack"))
+        Ok(current_dir.join(".hack").join("rs"))
     } else {
-        // Priority 3: Use user's home directory (default)
-        let proj_dirs = ProjectDirs::from("com", "rs-hack", "rs-hack")
+        let proj_dirs = ProjectDirs::from("com", "hack", "hack")
             .context("Could not determine project directories")?;
-        Ok(proj_dirs.data_dir().to_path_buf())
+        Ok(proj_dirs.data_dir().join("rs"))
     }
 }
 
@@ -109,7 +104,7 @@ impl RunsIndex {
         let index: RunsIndex = serde_json::from_str(&content)
             .map_err(|e| {
                 if e.to_string().contains("missing field") {
-                    eprintln!("⚠️  Incompatible state format detected from previous rs-hack version.");
+                    eprintln!("⚠️  Incompatible state format detected from previous hack version.");
                     eprintln!("   The state directory will be reset.");
                     eprintln!("   Location: {}", state_dir.display());
                 }

@@ -1,33 +1,15 @@
-//! @arch:layer(cli)
-//! @arch:role(discovery)
-//! @arch:role(refactor)
-//! @arch:depends_on(core, reason = "uses editor, operations, state, diff")
-//! @arch:thread(main)
-//!
 //! CLI frontend for rs-hack. Parses clap commands and dispatches
 //! to core library operations.
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
-use glob::glob;
 
-mod operations;
-mod visitor;
-mod editor;
-mod state;
-mod diff;
-mod path_resolver;
-mod surgical;
-
-#[cfg(test)]
-mod tests;
-
-use operations::*;
-use editor::RustEditor;
-use state::{*, save_backup_nodes};
-use diff::{print_diff, print_summary_diff, DiffStats};
+use rs_hack::operations::{self, *};
+use rs_hack::editor::{self, RustEditor};
+use rs_hack::state::{self, *};
+use rs_hack::diff::{print_diff, print_summary_diff, DiffStats};
+use rs_hack::files::{collect_rust_files_with_exclusions, expand_kind_to_node_types};
 
 #[derive(Parser)]
 #[command(name = "rs-hack")]
@@ -57,7 +39,7 @@ Examples:
   rs-hack rename --help")]
 #[command(version)]
 struct Cli {
-    /// Use project-local state directory (.rs-hack) instead of ~/.rs-hack
+    /// Use project-local state directory (./.hack/rs) instead of the system data dir
     #[arg(long, global = true)]
     local_state: bool,
 
@@ -643,6 +625,53 @@ MIGRATION:
         apply: bool,
     },
 
+    /// Show sibling files, twin-dir matches, and test files for a .rs file
+    Neighbors {
+        /// Path to a Rust source file
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Show which types implement a trait
+    Impls {
+        /// Path(s) to Rust file(s) or directories
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Trait name to search for (e.g., "Visit", "Display", "*::Iterator")
+        #[arg(long = "trait")]
+        r#trait: String,
+    },
+
+    /// Audit match expressions for missing enum variants
+    MatchAudit {
+        /// Path(s) to Rust file(s) or directories
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Enum name to audit (e.g., "Item", "Commands")
+        #[arg(long = "enum")]
+        r#enum: String,
+    },
+
+    /// Report doc-comment coverage for public items
+    DocCoverage {
+        /// Path(s) to Rust file(s) or directories
+        #[arg(short, long, num_args = 1..)]
+        paths: Vec<PathBuf>,
+
+        /// Also check struct fields, enum variants, and impl/trait methods
+        #[arg(long)]
+        fields: bool,
+    },
+
+    /// Print a module inventory for a single .rs file
+    Summary {
+        /// Path to a single Rust source file
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
     /// Find definitions AND all usages across files (see: rs-hack find --help)
     #[command(display_order = 1)]
     #[command(after_help = "EXAMPLES:
@@ -726,6 +755,10 @@ OUTPUT FORMATS:
         /// Output format: "json", "locations", "snippets"
         #[arg(short = 'f', long, default_value = "snippets")]
         format: String,
+
+        /// Show N raw lines of context before each snippet match (like grep -B N)
+        #[arg(long)]
+        context: Option<usize>,
     },
 
     /// [LEGACY] Add derive macros - use 'rs-hack add' instead
@@ -1445,123 +1478,6 @@ WHAT IT DOES:
         #[arg(long)]
         summary: bool,
     },
-
-    /// Architecture knowledge graph - extract and query @arch: annotations
-    #[command(subcommand)]
-    Arch(ArchCommands),
-}
-
-#[derive(Subcommand)]
-enum ArchCommands {
-    /// Extract annotations and build the graph
-    Extract {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Output format (json, mermaid)
-        #[arg(short, long, default_value = "json")]
-        format: String,
-
-        /// Show verbose extraction progress
-        #[arg(short, long)]
-        verbose: bool,
-    },
-
-    /// Query the architecture graph
-    Query {
-        /// Query string (e.g., "layer:core AND role:compiler")
-        query: String,
-
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Output format (ids, json, verbose)
-        #[arg(short, long, default_value = "ids")]
-        format: String,
-    },
-
-    /// Trace paths between nodes
-    Trace {
-        /// Source query
-        from: String,
-
-        /// Target query
-        to: String,
-
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-    },
-
-    /// Get architectural context for a file
-    Context {
-        /// File path to get context for
-        file: PathBuf,
-
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Output format (markdown, json)
-        #[arg(short, long, default_value = "markdown")]
-        format: String,
-    },
-
-    /// Validate architecture rules
-    Validate {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Path to rules TOML file (default: load from Cargo.toml metadata)
-        #[arg(short, long)]
-        rules: Option<PathBuf>,
-
-        /// Only show warnings and errors
-        #[arg(short, long)]
-        quiet: bool,
-
-        /// Also validate layer dependencies from schema
-        #[arg(long)]
-        include_schema_rules: bool,
-    },
-
-    /// Export graph visualization
-    Visualize {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Output format (mermaid, dot)
-        #[arg(short, long, default_value = "mermaid")]
-        format: String,
-    },
-
-    /// Print the schema loaded from Cargo.toml metadata
-    Schema {
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-
-        /// Output format (summary, toml, json)
-        #[arg(short, long, default_value = "summary")]
-        format: String,
-    },
-
-    /// Initialize arch metadata in Cargo.toml
-    Init {
-        /// Output format (toml, example)
-        #[arg(short, long, default_value = "toml")]
-        format: String,
-        /// Write to Cargo.toml instead of printing
-        #[arg(long)]
-        apply: bool,
-        /// Path to workspace root
-        #[arg(short, long, default_value = ".")]
-        path: PathBuf,
-    },
 }
 
 /// Validate that an enum variant rename would catch all references
@@ -2218,63 +2134,41 @@ fn main() -> Result<()> {
             execute_batch(&batch, apply, &cli.exclude)?;
         }
         
-        Commands::Find { paths, kind, node_type, name, variant, content_filter, field_name, include_comments, format } => {
+        Commands::Find { paths, kind, node_type, name, variant, content_filter, field_name, include_comments, format, context } => {
             use operations::InspectResult;
 
-            let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
-
-            // Expand kind to node_types if provided
-            let node_types_to_search: Vec<Option<&str>> = if let Some(k) = &kind {
-                let expanded = expand_kind_to_node_types(k);
-                if expanded.is_empty() {
-                    anyhow::bail!("Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use", k);
-                }
-                expanded.into_iter().map(Some).collect()
-            } else if let Some(ref nt) = node_type {
-                vec![Some(nt.as_str())]
-            } else {
-                vec![None]
+            let args = rs_hack::commands::find::FindArgs {
+                paths: paths.clone(),
+                exclude: cli.exclude.clone(),
+                kind: kind.clone(),
+                node_type: node_type.clone(),
+                name: name.clone(),
+                variant: variant.clone(),
+                content_filter: content_filter.clone(),
+                field_name: field_name.clone(),
+                include_comments,
+                context,
             };
 
-            // Handle --field-name flag (field finding mode)
-            if let Some(field) = field_name {
-                use operations::{FieldLocation, FieldContext};
+            let result = rs_hack::commands::find::run(&args)?;
+
+            // Field-mode rendering
+            if let rs_hack::commands::find::FindResult::Field { matches: all_locations } = &result {
+                use operations::FieldContext;
                 use std::collections::HashMap;
 
-                let mut all_locations: Vec<FieldLocation> = Vec::new();
-
-                for file in &files {
-                    let content = std::fs::read_to_string(&file)
-                        .context(format!("Failed to read file: {:?}", file))?;
-
-                    let editor = match RustEditor::new(&content) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            eprintln!("⚠️  Skipping {}: {}", file.display(), e);
-                            continue;
-                        }
-                    };
-                    let mut locations = editor.find_field_locations(&field)?;
-
-                    // Fill in file paths
-                    for location in &mut locations {
-                        location.file_path = file.to_string_lossy().to_string();
-                    }
-
-                    all_locations.extend(locations);
-                }
+                let field = field_name.as_ref().expect("field_name set when FindResult::Field");
 
                 if all_locations.is_empty() {
                     println!("No occurrences of field '{}' found.", field);
                     return Ok(());
                 }
 
-                // Group by context type
-                let mut struct_defs: Vec<&FieldLocation> = Vec::new();
-                let mut variant_defs: Vec<&FieldLocation> = Vec::new();
-                let mut struct_literals: Vec<&FieldLocation> = Vec::new();
+                let mut struct_defs: Vec<&operations::FieldLocation> = Vec::new();
+                let mut variant_defs: Vec<&operations::FieldLocation> = Vec::new();
+                let mut struct_literals: Vec<&operations::FieldLocation> = Vec::new();
 
-                for loc in &all_locations {
+                for loc in all_locations {
                     match &loc.context {
                         FieldContext::StructDefinition { .. } => struct_defs.push(loc),
                         FieldContext::EnumVariantDefinition { .. } => variant_defs.push(loc),
@@ -2282,7 +2176,6 @@ fn main() -> Result<()> {
                     }
                 }
 
-                // Display results
                 println!("Found {} occurrence{} of field '{}':\n",
                     all_locations.len(),
                     if all_locations.len() == 1 { "" } else { "s" },
@@ -2316,8 +2209,7 @@ fn main() -> Result<()> {
 
                 if !struct_literals.is_empty() {
                     println!("Struct Literal Expressions ({}):", struct_literals.len());
-                    // Group by struct name for cleaner output
-                    let mut by_struct: HashMap<String, Vec<&FieldLocation>> = HashMap::new();
+                    let mut by_struct: HashMap<String, Vec<&operations::FieldLocation>> = HashMap::new();
                     for loc in &struct_literals {
                         if let FieldContext::StructLiteral { struct_name } = &loc.context {
                             by_struct.entry(struct_name.clone()).or_insert_with(Vec::new).push(loc);
@@ -2343,73 +2235,15 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            let mut all_results: Vec<InspectResult> = Vec::new();
-
-            for file in &files {
-                let content = std::fs::read_to_string(&file)
-                    .context(format!("Failed to read file: {:?}", file))?;
-
-                let editor = match RustEditor::new(&content) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        eprintln!("⚠️  Skipping {}: {}", file.display(), e);
-                        continue;
-                    }
-                };
-
-                // Search for all node types (if kind was provided, this will be multiple types)
-                for node_type_to_search in &node_types_to_search {
-                    let mut results = editor.inspect(
-                        *node_type_to_search,
-                        name.as_deref(),
-                        variant.as_deref(),
-                        include_comments
-                    )?;
-
-                    // Fill in file paths
-                    for result in &mut results {
-                        result.file_path = file.to_string_lossy().to_string();
-                    }
-
-                    // Apply content filter if specified
-                    if let Some(ref filter) = content_filter {
-                        results.retain(|r| r.snippet.contains(filter));
-                    }
-
-                    all_results.extend(results);
-                }
-            }
+            // Node-mode rendering
+            let all_results: Vec<InspectResult> = match result {
+                rs_hack::commands::find::FindResult::Nodes { matches } => matches,
+                rs_hack::commands::find::FindResult::Field { .. } => unreachable!("handled above"),
+            };
 
             // Hints system: If we found nothing with a specific node-type, check if other types have matches
             if all_results.is_empty() && node_type.is_some() && name.is_some() {
-                // Re-run search across all node types to find near-misses
-                let mut hint_results: Vec<InspectResult> = Vec::new();
-
-                for file in &files {
-                    let content = std::fs::read_to_string(&file)
-                        .context(format!("Failed to read file: {:?}", file))?;
-
-                    let editor = match RustEditor::new(&content) {
-                        Ok(e) => e,
-                        Err(_) => continue,
-                    };
-                    let mut results = editor.inspect(
-                        None,  // Search all types
-                        name.as_deref(),
-                        variant.as_deref(),
-                        false  // No comments needed for hints
-                    )?;
-
-                    for result in &mut results {
-                        result.file_path = file.to_string_lossy().to_string();
-                    }
-
-                    if let Some(ref filter) = content_filter {
-                        results.retain(|r| r.snippet.contains(filter));
-                    }
-
-                    hint_results.extend(results);
-                }
+                let hint_results = rs_hack::commands::find::run_unfiltered_by_node_type(&args)?;
 
                 // If we found matches in other node types, show hints
                 if !hint_results.is_empty() {
@@ -2455,6 +2289,7 @@ fn main() -> Result<()> {
             if all_results.is_empty() && name.is_some() {
                 let search_name = name.as_ref().unwrap();
                 let mut text_matches: Vec<(String, usize)> = Vec::new();
+                let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
                 for file in &files {
                     let content = std::fs::read_to_string(&file)
@@ -2614,7 +2449,26 @@ fn main() -> Result<()> {
                         }
                     } else {
                         // Standard non-grouped output
+                        let mut prev_file: Option<&str> = None;
                         for result in &all_results {
+                            // Context lines (--context N): show N raw lines before the snippet
+                            if let Some(n) = context {
+                                if n > 0 {
+                                    // Separator between matches (grep-B style)
+                                    if prev_file.is_some() {
+                                        println!("--");
+                                    }
+                                    // Read the file and print N lines before the match
+                                    if let Ok(content) = std::fs::read_to_string(&result.file_path) {
+                                        let lines: Vec<&str> = content.lines().collect();
+                                        let match_line = result.location.line.saturating_sub(1); // 0-indexed
+                                        let start = match_line.saturating_sub(n);
+                                        for (i, line) in lines[start..match_line].iter().enumerate() {
+                                            println!("{}: {}", start + i + 1, line);
+                                        }
+                                    }
+                                }
+                            }
                             println!("// {}:{}:{} - {}",
                                 result.file_path,
                                 result.location.line,
@@ -2625,6 +2479,7 @@ fn main() -> Result<()> {
                                 println!("{}", comment);
                             }
                             println!("{}\n", result.snippet);
+                            prev_file = Some(&result.file_path);
                         }
                     }
                 }
@@ -2632,6 +2487,96 @@ fn main() -> Result<()> {
                     anyhow::bail!("Unknown format: {}. Use 'json', 'locations', or 'snippets'", format);
                 }
             }
+        }
+
+        Commands::Neighbors { path } => {
+            let report = rs_hack::commands::neighbors::run(&path)?;
+
+            // Display the path relative to cwd if possible
+            let display = |p: &std::path::Path| -> String {
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|cwd| p.strip_prefix(&cwd).ok().map(|r| r.to_path_buf()))
+                    .unwrap_or_else(|| p.to_path_buf())
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            println!("Neighbors for {}:", display(&report.target));
+            if report.siblings.is_empty() {
+                println!("  Siblings: (none)");
+            } else {
+                let s: Vec<String> = report.siblings.iter().map(|p| display(p)).collect();
+                println!("  Siblings: {}", s.join(", "));
+            }
+            if report.twin_files.is_empty() {
+                println!("  Twin dirs: (none)");
+            } else {
+                let s: Vec<String> = report.twin_files.iter().map(|p| display(p)).collect();
+                println!("  Twin dirs: {}", s.join(", "));
+            }
+            if report.test_files.is_empty() {
+                println!("  Tests: (none)");
+            } else {
+                let s: Vec<String> = report.test_files.iter().map(|p| display(p)).collect();
+                println!("  Tests: {}", s.join(", "));
+            }
+        }
+
+        Commands::Impls { paths, r#trait } => {
+            use rs_hack::commands::find::FindArgs;
+
+            let args = FindArgs {
+                paths: paths.clone(),
+                exclude: cli.exclude.clone(),
+                node_type: Some("trait-impl".to_string()),
+                name: Some(r#trait.clone()),
+                include_comments: false,
+                ..Default::default()
+            };
+
+            let result = rs_hack::commands::find::run(&args)?;
+            let matches = match result {
+                rs_hack::commands::find::FindResult::Nodes { matches } => matches,
+                _ => vec![],
+            };
+
+            if matches.is_empty() {
+                println!("Trait {} implemented by: (none found)", r#trait);
+            } else {
+                println!("Trait {} implemented by:", r#trait);
+                for m in &matches {
+                    // identifier = "TraitName for TypeName" — split to get type name
+                    let type_name = m.identifier
+                        .splitn(2, " for ")
+                        .nth(1)
+                        .unwrap_or(&m.identifier);
+                    println!("  {} ({}:{})", type_name, m.file_path, m.location.line);
+                }
+            }
+        }
+
+        Commands::MatchAudit { paths, r#enum } => {
+            let result = rs_hack::commands::match_audit::run(
+                &paths,
+                &r#enum,
+                &cli.exclude,
+            )?;
+            rs_hack::commands::match_audit::render(&result);
+        }
+
+        Commands::DocCoverage { paths, fields } => {
+            let result = rs_hack::commands::doc_coverage::run(
+                &paths,
+                fields,
+                &cli.exclude,
+            )?;
+            rs_hack::commands::doc_coverage::render(&result);
+        }
+
+        Commands::Summary { path } => {
+            let result = rs_hack::commands::summary::run(&path)?;
+            rs_hack::commands::summary::render(&result);
         }
 
         Commands::AddDerive { paths, target_type, name, derives, apply } => {
@@ -3402,507 +3347,13 @@ fn main() -> Result<()> {
                 }
             }
         }
-
-        Commands::Arch(arch_cmd) => {
-            handle_arch_command(arch_cmd)?;
-        }
     }
 
     Ok(())
 }
 
-fn handle_arch_command(cmd: ArchCommands) -> Result<()> {
-    use rs_hack_arch::{
-        extract::extract_from_workspace_verbose,
-        graph::{ArchGraph, EdgeKind},
-        query::{get_file_context, trace_path, Query},
-        schema::Schema,
-        validate::{load_rules, load_rules_from_metadata, rules_from_schema, validate, Severity},
-    };
-
-    match cmd {
-        ArchCommands::Extract { path, format, verbose } => {
-            let annotations = extract_from_workspace_verbose(&path, verbose)?;
-            if verbose {
-                for ann in &annotations {
-                    eprintln!("  {:?} at {}:{}", ann.kind, ann.file.display(), ann.line);
-                }
-            }
-            let graph = ArchGraph::from_annotations(annotations);
-            if verbose {
-                eprintln!("Built graph with {} nodes", graph.nodes().count());
-            }
-
-            match format.as_str() {
-                "json" => println!("{}", graph.to_json()?),
-                "mermaid" => println!("{}", graph.to_mermaid()),
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Query { query, path, format } => {
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let graph = ArchGraph::from_annotations(annotations);
-
-            let q = Query::parse(&query).map_err(|e| anyhow::anyhow!(e))?;
-            let result = q.execute(&graph);
-
-            match format.as_str() {
-                "ids" => {
-                    for id in &result.nodes {
-                        println!("{}", id);
-                    }
-                    eprintln!("\n{} matches", result.count);
-                }
-                "json" => {
-                    println!("{}", serde_json::to_string_pretty(&result.nodes)?);
-                }
-                "verbose" => {
-                    for id in &result.nodes {
-                        if let Some(node) = graph.get_node(id) {
-                            println!("{}:{} - {}", node.file.display(), node.line, node.id);
-                            if let Some(ref layer) = node.properties.layer {
-                                println!("  layer: {}", layer);
-                            }
-                            if !node.properties.roles.is_empty() {
-                                println!("  roles: {}", node.properties.roles.join(", "));
-                            }
-                            if let Some(ref thread) = node.properties.thread {
-                                println!("  thread: {:?}", thread);
-                            }
-                            println!();
-                        }
-                    }
-                    eprintln!("{} matches", result.count);
-                }
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Trace { from, to, path } => {
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let graph = ArchGraph::from_annotations(annotations);
-
-            let paths = trace_path(&graph, &from, &to).map_err(|e| anyhow::anyhow!(e))?;
-
-            if paths.is_empty() {
-                println!("No paths found from '{}' to '{}'", from, to);
-            } else {
-                for (i, p) in paths.iter().enumerate() {
-                    println!("Path {}:", i + 1);
-                    for (j, node) in p.iter().enumerate() {
-                        if j > 0 {
-                            println!("  ↓");
-                        }
-                        println!("  {}", node);
-                    }
-                    println!();
-                }
-            }
-        }
-
-        ArchCommands::Context { file, path, format } => {
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let graph = ArchGraph::from_annotations(annotations);
-
-            let file_str = file.to_string_lossy();
-            let context = get_file_context(&graph, &file_str);
-
-            match format.as_str() {
-                "markdown" => println!("{}", context.to_markdown(&file_str)),
-                "json" => {
-                    let json = serde_json::json!({
-                        "file": file_str.to_string(),
-                        "layer": context.layer,
-                        "roles": context.roles,
-                        "thread": context.thread,
-                        "qos": context.qos,
-                        "produces": context.produces,
-                        "consumes": context.consumes,
-                        "patterns": context.patterns,
-                        "constraints": context.constraints,
-                    });
-                    println!("{}", serde_json::to_string_pretty(&json)?);
-                }
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Validate { path, rules, quiet, include_schema_rules } => {
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let graph = ArchGraph::from_annotations(annotations);
-
-            let mut all_rules = if let Some(rules_path) = rules {
-                let content = std::fs::read_to_string(&rules_path)?;
-                load_rules(&content)?
-            } else {
-                match load_rules_from_metadata(&path) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        if !quiet {
-                            eprintln!("Note: Could not load rules from Cargo.toml: {}", e);
-                        }
-                        Vec::new()
-                    }
-                }
-            };
-
-            if include_schema_rules {
-                if let Ok(schema) = Schema::from_cargo_metadata(&path) {
-                    all_rules.extend(rules_from_schema(&schema));
-                }
-            }
-
-            if all_rules.is_empty() {
-                if !quiet {
-                    println!("No architecture rules defined.");
-                    println!("Add rules to [[workspace.metadata.arch.rules]] in Cargo.toml");
-                    println!("Or use --include-schema-rules to validate layer dependencies.");
-                }
-                return Ok(());
-            }
-
-            if !quiet {
-                eprintln!("Validating {} rules...", all_rules.len());
-            }
-
-            let violations = validate(&graph, &all_rules);
-
-            if violations.is_empty() {
-                if !quiet {
-                    println!("✓ No violations found");
-                }
-            } else {
-                let errors = violations.iter().filter(|v| v.severity == Severity::Error).count();
-                let warnings = violations.iter().filter(|v| v.severity == Severity::Warning).count();
-
-                for v in &violations {
-                    let prefix = match v.severity {
-                        Severity::Error => "ERROR",
-                        Severity::Warning => "WARNING",
-                    };
-                    let location = match (&v.file, v.line) {
-                        (Some(f), Some(l)) => format!("{}:{}", f.display(), l),
-                        (Some(f), None) => f.display().to_string(),
-                        _ => "unknown".into(),
-                    };
-                    println!("{}: {} - {} ({})", prefix, v.rule, v.message, location);
-                }
-
-                if errors > 0 {
-                    eprintln!("\n✗ {} errors, {} warnings", errors, warnings);
-                    std::process::exit(1);
-                } else {
-                    eprintln!("\n⚠ {} warnings", warnings);
-                }
-            }
-        }
-
-        ArchCommands::Visualize { path, format } => {
-            let annotations = extract_from_workspace_verbose(&path, false)?;
-            let graph = ArchGraph::from_annotations(annotations);
-
-            match format.as_str() {
-                "mermaid" => println!("{}", graph.to_mermaid()),
-                "dot" => {
-                    println!("digraph arch {{");
-                    println!("  rankdir=TB;");
-                    println!("  node [shape=box];");
-
-                    for node in graph.nodes() {
-                        let label = node.id.split("::").last().unwrap_or(&node.id);
-                        let color = node.properties.layer.as_deref()
-                            .map(|l| match l {
-                                "core" => "lightblue",
-                                "lib" => "lightgreen",
-                                "api" => "lightyellow",
-                                "ui" => "lightpink",
-                                "app" => "lightgray",
-                                _ => "white",
-                            })
-                            .unwrap_or("white");
-                        println!(
-                            "  \"{}\" [label=\"{}\" fillcolor=\"{}\" style=filled];",
-                            node.id, label, color
-                        );
-                    }
-
-                    for edge in graph.edges() {
-                        let style = match edge.kind {
-                            EdgeKind::DependsOn => "solid",
-                            EdgeKind::MessageFlow => "dashed",
-                            EdgeKind::Bridge => "bold",
-                            _ => "dotted",
-                        };
-                        println!("  \"{}\" -> \"{}\" [style={}];", edge.from, edge.to, style);
-                    }
-
-                    println!("}}");
-                }
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Schema { path, format } => {
-            let schema = Schema::from_cargo_metadata(&path)?;
-
-            if schema.is_empty() {
-                eprintln!("No architecture schema found in Cargo.toml");
-                eprintln!("Add [workspace.metadata.arch] section to configure.");
-                eprintln!("Run 'rs-hack arch init' for a template.");
-                return Ok(());
-            }
-
-            match format.as_str() {
-                "summary" => println!("{}", schema.summary()),
-                "toml" => println!("{}", schema.to_toml()?),
-                "json" => println!("{}", serde_json::to_string_pretty(&schema)?),
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-
-        ArchCommands::Init { format, apply, path } => {
-            match format.as_str() {
-                "toml" => {
-                    if apply {
-                        apply_arch_init_template(&path)?;
-                    } else {
-                        print_arch_init_template();
-                        eprintln!("\n# To apply this to your Cargo.toml, run:");
-                        eprintln!("#   rs-hack arch init --apply");
-                    }
-                }
-                "example" => print_arch_example_annotations(),
-                _ => eprintln!("Unknown format: {}", format),
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn apply_arch_init_template(path: &Path) -> Result<()> {
-    // Find workspace Cargo.toml
-    let cargo_toml = if path.join("Cargo.toml").exists() {
-        path.join("Cargo.toml")
-    } else {
-        // Try to find it via cargo metadata
-        let output = std::process::Command::new("cargo")
-            .args(["locate-project", "--workspace", "--message-format=plain"])
-            .current_dir(path)
-            .output()
-            .context("Failed to run cargo locate-project")?;
-        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
-    };
-
-    if !cargo_toml.exists() {
-        bail!("Could not find Cargo.toml at {:?}", cargo_toml);
-    }
-
-    // Read existing content
-    let content = std::fs::read_to_string(&cargo_toml)
-        .context("Failed to read Cargo.toml")?;
-
-    // Check if arch metadata already exists
-    if content.contains("[workspace.metadata.arch]") {
-        eprintln!("Architecture metadata already exists in {}", cargo_toml.display());
-        eprintln!("Edit manually or remove existing section first.");
-        return Ok(());
-    }
-
-    // Append the template
-    let template = r#"
-# Architecture Knowledge Graph Configuration
-# See: rs-hack arch --help
-[workspace.metadata.arch]
-
-# Define architectural layers (customize for your project)
-[workspace.metadata.arch.layers]
-core = { description = "Core library with no external dependencies", allowed_dependencies = [] }
-lib = { description = "Library layer", allowed_dependencies = ["core"] }
-app = { description = "Application entry points", allowed_dependencies = ["core", "lib"] }
-
-# Define roles for components
-[workspace.metadata.arch.roles]
-compiler = "Transforms source to executable form"
-runtime = "Manages execution state"
-transport = "Routes messages between components"
-
-# Define validation rules
-[[workspace.metadata.arch.rules]]
-name = "core-independence"
-description = "Core layer cannot depend on higher layers"
-severity = "error"
-type = "layer_dependency"
-layer = "core"
-allowed = []
-"#;
-
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(&cargo_toml)
-        .context("Failed to open Cargo.toml for appending")?;
-
-    use std::io::Write;
-    writeln!(file, "{}", template)?;
-
-    eprintln!("Added [workspace.metadata.arch] to {}", cargo_toml.display());
-    eprintln!("Next steps:");
-    eprintln!("  1. Edit the layers/roles to match your architecture");
-    eprintln!("  2. Add @arch: annotations to your source files");
-    eprintln!("  3. Run 'rs-hack arch extract' to build the graph");
-    Ok(())
-}
-
-fn print_arch_init_template() {
-    println!(r#"# Add this to your workspace Cargo.toml
-
-[workspace.metadata.arch]
-
-# Define architectural layers
-[workspace.metadata.arch.layers]
-core = {{ description = "Core library with no external dependencies", allowed_dependencies = [] }}
-lib = {{ description = "Library layer", allowed_dependencies = ["core"] }}
-api = {{ description = "API/service layer", allowed_dependencies = ["core", "lib"] }}
-app = {{ description = "Application entry points", allowed_dependencies = ["core", "lib", "api"] }}
-
-# Define roles for components
-[workspace.metadata.arch.roles]
-compiler = "Transforms source to executable form"
-runtime = "Manages execution state"
-transport = "Routes messages between components"
-storage = "Persists and retrieves data"
-
-# Define thread contexts (optional)
-[workspace.metadata.arch.threads]
-main = {{ priority = "normal", description = "Main thread" }}
-worker = {{ priority = "normal", description = "Background worker threads" }}
-
-# Define validation rules
-[[workspace.metadata.arch.rules]]
-name = "core-independence"
-description = "Core layer cannot depend on higher layers"
-severity = "error"
-type = "layer_dependency"
-layer = "core"
-allowed = []
-"#);
-}
-
-fn print_arch_example_annotations() {
-    println!(r#"# Example @arch: annotations for Rust source files
-
-## Module-level (at top of file with //! comments):
-
-//! @arch:layer(core)
-//! @arch:role(runtime)
-
-## Struct-level:
-
-/// @arch:layer(lib)
-/// @arch:role(storage)
-/// @arch:produces(event:Created, event:Updated)
-pub struct Repository {{ ... }}
-
-## Function-level:
-
-/// @arch:thread(worker)
-/// @arch:consumes(command:Create)
-pub fn process_command(cmd: Command) {{ ... }}
-
-## Available annotations:
-
-@arch:layer(name)              - Architectural layer
-@arch:role(name)               - Component role
-@arch:thread(name)             - Thread context
-@arch:produces(type:name, ...) - Messages this component produces
-@arch:consumes(type:name, ...) - Messages this component consumes
-@arch:depends_on(target)       - Explicit dependency
-@arch:pattern(name)            - Design pattern in use
-@arch:gateway                  - Protocol translation point
-"#);
-}
 
 /// Expand semantic kind to list of specific node types
-fn expand_kind_to_node_types(kind: &str) -> Vec<&'static str> {
-    match kind {
-        "struct" => vec!["struct", "struct-literal"],
-        "function" => vec!["function", "function-call", "method-call", "impl-method", "trait-method"],
-        "enum" => vec!["enum", "enum-usage"],
-        "match" => vec!["match-arm"],
-        "identifier" => vec!["identifier"],
-        "type" => vec!["type-ref", "type-alias"],
-        "macro" => vec!["macro-call"],
-        "const" => vec!["const", "static"],
-        "trait" => vec!["trait"],
-        "mod" => vec!["mod"],
-        "use" => vec!["use"],
-        _ => vec![],
-    }
-}
-
-fn collect_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    collect_rust_files_with_exclusions(paths, &[])
-}
-
-fn collect_rust_files_with_exclusions(paths: &[PathBuf], exclude_patterns: &[String]) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-
-    for path in paths {
-        let path_str = path.to_string_lossy();
-
-        // Check if path contains glob pattern characters
-        if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
-            // Use glob pattern matching
-            for entry in glob(&path_str)
-                .context("Failed to parse glob pattern")?
-            {
-                match entry {
-                    Ok(file_path) => {
-                        if file_path.is_file() && file_path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                            files.push(file_path);
-                        }
-                    }
-                    Err(e) => eprintln!("Warning: Error reading glob entry: {}", e),
-                }
-            }
-        } else if path.is_file() {
-            if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                files.push(path.clone());
-            }
-        } else if path.is_dir() {
-            for entry in WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("rs"))
-            {
-                files.push(entry.path().to_path_buf());
-            }
-        }
-    }
-
-    // Filter out excluded paths
-    if !exclude_patterns.is_empty() {
-        files.retain(|file| {
-            let file_str = file.to_string_lossy();
-            !exclude_patterns.iter().any(|pattern| {
-                // Check if the file matches the exclude pattern
-                if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-                    // Use glob matching
-                    glob::Pattern::new(pattern)
-                        .map(|p| p.matches(&file_str))
-                        .unwrap_or(false)
-                } else {
-                    // Simple string matching for non-glob patterns
-                    file_str.contains(pattern.as_str())
-                }
-            })
-        });
-    }
-
-    Ok(files)
-}
-
 fn parse_position(pos: &str) -> Result<InsertPosition> {
     match pos {
         "first" => Ok(InsertPosition::First),
@@ -3962,171 +3413,123 @@ fn execute_operation(
     show_summary: bool,
     limit: Option<usize>,
 ) -> Result<()> {
-    let mut changes = Vec::new();
+    let opts = rs_hack::execute::ExecuteOpts {
+        apply,
+        output: output.cloned(),
+        limit,
+    };
+
+    let result = rs_hack::execute::execute(files, op, &opts)?;
+    render_execute_result(&result, op, format, show_summary, apply, output);
+    Ok(())
+}
+
+/// CLI-side rendering of an `ExecuteResult`. Reproduces the original
+/// `execute_operation` stdout/stderr output from structured fields.
+fn render_execute_result(
+    result: &rs_hack::execute::ExecuteResult,
+    op: &Operation,
+    format: &str,
+    show_summary: bool,
+    apply: bool,
+    output: Option<&PathBuf>,
+) {
     let mut total_stats = DiffStats::default();
-    let mut total_modifications = 0;
-    let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut last_error: Option<anyhow::Error> = None;
 
-    let mut parse_errors: Vec<(PathBuf, String)> = Vec::new();
-
-    for file_path in files {
-        let content = std::fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read {}", file_path.display()))?;
-
-        let mut editor = match RustEditor::new(&content) {
-            Ok(editor) => editor,
-            Err(e) => {
-                if files.len() == 1 {
-                    return Err(e).with_context(|| format!("Failed to parse {}", file_path.display()));
-                }
-                eprintln!("⚠️  Skipping {}: {}", file_path.display(), e);
-                parse_errors.push((file_path.clone(), format!("{}", e)));
-                continue;
+    for change in &result.changes {
+        if format == "diff" {
+            let stats = print_diff(&change.path, &change.old_content, &change.new_content);
+            total_stats.add(&stats);
+        } else if format == "summary" {
+            let stats = print_summary_diff(&change.path, &change.old_content, &change.new_content);
+            total_stats.add(&stats);
+        } else if apply {
+            if let Some(out) = output {
+                println!("✓ Written to: {}", out.display());
+            } else {
+                println!("✓ Modified: {}", change.path.display());
             }
-        };
-
-        match editor.apply_operation(op) {
-            Ok(result) => {
-                // Collect unmatched qualified paths
-                if let Some(unmatched) = result.unmatched_qualified_paths {
-                    for (path, count) in unmatched {
-                        *all_unmatched_paths.entry(path).or_insert(0) += count;
-                    }
-                }
-
-                if result.changed {
-                    // Track total modifications across all files
-                    let modifications_in_file = result.modified_nodes.len();
-                    total_modifications += modifications_in_file;
-
-                    let new_content = editor.to_string();
-                    changes.push(FileChange {
-                        path: file_path.clone(),
-                        old_content: content.clone(),
-                        new_content: new_content.clone(),
-                    });
-
-                    if format == "diff" {
-                        // In diff mode, print the diff
-                        let stats = print_diff(file_path, &content, &new_content);
-                        total_stats.add(&stats);
-
-                        if apply {
-                            // Apply changes and show a message
-                            let write_path = output.unwrap_or(file_path);
-                            std::fs::write(write_path, &new_content)
-                                .with_context(|| format!("Failed to write {}", write_path.display()))?;
-                        }
-                    } else if format == "summary" {
-                        // In summary mode, print only changed lines
-                        let stats = print_summary_diff(file_path, &content, &new_content);
-                        total_stats.add(&stats);
-
-                        if apply {
-                            // Apply changes and show a message
-                            let write_path = output.unwrap_or(file_path);
-                            std::fs::write(write_path, &new_content)
-                                .with_context(|| format!("Failed to write {}", write_path.display()))?;
-                        }
-                    } else {
-                        // Default mode - original behavior
-                        if apply {
-                            let write_path = output.unwrap_or(file_path);
-                            std::fs::write(write_path, &new_content)
-                                .with_context(|| format!("Failed to write {}", write_path.display()))?;
-                            if let Some(out) = output {
-                                println!("✓ Written to: {}", out.display());
-                            } else {
-                                println!("✓ Modified: {}", file_path.display());
-                            }
-                        } else {
-                            if output.is_some() {
-                                println!("Would write to: {}", output.unwrap().display());
-                            } else {
-                                println!("Would modify: {}", file_path.display());
-                            }
-                        }
-                    }
-
-                    // Check if we've hit the limit
-                    if let Some(limit) = limit {
-                        if total_modifications >= limit {
-                            println!("\n⚠️  Limit reached: {} modifications made (limit: {})", total_modifications, limit);
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                // Not an error if the target doesn't exist in this file
-                if files.len() == 1 {
-                    return Err(e);
-                }
-                // Store for diagnostic output if nothing matches
-                last_error = Some(e);
-            }
+        } else if let Some(out) = output {
+            println!("Would write to: {}", out.display());
+        } else {
+            println!("Would modify: {}", change.path.display());
         }
     }
 
-    // Report parse errors summary
-    if !parse_errors.is_empty() {
-        eprintln!("\n⚠️  {} file(s) skipped due to parse errors:", parse_errors.len());
-        for (path, err) in &parse_errors {
+    for (path, err) in &result.parse_errors {
+        eprintln!("⚠️  Skipping {}: {}", path.display(), err);
+    }
+
+    if result.limit_hit {
+        println!(
+            "\n⚠️  Limit reached: {} modifications made",
+            result.total_modifications
+        );
+    }
+
+    if !result.parse_errors.is_empty() {
+        eprintln!(
+            "\n⚠️  {} file(s) skipped due to parse errors:",
+            result.parse_errors.len()
+        );
+        for (path, err) in &result.parse_errors {
             eprintln!("   {} — {}", path.display(), err);
         }
     }
 
-    // Show hint if we found unmatched qualified paths (even if we made some changes)
-    if !all_unmatched_paths.is_empty() {
-        if !changes.is_empty() {
+    if !result.unmatched_qualified_paths.is_empty() {
+        if !result.changes.is_empty() {
             println!("\n⚠️  Note: Some instances were not matched:");
         }
-
-        println!("\n💡 Hint: Found {} struct literal(s) with fully qualified paths that didn't match:",
-            all_unmatched_paths.values().sum::<usize>());
-
-        let mut paths: Vec<_> = all_unmatched_paths.iter().collect();
-        paths.sort_by_key(|(path, _)| *path);
-
-        for (path, count) in &paths {
-            println!("   {} ({} instance{})", path, count, if **count == 1 { "" } else { "s" });
-        }
-
-        println!("\nTo match all of these, use:");
-
-        // Extract the simple name from the first path for the suggestion
-        if let Some((first_path, _)) = paths.first() {
-            if let Some(simple_name) = first_path.split("::").last() {
-                println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
-                println!("\nOr match specific paths:");
-                for (path, _) in paths.iter().take(3) {
-                    println!("   rs-hack ... --name \"{}\" ...", path);
-                }
-                if paths.len() > 3 {
-                    println!("   (and {} more...)", paths.len() - 3);
-                }
-            }
-        }
-    } else if changes.is_empty() {
+        render_unmatched_paths(&result.unmatched_qualified_paths);
+    } else if result.changes.is_empty() {
         println!("No changes made - target not found in any files");
-        // Show the last error for context
-        if let Some(err) = last_error {
+        if let Some(err) = &result.last_error {
             eprintln!("\n📋 Diagnostic: {}", err);
         }
-        // Operation-specific hints
         print_operation_hints(op);
     }
 
     if format == "diff" && show_summary {
-        // Print summary for diff mode
         total_stats.print_summary();
     } else if format == "default" && !apply {
         println!("\n🔍 Dry run complete. Use --apply to make changes, or --format diff to generate a patch.");
-        println!("Summary: {} file(s) would be modified", changes.len());
+        println!("Summary: {} file(s) would be modified", result.changes.len());
+    }
+}
+
+fn render_unmatched_paths(unmatched: &std::collections::HashMap<String, usize>) {
+    println!(
+        "\n💡 Hint: Found {} struct literal(s) with fully qualified paths that didn't match:",
+        unmatched.values().sum::<usize>()
+    );
+
+    let mut paths: Vec<_> = unmatched.iter().collect();
+    paths.sort_by_key(|(path, _)| *path);
+
+    for (path, count) in &paths {
+        println!(
+            "   {} ({} instance{})",
+            path,
+            count,
+            if **count == 1 { "" } else { "s" }
+        );
     }
 
-    Ok(())
+    println!("\nTo match all of these, use:");
+
+    if let Some((first_path, _)) = paths.first() {
+        if let Some(simple_name) = first_path.split("::").last() {
+            println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
+            println!("\nOr match specific paths:");
+            for (path, _) in paths.iter().take(3) {
+                println!("   rs-hack ... --name \"{}\" ...", path);
+            }
+            if paths.len() > 3 {
+                println!("   (and {} more...)", paths.len() - 3);
+            }
+        }
+    }
 }
 
 fn execute_batch(batch: &BatchSpec, apply: bool, exclude_patterns: &[String]) -> Result<()> {
@@ -4147,213 +3550,88 @@ fn execute_operation_with_state(
     show_summary: bool,
     limit: Option<usize>,
 ) -> Result<()> {
-    // If not applying or output is specified (not in-place), don't track state
-    if !apply || output.is_some() {
-        return execute_operation(files, op, apply, output, format, show_summary, limit);
-    }
-
-    // Generate run ID and get state dir
-    let run_id = generate_run_id();
-    let state_dir = get_state_dir(*local_state)?;
-
-    // Collect command line for metadata
-    let command = std::env::args().collect::<Vec<_>>().join(" ");
-    let operation_name = match op {
-        Operation::AddStructField(_) => "AddStructField",
-        Operation::UpdateStructField(_) => "UpdateStructField",
-        Operation::RemoveStructField(_) => "RemoveStructField",
-        Operation::AddStructLiteralField(_) => "AddStructLiteralField",
-        Operation::AddEnumVariant(_) => "AddEnumVariant",
-        Operation::UpdateEnumVariant(_) => "UpdateEnumVariant",
-        Operation::RemoveEnumVariant(_) => "RemoveEnumVariant",
-        Operation::RenameEnumVariant(_) => "RenameEnumVariant",
-        Operation::AddMatchArm(_) => "AddMatchArm",
-        Operation::UpdateMatchArm(_) => "UpdateMatchArm",
-        Operation::RemoveMatchArm(_) => "RemoveMatchArm",
-        Operation::AddImplMethod(_) => "AddImplMethod",
-        Operation::AddUseStatement(_) => "AddUseStatement",
-        Operation::AddDerive(_) => "AddDerive",
-        Operation::Transform(_) => "Transform",
-        Operation::RenameFunction(_) => "RenameFunction",
-        Operation::AddDocComment(_) => "AddDocComment",
-        Operation::UpdateDocComment(_) => "UpdateDocComment",
-        Operation::RemoveDocComment(_) => "RemoveDocComment",
-        Operation::SetStructLiteralBase(_) => "SetStructLiteralBase",
-        Operation::AddCallArg(_) => "AddCallArg",
-        Operation::UpdateCallArg(_) => "UpdateCallArg",
-        Operation::RemoveCallArg(_) => "RemoveCallArg",
+    let opts = rs_hack::execute::ExecuteOpts {
+        apply,
+        output: output.cloned(),
+        limit,
     };
 
-    // First pass: collect changes and backup files
-    let mut file_modifications = Vec::new();
-    let mut changes_made = false;
+    let command = std::env::args().collect::<Vec<_>>().join(" ");
+    let result =
+        rs_hack::execute::execute_with_state(files, op, &opts, *local_state, command)?;
+
+    // The lib falls back to plain `execute` (no state tracking) when the call
+    // would not have written: dry runs and `--output` overrides. Match the
+    // renderer to the path that actually ran so dry runs say "Would modify".
+    if !apply || output.is_some() {
+        render_execute_result(&result, op, format, show_summary, apply, output);
+    } else {
+        render_execute_with_state_result(&result, op, format, show_summary);
+    }
+    Ok(())
+}
+
+fn render_execute_with_state_result(
+    result: &rs_hack::execute::ExecuteResult,
+    op: &Operation,
+    format: &str,
+    show_summary: bool,
+) {
     let mut total_stats = DiffStats::default();
-    let mut total_modifications = 0;
-    let mut all_unmatched_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut last_error: Option<anyhow::Error> = None;
 
-    let mut parse_errors: Vec<(PathBuf, String)> = Vec::new();
-
-    for file_path in files {
-        let content = std::fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read {}", file_path.display()))?;
-
-        let mut editor = match RustEditor::new(&content) {
-            Ok(editor) => editor,
-            Err(e) => {
-                if files.len() == 1 {
-                    return Err(e).with_context(|| format!("Failed to parse {}", file_path.display()));
-                }
-                eprintln!("⚠️  Skipping {}: {}", file_path.display(), e);
-                parse_errors.push((file_path.clone(), format!("{}", e)));
-                continue;
-            }
-        };
-
-        match editor.apply_operation(op) {
-            Ok(result) => {
-                // Collect unmatched qualified paths
-                if let Some(unmatched) = result.unmatched_qualified_paths {
-                    for (path, count) in unmatched {
-                        *all_unmatched_paths.entry(path).or_insert(0) += count;
-                    }
-                }
-
-                if result.changed {
-                    // Track total modifications across all files
-                    let modifications_in_file = result.modified_nodes.len();
-                    total_modifications += modifications_in_file;
-
-                    let new_content = editor.to_string();
-
-                    // Print diff if format is "diff" or "summary"
-                    if format == "diff" {
-                        let stats = print_diff(file_path, &content, &new_content);
-                        total_stats.add(&stats);
-                    } else if format == "summary" {
-                        let stats = print_summary_diff(file_path, &content, &new_content);
-                        total_stats.add(&stats);
-                    }
-
-                    // Save backup nodes before modifying
-                    let hash_before = hash_file(file_path)?;
-                    save_backup_nodes(file_path, &result.modified_nodes, &run_id, &state_dir)?;
-
-                    // Write the new content
-                    std::fs::write(file_path, &new_content)
-                        .with_context(|| format!("Failed to write {}", file_path.display()))?;
-
-                    let hash_after = hash_file(file_path)?;
-
-                    file_modifications.push(FileModification {
-                        path: file_path.clone(),
-                        hash_before,
-                        hash_after,
-                        backup_nodes: result.modified_nodes.clone(),
-                    });
-
-                    if format != "diff" {
-                        println!("✓ Modified: {}", file_path.display());
-                    }
-                    changes_made = true;
-
-                    // Check if we've hit the limit
-                    if let Some(limit) = limit {
-                        if total_modifications >= limit {
-                            println!("\n⚠️  Limit reached: {} modifications made (limit: {})", total_modifications, limit);
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                // Not an error if the target doesn't exist in this file
-                if files.len() == 1 {
-                    return Err(e);
-                }
-                // Store for diagnostic output if nothing matches
-                last_error = Some(e);
-            }
+    for change in &result.changes {
+        if format == "diff" {
+            let stats = print_diff(&change.path, &change.old_content, &change.new_content);
+            total_stats.add(&stats);
+        } else if format == "summary" {
+            let stats = print_summary_diff(&change.path, &change.old_content, &change.new_content);
+            total_stats.add(&stats);
+        } else {
+            println!("✓ Modified: {}", change.path.display());
         }
     }
 
-    // Report parse errors summary
-    if !parse_errors.is_empty() {
-        eprintln!("\n⚠️  {} file(s) skipped due to parse errors:", parse_errors.len());
-        for (path, err) in &parse_errors {
+    for (path, err) in &result.parse_errors {
+        eprintln!("⚠️  Skipping {}: {}", path.display(), err);
+    }
+
+    if result.limit_hit {
+        println!(
+            "\n⚠️  Limit reached: {} modifications made",
+            result.total_modifications
+        );
+    }
+
+    if !result.parse_errors.is_empty() {
+        eprintln!(
+            "\n⚠️  {} file(s) skipped due to parse errors:",
+            result.parse_errors.len()
+        );
+        for (path, err) in &result.parse_errors {
             eprintln!("   {} — {}", path.display(), err);
         }
     }
 
-    // Save run metadata if any changes were made
-    if !file_modifications.is_empty() {
-        let metadata = RunMetadata {
-            run_id: run_id.clone(),
-            timestamp: chrono::Utc::now(),
-            command,
-            operation: operation_name.to_string(),
-            files_modified: file_modifications,
-            status: RunStatus::Applied,
-            can_revert: true,
-        };
-
-        save_run_metadata(&metadata, &state_dir)?;
-
+    if let Some(run_id) = &result.run_id {
         if format == "diff" && show_summary {
             total_stats.print_summary();
         }
-
-        println!("\n📝 Run ID: {} (use 'rs-hack revert {}' to undo)", run_id, run_id);
-    } else if !changes_made {
+        println!(
+            "\n📝 Run ID: {} (use 'rs-hack revert {}' to undo)",
+            run_id, run_id
+        );
+    } else if result.changes.is_empty() {
         println!("No changes made - target not found in any files");
-        // Show the last error for context
-        if let Some(err) = last_error {
+        if let Some(err) = &result.last_error {
             eprintln!("\n📋 Diagnostic: {}", err);
         }
-        // Operation-specific hints
         print_operation_hints(op);
     }
 
-    // Show hint if we found unmatched qualified paths (even if we made some changes)
-    if !all_unmatched_paths.is_empty() {
-        if changes_made {
+    if !result.unmatched_qualified_paths.is_empty() {
+        if !result.changes.is_empty() {
             println!("\n⚠️  Note: Some instances were not matched:");
         }
-
-        println!("\n💡 Hint: Found {} struct literal(s) with fully qualified paths that didn't match:",
-            all_unmatched_paths.values().sum::<usize>());
-
-        let mut paths: Vec<_> = all_unmatched_paths.iter().collect();
-        paths.sort_by_key(|(path, _)| *path);
-
-        for (path, count) in &paths {
-            println!("   {} ({} instance{})", path, count, if **count == 1 { "" } else { "s" });
-        }
-
-        println!("\nTo match all of these, use:");
-
-        // Extract the simple name from the first path for the suggestion
-        if let Some((first_path, _)) = paths.first() {
-            if let Some(simple_name) = first_path.split("::").last() {
-                println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
-                println!("\nOr match specific paths:");
-                for (path, _) in paths.iter().take(3) {
-                    println!("   rs-hack ... --name \"{}\" ...", path);
-                }
-                if paths.len() > 3 {
-                    println!("   (and {} more...)", paths.len() - 3);
-                }
-            }
-        }
+        render_unmatched_paths(&result.unmatched_qualified_paths);
     }
-
-    Ok(())
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-struct FileChange {
-    path: PathBuf,
-    old_content: String,
-    new_content: String,
 }

@@ -1,9 +1,3 @@
-//! @arch:layer(core)
-//! @arch:role(parser)
-//! @arch:role(refactor)
-//! @arch:role(emit)
-//! @arch:note(Central engine: parses source, applies operations, emits modified code)
-//!
 //! The RustEditor is the core engine of rs-hack. It parses Rust source
 //! into a syn AST, applies refactoring operations (add/remove/rename/update),
 //! and emits modified code via surgical edits or prettyplease reformatting.
@@ -2552,7 +2546,7 @@ impl RustEditor {
         // If node_type is None, search all node types
         if node_type.is_none() {
             let all_types = vec![
-                "struct", "enum", "function", "impl-method", "trait", "const", "static", "type-alias", "mod",
+                "struct", "enum", "function", "impl-method", "trait", "trait-impl", "const", "static", "type-alias", "mod",
                 "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref",
             ];
             for nt in all_types {
@@ -3886,6 +3880,90 @@ impl RustEditor {
                     name_filter,
                     editor: self,
                     include_comments,
+                };
+
+                for item in &self.syntax_tree.items {
+                    syn::visit::visit_item(&mut visitor, item);
+                }
+            }
+            "trait-impl" => {
+                // Find all trait impl blocks (impl Trait for Type)
+                struct TraitImplVisitor<'a> {
+                    results: &'a mut Vec<InspectResult>,
+                    name_filter: Option<&'a str>,
+                    editor: &'a RustEditor,
+                }
+
+                impl<'ast, 'a> Visit<'ast> for TraitImplVisitor<'a> {
+                    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+                        // Only emit when there's a trait clause
+                        if node.trait_.is_none() {
+                            syn::visit::visit_item_impl(self, node);
+                            return;
+                        }
+
+                        let trait_path = &node.trait_.as_ref().unwrap().1;
+                        let trait_name = trait_path.segments.last()
+                            .map(|seg| seg.ident.to_string())
+                            .unwrap_or_default();
+
+                        // Apply name filter to the trait name (same wildcard semantics as struct-literal)
+                        if let Some(filter) = self.name_filter {
+                            let matches = if filter.contains("::") {
+                                if filter.starts_with("*::") {
+                                    let target = &filter[3..];
+                                    trait_path.segments.last()
+                                        .map(|seg| seg.ident.to_string() == target)
+                                        .unwrap_or(false)
+                                } else {
+                                    let path_str = trait_path.segments.iter()
+                                        .map(|seg| seg.ident.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join("::");
+                                    path_str == filter
+                                }
+                            } else {
+                                trait_path.segments.last()
+                                    .map(|seg| seg.ident.to_string() == filter)
+                                    .unwrap_or(false)
+                            };
+                            if !matches {
+                                syn::visit::visit_item_impl(self, node);
+                                return;
+                            }
+                        }
+
+                        // Extract the implementing type name
+                        let type_name = match &*node.self_ty {
+                            syn::Type::Path(tp) => {
+                                tp.path.segments.last()
+                                    .map(|seg| seg.ident.to_string())
+                                    .unwrap_or_else(|| quote::quote!(#tp).to_string())
+                            }
+                            other => quote::quote!(#other).to_string(),
+                        };
+
+                        let identifier = format!("{} for {}", trait_name, type_name);
+                        let snippet = format!("impl {} for {} {{ ... }}", trait_name, type_name);
+                        let location = self.editor.span_to_location(node.impl_token.span);
+
+                        self.results.push(InspectResult {
+                            file_path: String::new(),
+                            node_type: "trait-impl".to_string(),
+                            identifier,
+                            location,
+                            snippet,
+                            preceding_comment: None,
+                        });
+
+                        syn::visit::visit_item_impl(self, node);
+                    }
+                }
+
+                let mut visitor = TraitImplVisitor {
+                    results: &mut results,
+                    name_filter,
+                    editor: self,
                 };
 
                 for item in &self.syntax_tree.items {

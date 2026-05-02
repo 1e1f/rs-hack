@@ -1,16 +1,16 @@
-//! @arch:layer(core)
-//! @arch:role(refactor)
-//!
 //! Core library for AST-aware Rust refactoring.
 //! Re-exports operations, editor, diff, surgical edits, and state management.
 
-pub mod operations;
-pub mod visitor;
-pub mod editor;
+pub mod commands;
 pub mod diff;
+pub mod editor;
+pub mod execute;
+pub mod files;
+pub mod operations;
 pub mod path_resolver;
-pub mod surgical;
 pub mod state;
+pub mod surgical;
+pub mod visitor;
 
 #[cfg(test)]
 mod tests;

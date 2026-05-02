@@ -1,7 +1,3 @@
-//! @arch:layer(core)
-//! @arch:role(emit)
-//! @arch:note(Preserves all formatting - only modifies specific byte ranges)
-//!
 //! Surgical edit engine: applies precise, minimal text replacements
 //! to source code while preserving all formatting, comments, and whitespace.
 

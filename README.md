@@ -265,6 +265,14 @@ rs-hack add --name Rectangle --field "color: String" --paths src --apply
   - Works with all node types
   - Content filtering for precise targeting
 
+### Discovery Commands (5) ⭐ NEW
+- ✅ **impls**: list trait implementors (`--trait HistoryCell`)
+- ✅ **match-audit**: report missing variants per `match` site (`--enum View`)
+- ✅ **doc-coverage**: count missing-doc items, list top offenders (`--fields` to descend into members)
+- ✅ **summary**: single-file inventory — public items, type counts, fns, re-exports, module doc (`--path FILE`)
+- ✅ **neighbors**: pure-filesystem siblings / twin-dirs / tests for a path
+- See `find --context N` for grep-style raw-line context around matches
+
 ### State & Utilities (5)
 - ✅ **history**: View past operations
 - ✅ **revert**: Undo specific changes

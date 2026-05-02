@@ -1,8 +1,3 @@
-//! @arch:layer(mcp)
-//! @arch:role(bridge)
-//! @arch:role(discovery)
-//! @arch:note(Each MCP tool maps 1:1 to an rs-hack CLI subcommand via subprocess)
-//!
 //! Tool registry: defines MCP tool schemas and executes them
 //! by shelling out to the rs-hack CLI binary.
 
@@ -225,59 +220,6 @@ impl ToolRegistry {
                     }),
                 },
 
-                // ============================================================
-                // ARCHITECTURE TOOLS (4) - query @arch: annotations
-                // Use these to understand codebase architecture before editing.
-                // Requires @arch: annotations in doc comments (see rs-hack arch init).
-                // ============================================================
-                Tool {
-                    name: "arch_context",
-                    description: "Get architectural context for a file. Returns layer, role, thread, QoS, constraints, and design notes/rationale extracted from @arch: annotations. USE THIS BEFORE EDITING a file to understand its architectural role and constraints. If a file has no annotations, the result will be empty — that's normal for unannotated repos.",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "file": {"type": "string", "description": "File path to get context for (e.g., 'src/editor.rs')"},
-                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
-                            "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"}
-                        },
-                        "required": ["file"]
-                    }),
-                },
-                Tool {
-                    name: "arch_query",
-                    description: "Query the architecture knowledge graph built from @arch: annotations. Find modules by layer, role, or other properties. Examples: 'layer:core', 'role:parser AND layer:core', 'file:editor'. Better than grep for architectural questions — returns only annotated nodes with their metadata.",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string", "description": "Query using predicates: layer:X, role:X, thread:X, file:X, gateway, owns_voices. Combine with AND/OR/NOT."},
-                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
-                            "format": {"type": "string", "enum": ["ids", "verbose"], "description": "Output format: 'ids' (default) or 'verbose' (with file locations and properties)"}
-                        },
-                        "required": ["query"]
-                    }),
-                },
-                Tool {
-                    name: "arch_validate",
-                    description: "Validate architecture rules defined in Cargo.toml [workspace.metadata.arch.rules]. Returns violations with file locations. Use after making changes to ensure architectural constraints (e.g., layer dependencies) are satisfied.",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
-                            "include_schema_rules": {"type": "boolean", "default": true, "description": "Include auto-generated rules from layer dependency schema"}
-                        }
-                    }),
-                },
-                Tool {
-                    name: "arch_schema",
-                    description: "Show the architecture schema: valid layers, roles, threads, QoS classes, and message types defined in Cargo.toml [workspace.metadata.arch]. Use this to understand what annotations are available in a project.",
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to workspace root (default: current directory)"},
-                            "format": {"type": "string", "enum": ["text", "json"], "description": "Output format (default: text)"}
-                        }
-                    }),
-                },
             ],
         }
     }
@@ -289,15 +231,19 @@ impl ToolRegistry {
     pub async fn call(&self, name: &str, arguments: Value) -> Result<String> {
         debug!("Executing tool: {} with args: {:?}", name, arguments);
 
+        // In-process dispatch for tools backed by the rs-hack lib API.
+        // Returns serialized JSON; bypasses argv → CLI → stdout marshalling.
+        if name == "find" {
+            return Self::call_find_inproc(&arguments);
+        }
+
         // Map tool name to rs-hack command and build arguments
         let (command, args) = self.build_command(name, &arguments)?;
 
         debug!("Running: rs-hack {} {}", command, args.join(" "));
 
-        // Execute rs-hack command (command may be multi-word, e.g. "arch context")
-        let cmd_parts: Vec<&str> = command.split_whitespace().collect();
         let output = Command::new("rs-hack")
-            .args(&cmd_parts)
+            .arg(&command)
             .args(&args)
             .output()
             .map_err(|e| anyhow!("Failed to run rs-hack: {}. Is it installed?", e))?;
@@ -308,7 +254,7 @@ impl ToolRegistry {
 
             // If operation completed and apply was false, add reminder
             // (skip for read-only tools that don't have an apply parameter)
-            let is_read_only = name.starts_with("arch_") || name == "find" || name == "history";
+            let is_read_only = name == "find" || name == "history";
             if !is_read_only && !self.get_bool(&arguments, "apply") && !result.is_empty() {
                 Ok(format!("{}\n\n💡 This was a DRY RUN. Use apply=true to make actual changes.", result))
             } else {
@@ -318,6 +264,46 @@ impl ToolRegistry {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(anyhow!("rs-hack failed: {}", stderr))
         }
+    }
+
+    /// In-process `find`: builds `FindArgs` from the JSON tool arguments,
+    /// calls the rs-hack lib, returns serialized matches. The `format` field
+    /// in the schema is honored by always returning JSON — agent consumers
+    /// of the MCP server want structured data, not the CLI's grouped/snippet
+    /// rendering.
+    fn call_find_inproc(arguments: &Value) -> Result<String> {
+        use rs_hack::commands::find::{run, FindArgs};
+        use std::path::PathBuf;
+
+        let str_arg =
+            |k: &str| -> Option<String> { arguments.get(k).and_then(|v| v.as_str()).map(String::from) };
+
+        let paths: Vec<PathBuf> = arguments
+            .get("paths")
+            .and_then(|v| v.as_str())
+            .map(|s| vec![PathBuf::from(s)])
+            .ok_or_else(|| anyhow!("find: 'paths' is required"))?;
+
+        let include_comments = arguments
+            .get("include_comments")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let args = FindArgs {
+            paths,
+            exclude: Vec::new(),
+            kind: str_arg("kind"),
+            node_type: str_arg("node_type"),
+            name: str_arg("name"),
+            variant: str_arg("variant"),
+            content_filter: str_arg("content_filter"),
+            field_name: str_arg("field_name"),
+            include_comments,
+            context: None,
+        };
+
+        let result = run(&args)?;
+        Ok(serde_json::to_string_pretty(&result)?)
     }
 
     fn build_command(&self, tool_name: &str, arguments: &Value) -> Result<(String, Vec<String>)> {
@@ -388,23 +374,6 @@ impl ToolRegistry {
                     args.push("--apply".to_string());
                 }
                 "batch"
-            }
-            // Architecture tools - map to "rs-hack arch <subcommand>"
-            "arch_context" => {
-                self.add_arch_context_args(&arguments, &mut args);
-                "arch context"
-            }
-            "arch_query" => {
-                self.add_arch_query_args(&arguments, &mut args);
-                "arch query"
-            }
-            "arch_validate" => {
-                self.add_arch_validate_args(&arguments, &mut args);
-                "arch validate"
-            }
-            "arch_schema" => {
-                self.add_arch_schema_args(&arguments, &mut args);
-                "arch schema"
             }
             // All other commands map 1:1 (with underscores -> dashes)
             _ => {
@@ -862,59 +831,4 @@ impl ToolRegistry {
         }
     }
 
-    // ============================================================
-    // Architecture tool argument builders
-    // ============================================================
-
-    fn add_arch_context_args(&self, arguments: &Value, args: &mut Vec<String>) {
-        // 'file' is a positional arg in the CLI
-        if let Some(file) = arguments.get("file").and_then(|v| v.as_str()) {
-            // path flag must come before the positional arg
-            if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
-                args.push("--path".to_string());
-                args.push(path.to_string());
-            }
-            if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
-                args.push("--format".to_string());
-                args.push(format.to_string());
-            }
-            args.push(file.to_string());
-        }
-    }
-
-    fn add_arch_query_args(&self, arguments: &Value, args: &mut Vec<String>) {
-        // 'query' is a positional arg in the CLI
-        if let Some(query) = arguments.get("query").and_then(|v| v.as_str()) {
-            if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
-                args.push("--path".to_string());
-                args.push(path.to_string());
-            }
-            if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
-                args.push("--format".to_string());
-                args.push(format.to_string());
-            }
-            args.push(query.to_string());
-        }
-    }
-
-    fn add_arch_validate_args(&self, arguments: &Value, args: &mut Vec<String>) {
-        if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
-            args.push("--path".to_string());
-            args.push(path.to_string());
-        }
-        if self.get_bool(arguments, "include_schema_rules") {
-            args.push("--include-schema-rules".to_string());
-        }
-    }
-
-    fn add_arch_schema_args(&self, arguments: &Value, args: &mut Vec<String>) {
-        if let Some(path) = arguments.get("path").and_then(|v| v.as_str()) {
-            args.push("--path".to_string());
-            args.push(path.to_string());
-        }
-        if let Some(format) = arguments.get("format").and_then(|v| v.as_str()) {
-            args.push("--format".to_string());
-            args.push(format.to_string());
-        }
-    }
 }

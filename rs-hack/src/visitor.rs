@@ -1,6 +1,3 @@
-//! @arch:layer(core)
-//! @arch:role(traverse)
-//!
 //! AST visitor that walks syn trees to collect node matches
 //! (structs, enums, functions, match expressions).
 

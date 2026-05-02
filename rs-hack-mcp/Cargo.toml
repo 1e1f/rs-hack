@@ -30,8 +30,8 @@ bytes = "1.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# rs-hack integration (not needed - we call via CLI)
-# rs-hack = { path = "..", version = "0.4.3" }
+# rs-hack lib: in-process tool dispatch (find, execute) without shelling out
+rs-hack = { path = "../rs-hack", version = "0.5.4" }
 
 [dev-dependencies]
 tokio-test = "0.4"

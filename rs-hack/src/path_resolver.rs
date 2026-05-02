@@ -1,6 +1,3 @@
-//! @arch:layer(core)
-//! @arch:role(resolve)
-//!
 //! Path resolution for safely matching qualified paths in Rust code.
 //! Tracks use statements and validates whether a path refers to a specific target.
 ///
