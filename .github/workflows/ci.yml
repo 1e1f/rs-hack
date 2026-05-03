@@ -65,3 +65,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Run integration tests
+        run: bash rs-hack/integration_test.sh
