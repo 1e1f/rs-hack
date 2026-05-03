@@ -2939,7 +2939,7 @@ fn main() -> Result<()> {
                                     if let Ok(content) = std::fs::read_to_string(&result.file_path)
                                     {
                                         let lines: Vec<&str> = content.lines().collect();
-                                        let match_line = result.location.line.saturating_sub(1); // 0-indexed
+                                        let match_line = result.location.line; // already 0-indexed
                                         let start = match_line.saturating_sub(n);
                                         for (i, line) in lines[start..match_line].iter().enumerate()
                                         {
