@@ -1,15 +1,15 @@
 //! CLI frontend for rs-hack. Parses clap commands and dispatches
 //! to core library operations.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rs_hack::diff::{print_diff, print_summary_diff, DiffStats};
-use rs_hack::editor::{self, RustEditor};
+use rs_hack::editor::RustEditor;
 use rs_hack::files::{collect_rust_files_with_exclusions, expand_kind_to_node_types};
 use rs_hack::operations::{self, *};
-use rs_hack::state::{self, *};
+use rs_hack::state::*;
 
 #[derive(Parser)]
 #[command(name = "rs-hack")]
@@ -75,6 +75,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// [LEGACY] Add a field to a struct - use 'rs-hack add' instead
     #[command(hide = true)]
@@ -1555,7 +1556,7 @@ fn validate_enum_variant_rename(
     struct VariantFinder<'a> {
         enum_name: &'a str,
         variant_name: &'a str,
-        enum_path: Option<&'a str>,
+        _enum_path: Option<&'a str>,
         references: Vec<(String, usize, usize, String)>, // (file, line, col, code)
     }
 
@@ -1595,7 +1596,7 @@ fn validate_enum_variant_rename(
     let mut finder = VariantFinder {
         enum_name,
         variant_name: old_variant,
-        enum_path,
+        _enum_path: enum_path,
         references: Vec::new(),
     };
 
@@ -1603,7 +1604,7 @@ fn validate_enum_variant_rename(
         let content = std::fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
 
-        let syntax_tree: File = syn::parse_str(&content)
+        let _syntax_tree: File = syn::parse_str(&content)
             .with_context(|| format!("Failed to parse {}", file_path.display()))?;
 
         // Search for simple text matches (this catches things AST might miss)
@@ -1816,7 +1817,7 @@ fn show_target_hints(
         for result in &hint_results {
             by_type
                 .entry(result.node_type.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(result);
         }
 
@@ -1872,10 +1873,10 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddStructField(AddStructFieldOp {
-                struct_name: struct_name.clone(),
-                field_def: field.clone(),
+                struct_name,
+                field_def: field,
                 position: parse_position(&position)?,
-                literal_default: literal_default.clone(),
+                literal_default,
                 where_filter: cli.r#where.clone(),
             });
 
@@ -1900,8 +1901,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateStructField(UpdateStructFieldOp {
-                struct_name: struct_name.clone(),
-                field_def: field.clone(),
+                struct_name,
+                field_def: field,
                 where_filter: cli.r#where.clone(),
             });
 
@@ -1927,8 +1928,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveStructField(RemoveStructFieldOp {
-                struct_name: struct_name.clone(),
-                field_name: field_name.clone(),
+                struct_name,
+                field_name,
                 literal_only,
                 where_filter: cli.r#where.clone(),
             });
@@ -1945,6 +1946,7 @@ fn main() -> Result<()> {
             )?;
         }
 
+        #[allow(deprecated)]
         Commands::AddStructLiteralField {
             paths,
             struct_name,
@@ -1954,8 +1956,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddStructLiteralField(AddStructLiteralFieldOp {
-                struct_name: struct_name.clone(),
-                field_def: field.clone(),
+                struct_name,
+                field_def: field,
                 position: parse_position(&position)?,
                 struct_path: None, // Deprecated command doesn't support path resolution
             });
@@ -1982,8 +1984,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddEnumVariant(AddEnumVariantOp {
-                enum_name: enum_name.clone(),
-                variant_def: variant.clone(),
+                enum_name,
+                variant_def: variant,
                 position: parse_position(&position)?,
                 where_filter: cli.r#where.clone(),
             });
@@ -2009,8 +2011,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateEnumVariant(UpdateEnumVariantOp {
-                enum_name: enum_name.clone(),
-                variant_def: variant.clone(),
+                enum_name,
+                variant_def: variant,
                 where_filter: cli.r#where.clone(),
             });
 
@@ -2035,8 +2037,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveEnumVariant(RemoveEnumVariantOp {
-                enum_name: enum_name.clone(),
-                variant_name: variant_name.clone(),
+                enum_name,
+                variant_name,
                 where_filter: cli.r#where.clone(),
             });
 
@@ -2079,10 +2081,10 @@ fn main() -> Result<()> {
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 let op = Operation::RenameEnumVariant(RenameEnumVariantOp {
-                    enum_name: enum_name.clone(),
-                    old_variant: old_variant.clone(),
-                    new_variant: new_variant.clone(),
-                    enum_path: enum_path.clone(),
+                    enum_name,
+                    old_variant,
+                    new_variant,
+                    enum_path,
                     edit_mode,
                 });
 
@@ -2120,9 +2122,9 @@ fn main() -> Result<()> {
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 let op = Operation::RenameFunction(RenameFunctionOp {
-                    old_name: old_name.clone(),
-                    new_name: new_name.clone(),
-                    function_path: function_path.clone(),
+                    old_name,
+                    new_name,
+                    function_path,
                     edit_mode,
                 });
 
@@ -2170,14 +2172,14 @@ fn main() -> Result<()> {
                 "type-ref",
             ];
 
-            if let Some(nt) = &node_type {
-                if granular_types.contains(&nt.as_str()) {
+            if let Some(nt) = &node_type
+                && granular_types.contains(&nt.as_str()) {
                     // Use Transform operation for granular renaming
                     let op = Operation::Transform(TransformOp {
                         node_type: nt.clone(),
-                        name_filter: Some(name.clone()),
+                        name_filter: Some(name),
                         content_filter: None,
-                        action: TransformAction::Replace { with: to.clone() },
+                        action: TransformAction::Replace { with: to },
                     });
                     execute_operation_with_state(
                         &files,
@@ -2191,7 +2193,6 @@ fn main() -> Result<()> {
                     )?;
                     return Ok(());
                 }
-            }
 
             // Handle --kind expansion for semantic grouping
             if let Some(k) = &kind {
@@ -2208,9 +2209,9 @@ fn main() -> Result<()> {
                     // For identifier kind, use Transform
                     let op = Operation::Transform(TransformOp {
                         node_type: "identifier".to_string(),
-                        name_filter: Some(name.clone()),
+                        name_filter: Some(name),
                         content_filter: None,
-                        action: TransformAction::Replace { with: to.clone() },
+                        action: TransformAction::Replace { with: to },
                     });
                     execute_operation_with_state(
                         &files,
@@ -2257,8 +2258,8 @@ fn main() -> Result<()> {
                     let op = Operation::RenameEnumVariant(RenameEnumVariantOp {
                         enum_name: enum_name.to_string(),
                         old_variant: old_variant.to_string(),
-                        new_variant: to.clone(),
-                        enum_path: enum_path.clone(),
+                        new_variant: to,
+                        enum_path,
                         edit_mode,
                     });
 
@@ -2327,9 +2328,9 @@ fn main() -> Result<()> {
                         validate_function_rename(&files, &name, function_path.as_deref())?;
                     } else {
                         let op = Operation::RenameFunction(RenameFunctionOp {
-                            old_name: name.clone(),
-                            new_name: to.clone(),
-                            function_path: function_path.clone(),
+                            old_name: name,
+                            new_name: to,
+                            function_path,
                             edit_mode,
                         });
 
@@ -2360,9 +2361,9 @@ fn main() -> Result<()> {
                         } else {
                             let op = Operation::RenameEnumVariant(RenameEnumVariantOp {
                                 enum_name: enum_name.clone(),
-                                old_variant: name.clone(),
-                                new_variant: to.clone(),
-                                enum_path: enum_path.clone(),
+                                old_variant: name,
+                                new_variant: to,
+                                enum_path,
                                 edit_mode,
                             });
 
@@ -2429,7 +2430,7 @@ fn main() -> Result<()> {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::AddMatchArm(AddMatchArmOp {
                 pattern: pattern.unwrap_or_default(),
-                body: body.clone(),
+                body,
                 function_name: function,
                 auto_detect,
                 enum_name,
@@ -2455,8 +2456,8 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::UpdateMatchArm(UpdateMatchArmOp {
-                pattern: pattern.clone(),
-                new_body: body.clone(),
+                pattern,
+                new_body: body,
                 function_name: function,
             });
 
@@ -2479,7 +2480,7 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::RemoveMatchArm(RemoveMatchArmOp {
-                pattern: pattern.clone(),
+                pattern,
                 function_name: function,
             });
 
@@ -2533,8 +2534,8 @@ fn main() -> Result<()> {
                 kind: kind.clone(),
                 node_type: node_type.clone(),
                 name: name.clone(),
-                variant: variant.clone(),
-                content_filter: content_filter.clone(),
+                variant,
+                content_filter,
                 field_name: field_name.clone(),
                 include_comments,
                 context,
@@ -2626,7 +2627,7 @@ fn main() -> Result<()> {
                         if let FieldContext::StructLiteral { struct_name } = &loc.context {
                             by_struct
                                 .entry(struct_name.clone())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(loc);
                         }
                     }
@@ -2662,7 +2663,10 @@ fn main() -> Result<()> {
 
             // Hints system: If we found nothing with a specific node-type, check if other types
             // have matches
-            if all_results.is_empty() && node_type.is_some() && name.is_some() {
+            if all_results.is_empty()
+                && let Some(node_type_str) = node_type.as_deref()
+                && let Some(name_str) = name.as_deref()
+            {
                 let hint_results = rs_hack::commands::find::run_unfiltered_by_node_type(&args)?;
 
                 // If we found matches in other node types, show hints
@@ -2674,21 +2678,14 @@ fn main() -> Result<()> {
                     for result in &hint_results {
                         by_type
                             .entry(result.node_type.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(result);
                     }
 
                     // Display helpful message
-                    eprintln!(
-                        "No {} found named \"{}\"",
-                        node_type.as_ref().unwrap(),
-                        name.as_ref().unwrap()
-                    );
+                    eprintln!("No {} found named \"{}\"", node_type_str, name_str);
                     eprintln!();
-                    eprintln!(
-                        "Hint: Found \"{}\" in other contexts:",
-                        name.as_ref().unwrap()
-                    );
+                    eprintln!("Hint: Found \"{}\" in other contexts:", name_str);
 
                     for (ntype, results) in by_type.iter() {
                         let count = results.len();
@@ -2716,7 +2713,7 @@ fn main() -> Result<()> {
                             .map(|p| p.to_string_lossy())
                             .collect::<Vec<_>>()
                             .join(" "),
-                        name.as_ref().unwrap()
+                        name_str
                     );
 
                     return Ok(());
@@ -2724,13 +2721,12 @@ fn main() -> Result<()> {
             }
 
             // Fallback: If we still found nothing with a name filter, do a text search
-            if all_results.is_empty() && name.is_some() {
-                let search_name = name.as_ref().unwrap();
+            if all_results.is_empty() && let Some(search_name) = name.as_deref() {
                 let mut text_matches: Vec<(String, usize)> = Vec::new();
                 let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
                 for file in &files {
-                    let content = std::fs::read_to_string(&file)
+                    let content = std::fs::read_to_string(file)
                         .context(format!("Failed to read file: {:?}", file))?;
 
                     let count = content
@@ -2806,7 +2802,7 @@ fn main() -> Result<()> {
                         for result in &all_results {
                             by_type
                                 .entry(result.node_type.clone())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(result);
                         }
 
@@ -2838,7 +2834,7 @@ fn main() -> Result<()> {
                             let count = results.len();
 
                             println!(
-                                "{}{}{}:",
+                                "{}{}:",
                                 type_name,
                                 if count > 1 {
                                     format!(
@@ -2848,8 +2844,7 @@ fn main() -> Result<()> {
                                     )
                                 } else {
                                     String::new()
-                                },
-                                ""
+                                }
                             );
 
                             for result in results {
@@ -2876,8 +2871,8 @@ fn main() -> Result<()> {
                         }
 
                         // Add hints for struct-literal searches with simple names
-                        if let Some(ref search_name) = name {
-                            if !search_name.contains("::")
+                        if let Some(ref search_name) = name
+                            && !search_name.contains("::")
                                 && (node_type.as_deref() == Some("struct-literal")
                                     || kind.as_deref() == Some("struct"))
                             {
@@ -2923,14 +2918,13 @@ fn main() -> Result<()> {
                                     }
                                 }
                             }
-                        }
                     } else {
                         // Standard non-grouped output
                         let mut prev_file: Option<&str> = None;
                         for result in &all_results {
                             // Context lines (--context N): show N raw lines before the snippet
-                            if let Some(n) = context {
-                                if n > 0 {
+                            if let Some(n) = context
+                                && n > 0 {
                                     // Separator between matches (grep-B style)
                                     if prev_file.is_some() {
                                         println!("--");
@@ -2947,7 +2941,6 @@ fn main() -> Result<()> {
                                         }
                                     }
                                 }
-                            }
                             println!(
                                 "// {}:{}:{} - {}",
                                 result.file_path,
@@ -3011,7 +3004,7 @@ fn main() -> Result<()> {
             use rs_hack::commands::find::FindArgs;
 
             let args = FindArgs {
-                paths: paths.clone(),
+                paths,
                 exclude: cli.exclude.clone(),
                 node_type: Some("trait-impl".to_string()),
                 name: Some(r#trait.clone()),
@@ -3032,9 +3025,7 @@ fn main() -> Result<()> {
                 for m in &matches {
                     // identifier = "TraitName for TypeName" — split to get type name
                     let type_name = m
-                        .identifier
-                        .splitn(2, " for ")
-                        .nth(1)
+                        .identifier.split_once(" for ").map(|x| x.1)
                         .unwrap_or(&m.identifier);
                     println!("  {} ({}:{})", type_name, m.file_path, m.location.line);
                 }
@@ -3068,8 +3059,8 @@ fn main() -> Result<()> {
                 derives.split(',').map(|s| s.trim().to_string()).collect();
 
             let op = Operation::AddDerive(AddDeriveOp {
-                target_name: name.clone(),
-                target_type: target_type.clone(),
+                target_name: name,
+                target_type,
                 derives: derive_vec,
                 where_filter: cli.r#where.clone(),
             });
@@ -3095,8 +3086,8 @@ fn main() -> Result<()> {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::AddImplMethod(AddImplMethodOp {
-                target: target.clone(),
-                method_def: method.clone(),
+                target,
+                method_def: method,
                 position: parse_position(&position)?,
             });
 
@@ -3120,7 +3111,7 @@ fn main() -> Result<()> {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::AddUseStatement(AddUseStatementOp {
-                use_path: use_path.clone(),
+                use_path,
                 position: parse_position(&position)?,
             });
 
@@ -3156,7 +3147,7 @@ fn main() -> Result<()> {
             kind,
             node_type,
             literal_default,
-            literal_only,
+            literal_only: _,
             default_rest,
             base,
             call,
@@ -3206,7 +3197,7 @@ fn main() -> Result<()> {
                 let base_expr = if default_rest {
                     "Default::default()".to_string()
                 } else {
-                    base.clone().unwrap()
+                    base.unwrap()
                 };
 
                 let op = Operation::SetStructLiteralBase(SetStructLiteralBaseOp {
@@ -3280,10 +3271,10 @@ fn main() -> Result<()> {
 
                     let op = Operation::AddMatchArm(AddMatchArmOp {
                         pattern: "".to_string(), // Not used in auto-detect mode
-                        body: body.clone().unwrap(),
-                        function_name: function.clone(),
+                        body: body.unwrap(),
+                        function_name: function,
                         auto_detect: true,
-                        enum_name: enum_name.clone(),
+                        enum_name,
                     });
                     execute_operation_with_state(
                         &files,
@@ -3297,9 +3288,9 @@ fn main() -> Result<()> {
                     )?;
                 } else {
                     let op = Operation::AddMatchArm(AddMatchArmOp {
-                        pattern: match_arm.clone().unwrap(),
-                        body: body.clone().unwrap(),
-                        function_name: function.clone(),
+                        pattern: match_arm.unwrap(),
+                        body: body.unwrap(),
+                        function_name: function,
                         auto_detect: false,
                         enum_name: None,
                     });
@@ -3341,8 +3332,8 @@ fn main() -> Result<()> {
 
                 let op = Operation::AddDocComment(AddDocCommentOp {
                     target_type,
-                    name: name.clone().unwrap(),
-                    doc_comment: doc_text.clone(),
+                    name: name.unwrap(),
+                    doc_comment: doc_text,
                     style: DocCommentStyle::Line,
                 });
                 execute_operation_with_state(
@@ -3361,7 +3352,7 @@ fn main() -> Result<()> {
             // Handle --use (doesn't require --name)
             if let Some(use_path) = r#use {
                 let op = Operation::AddUseStatement(AddUseStatementOp {
-                    use_path: use_path.clone(),
+                    use_path,
                     position: parse_position(&position)?,
                 });
                 execute_operation_with_state(
@@ -3399,7 +3390,7 @@ fn main() -> Result<()> {
                         }
                         (None, Some(fvalue)) => {
                             // Only value: literals only (no type needed)
-                            (fname.clone(), Some(fvalue.clone()))
+                            (fname, Some(fvalue.clone()))
                         }
                         (None, None) => {
                             anyhow::bail!("--field-name requires either --field-type (for definitions) or --field-value (for literals) or both");
@@ -3407,7 +3398,7 @@ fn main() -> Result<()> {
                     }
                 } else {
                     // Old API: --field [--literal-default]
-                    (field.clone().unwrap(), literal_default.clone())
+                    (field.unwrap(), literal_default)
                 };
 
                 // For literal-only operations (field_value without field_type), skip struct
@@ -3468,7 +3459,7 @@ fn main() -> Result<()> {
 
                 let op = Operation::AddEnumVariant(AddEnumVariantOp {
                     enum_name: target_name.clone(),
-                    variant_def: variant_def.clone(),
+                    variant_def,
                     position: parse_position(&position)?,
                     where_filter: cli.r#where.clone(),
                 });
@@ -3492,7 +3483,7 @@ fn main() -> Result<()> {
 
                 let op = Operation::AddImplMethod(AddImplMethodOp {
                     target: target_name.clone(),
-                    method_def: method_def.clone(),
+                    method_def,
                     position: parse_position(&position)?,
                 });
                 execute_operation(
@@ -3604,8 +3595,8 @@ fn main() -> Result<()> {
             // Handle --match-arm operations
             if let Some(pattern) = match_arm {
                 let op = Operation::RemoveMatchArm(RemoveMatchArmOp {
-                    pattern: pattern.clone(),
-                    function_name: function.clone(),
+                    pattern,
+                    function_name: function,
                 });
                 execute_operation_with_state(
                     &files,
@@ -3644,7 +3635,7 @@ fn main() -> Result<()> {
 
                 let op = Operation::RemoveDocComment(RemoveDocCommentOp {
                     target_type,
-                    name: name.clone().unwrap(),
+                    name: name.unwrap(),
                 });
                 execute_operation_with_state(
                     &files,
@@ -3710,7 +3701,7 @@ fn main() -> Result<()> {
 
                 let op = Operation::RemoveStructField(RemoveStructFieldOp {
                     struct_name: target_name.clone(),
-                    field_name: field.clone(),
+                    field_name: field,
                     literal_only,
                     where_filter: cli.r#where.clone(),
                 });
@@ -3733,7 +3724,7 @@ fn main() -> Result<()> {
 
                 let op = Operation::RemoveEnumVariant(RemoveEnumVariantOp {
                     enum_name: target_name.clone(),
-                    variant_name: variant_name.clone(),
+                    variant_name,
                     where_filter: cli.r#where.clone(),
                 });
                 execute_operation_with_state(
@@ -3750,7 +3741,7 @@ fn main() -> Result<()> {
                 // Removing impl method
                 // Note: We don't have RemoveImplMethod operation yet, so bail with helpful message
                 anyhow::bail!("Remove impl method is not yet implemented. Use the transform command to comment out methods:\n  rs-hack transform --paths src --node-type impl-method --name {} --action comment --apply", method_name);
-            } else if let Some(derive_macro) = derive {
+            } else if let Some(_derive_macro) = derive {
                 // Removing derive macro
                 // Note: We don't have RemoveDerive operation yet, so bail with helpful message
                 anyhow::bail!("Remove derive macro is not yet implemented. This is planned for a future release.\nFor now, you can manually edit the derive attribute or use the transform command.");
@@ -3833,9 +3824,9 @@ fn main() -> Result<()> {
                 }
 
                 let op = Operation::UpdateMatchArm(UpdateMatchArmOp {
-                    pattern: pattern.clone(),
-                    new_body: body.clone().unwrap(),
-                    function_name: function.clone(),
+                    pattern,
+                    new_body: body.unwrap(),
+                    function_name: function,
                 });
                 execute_operation_with_state(
                     &files,
@@ -3874,8 +3865,8 @@ fn main() -> Result<()> {
 
                 let op = Operation::UpdateDocComment(UpdateDocCommentOp {
                     target_type,
-                    name: name.clone().unwrap(),
-                    doc_comment: doc_text.clone(),
+                    name: name.unwrap(),
+                    doc_comment: doc_text,
                 });
                 execute_operation_with_state(
                     &files,
@@ -3909,7 +3900,7 @@ fn main() -> Result<()> {
                     }
                 } else {
                     // Old API: --field
-                    field.clone().unwrap()
+                    field.unwrap()
                 };
 
                 // Check if target exists using kind expansion if provided
@@ -3961,7 +3952,7 @@ fn main() -> Result<()> {
 
                 let op = Operation::UpdateEnumVariant(UpdateEnumVariantOp {
                     enum_name: target_name.clone(),
-                    variant_def: variant_def.clone(),
+                    variant_def,
                     where_filter: cli.r#where.clone(),
                 });
                 execute_operation_with_state(
@@ -4021,7 +4012,7 @@ fn main() -> Result<()> {
 
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
             let op = Operation::Transform(TransformOp {
-                node_type: node_type.clone(),
+                node_type,
                 name_filter: name,
                 content_filter,
                 action: transform_action,
@@ -4055,9 +4046,9 @@ fn main() -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let op = Operation::AddDocComment(AddDocCommentOp {
-                target_type: target_type.clone(),
-                name: name.clone(),
-                doc_comment: doc_comment.clone(),
+                target_type,
+                name,
+                doc_comment,
                 style: doc_style,
             });
 
@@ -4083,9 +4074,9 @@ fn main() -> Result<()> {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::UpdateDocComment(UpdateDocCommentOp {
-                target_type: target_type.clone(),
-                name: name.clone(),
-                doc_comment: doc_comment.clone(),
+                target_type,
+                name,
+                doc_comment,
             });
 
             execute_operation_with_state(
@@ -4109,8 +4100,8 @@ fn main() -> Result<()> {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
             let op = Operation::RemoveDocComment(RemoveDocCommentOp {
-                target_type: target_type.clone(),
-                name: name.clone(),
+                target_type,
+                name,
             });
 
             execute_operation_with_state(
@@ -4130,7 +4121,7 @@ fn main() -> Result<()> {
             field_name,
             summary,
         } => {
-            use operations::{FieldContext, FieldLocation};
+            use operations::FieldContext;
 
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
@@ -4441,8 +4432,8 @@ fn render_unmatched_paths(unmatched: &std::collections::HashMap<String, usize>) 
 
     println!("\nTo match all of these, use:");
 
-    if let Some((first_path, _)) = paths.first() {
-        if let Some(simple_name) = first_path.split("::").last() {
+    if let Some((first_path, _)) = paths.first()
+        && let Some(simple_name) = first_path.split("::").last() {
             println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
             println!("\nOr match specific paths:");
             for (path, _) in paths.iter().take(3) {
@@ -4452,18 +4443,21 @@ fn render_unmatched_paths(unmatched: &std::collections::HashMap<String, usize>) 
                 println!("   (and {} more...)", paths.len() - 3);
             }
         }
-    }
 }
 
 fn execute_batch(batch: &BatchSpec, apply: bool, exclude_patterns: &[String]) -> Result<()> {
     for op in &batch.operations {
         let files =
-            collect_rust_files_with_exclusions(&[batch.base_path.clone()], exclude_patterns)?;
+            collect_rust_files_with_exclusions(
+                std::slice::from_ref(&batch.base_path),
+                exclude_patterns,
+            )?;
         execute_operation(&files, op, apply, None, "default", false, None)?;
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_operation_with_state(
     files: &[PathBuf],
     op: &Operation,

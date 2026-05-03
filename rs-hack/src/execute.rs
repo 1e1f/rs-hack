@@ -1,8 +1,8 @@
-//! Silent execution of an `Operation` across a set of files. Returns a
-//! structured `ExecuteResult` with everything a caller needs to render output,
-//! make decisions, or surface errors. No `println!`/`eprintln!` — embedders
-//! (MCP server, yah, tests) decide what to display; the CLI in `main.rs`
-//! wraps these calls with its own renderer.
+//! Silent execution of an `Operation` across a set of files.
+//!
+//! Returns a structured `ExecuteResult` with everything a caller needs to render output, make
+//! decisions, or surface errors. No `println!`/`eprintln!` — embedders (MCP server, yah, tests)
+//! decide what to display; the CLI in `main.rs` wraps these calls with its own renderer.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -99,12 +99,11 @@ pub fn execute(files: &[PathBuf], op: &Operation, opts: &ExecuteOpts) -> Result<
                         modified_nodes: op_result.modified_nodes,
                     });
 
-                    if let Some(limit) = opts.limit {
-                        if result.total_modifications >= limit {
+                    if let Some(limit) = opts.limit
+                        && result.total_modifications >= limit {
                             result.limit_hit = true;
                             break;
                         }
-                    }
                 }
             }
             Err(e) => {
@@ -119,9 +118,10 @@ pub fn execute(files: &[PathBuf], op: &Operation, opts: &ExecuteOpts) -> Result<
     Ok(result)
 }
 
-/// Like `execute` but records a revertible run. Falls back to plain `execute`
-/// if `apply` is false or `output` is set (state tracking only applies to
-/// in-place writes). On success, populates `run_id` and `files_modified`.
+/// Like `execute` but records a revertible run.
+///
+/// Falls back to plain `execute` if `apply` is false or `output` is set (state tracking only
+/// applies to in-place writes). On success, populates `run_id` and `files_modified`.
 ///
 /// `command_line` is stored verbatim in the run metadata so users can recall
 /// what produced a given run; pass `String::new()` if the caller has no
@@ -192,12 +192,11 @@ pub fn execute_with_state(
                         modified_nodes: op_result.modified_nodes,
                     });
 
-                    if let Some(limit) = opts.limit {
-                        if result.total_modifications >= limit {
+                    if let Some(limit) = opts.limit
+                        && result.total_modifications >= limit {
                             result.limit_hit = true;
                             break;
                         }
-                    }
                 }
             }
             Err(e) => {

@@ -161,7 +161,7 @@ impl RunsIndex {
 
     pub fn get_sorted_runs(&self) -> Vec<&RunMetadata> {
         let mut runs: Vec<_> = self.runs.values().collect();
-        runs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        runs.sort_by_key(|r| std::cmp::Reverse(r.timestamp));
         runs
     }
 }

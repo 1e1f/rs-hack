@@ -1,6 +1,8 @@
-//! The RustEditor is the core engine of rs-hack. It parses Rust source
-//! into a syn AST, applies refactoring operations (add/remove/rename/update),
-//! and emits modified code via surgical edits or prettyplease reformatting.
+//! Core AST refactoring engine for rs-hack.
+//!
+//! Parses Rust source into a syn AST, applies refactoring operations
+//! (add/remove/rename/update), and emits modified code via surgical edits or prettyplease
+//! reformatting.
 
 use anyhow::{Context, Result};
 use proc_macro2::{LineColumn, Span};
@@ -4223,13 +4225,13 @@ impl RustEditor {
                         // Apply name filter to the trait name (same wildcard semantics as
                         // struct-literal)
                         if let Some(filter) = self.name_filter {
+                            #[allow(clippy::option_if_let_else)]
                             let matches = if filter.contains("::") {
-                                if filter.starts_with("*::") {
-                                    let target = &filter[3..];
+                                if let Some(target) = filter.strip_prefix("*::") {
                                     trait_path
                                         .segments
                                         .last()
-                                        .map(|seg| seg.ident.to_string() == target)
+                                        .map(|seg| seg.ident == target)
                                         .unwrap_or(false)
                                 } else {
                                     let path_str = trait_path
@@ -4244,7 +4246,7 @@ impl RustEditor {
                                 trait_path
                                     .segments
                                     .last()
-                                    .map(|seg| seg.ident.to_string() == filter)
+                                    .map(|seg| seg.ident == filter)
                                     .unwrap_or(false)
                             };
                             if !matches {

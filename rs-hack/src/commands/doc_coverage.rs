@@ -130,8 +130,8 @@ fn process_item(
                     label: format!("{} (struct)", s.ident),
                 });
             }
-            if check_fields {
-                if let syn::Fields::Named(ref named) = s.fields {
+            if check_fields
+                && let syn::Fields::Named(ref named) = s.fields {
                     for field in &named.named {
                         *total_fields += 1;
                         if !has_doc(&field.attrs) {
@@ -149,7 +149,6 @@ fn process_item(
                         }
                     }
                 }
-            }
         }
         Item::Enum(e) => {
             *total_items += 1;

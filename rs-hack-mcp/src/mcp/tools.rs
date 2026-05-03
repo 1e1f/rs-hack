@@ -574,18 +574,17 @@ impl ToolRegistry {
                 let flag = format!("--{}", key.replace('_', "-"));
 
                 match value {
-                    Value::Bool(true) => {
+                    Value::Bool(true)
                         // Handle boolean true values as flags
-                        if key == "apply"
+                        if (key == "apply"
                             || key == "literal_only"
                             || key == "summary"
                             || key == "force"
                             || key == "auto_detect"
-                            || key == "fields"
-                        {
+                            || key == "fields")
+                        => {
                             args.push(flag);
                         }
-                    }
                     Value::Bool(false) => {} // Skip false booleans (they're usually the default)
                     Value::String(s) => {
                         args.push(flag);

@@ -26,9 +26,9 @@ pub fn run(path: &PathBuf) -> Result<SummaryReport> {
     // Module-level doc: inner doc attrs (//! or #![doc = ...])
     let mut module_doc_parts: Vec<String> = Vec::new();
     for attr in &syntax.attrs {
-        if let syn::AttrStyle::Inner(_) = attr.style {
-            if attr.path().is_ident("doc") {
-                if let Ok(syn::MetaNameValue {
+        if let syn::AttrStyle::Inner(_) = attr.style
+            && attr.path().is_ident("doc")
+                && let Ok(syn::MetaNameValue {
                     value:
                         syn::Expr::Lit(syn::ExprLit {
                             lit: syn::Lit::Str(s),
@@ -42,8 +42,6 @@ pub fn run(path: &PathBuf) -> Result<SummaryReport> {
                         module_doc_parts.push(text);
                     }
                 }
-            }
-        }
     }
     let module_doc = if module_doc_parts.is_empty() {
         None
@@ -84,37 +82,31 @@ pub fn run(path: &PathBuf) -> Result<SummaryReport> {
                     public_items.push(f.sig.ident.to_string());
                 }
             }
-            syn::Item::Trait(t) => {
-                if is_public(&t.vis) {
+            syn::Item::Trait(t)
+                if is_public(&t.vis) => {
                     public_items.push(t.ident.to_string());
                 }
-            }
-            syn::Item::Const(c) => {
-                if is_public(&c.vis) {
+            syn::Item::Const(c)
+                if is_public(&c.vis) => {
                     public_items.push(c.ident.to_string());
                 }
-            }
-            syn::Item::Static(s) => {
-                if is_public(&s.vis) {
+            syn::Item::Static(s)
+                if is_public(&s.vis) => {
                     public_items.push(s.ident.to_string());
                 }
-            }
-            syn::Item::Mod(m) => {
-                if is_public(&m.vis) {
+            syn::Item::Mod(m)
+                if is_public(&m.vis) => {
                     public_items.push(m.ident.to_string());
                 }
-            }
-            syn::Item::Use(u) => {
-                if is_public(&u.vis) {
+            syn::Item::Use(u)
+                if is_public(&u.vis) => {
                     let tokens = quote::quote!(#u);
                     reexports.push(
                         tokens
                             .to_string()
-                            .replace(" :: ", "::")
-                            .replace(" as ", " as "),
+                            .replace(" :: ", "::"),
                     );
                 }
-            }
             _ => {}
         }
     }
@@ -174,7 +166,7 @@ pub fn render(report: &SummaryReport) {
     }
 }
 
-fn is_public(vis: &syn::Visibility) -> bool {
+const fn is_public(vis: &syn::Visibility) -> bool {
     matches!(
         vis,
         syn::Visibility::Public(_) | syn::Visibility::Restricted(_)

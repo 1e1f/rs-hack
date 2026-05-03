@@ -34,10 +34,10 @@ pub enum FindResult {
 }
 
 impl FindResult {
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         match self {
-            FindResult::Field { matches } => matches.is_empty(),
-            FindResult::Nodes { matches } => matches.is_empty(),
+            Self::Field { matches } => matches.is_empty(),
+            Self::Nodes { matches } => matches.is_empty(),
         }
     }
 }
