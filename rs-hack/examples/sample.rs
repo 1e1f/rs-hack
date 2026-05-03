@@ -18,7 +18,7 @@ pub enum Status {
     Published,
     Deleted,
 }
-// line 23 ftw!
+// landmark: comment immediately preceding an enum (no blank line)
 pub enum MessageType {
     Text { content: String },
     Image { url: String, caption: Option<String> },

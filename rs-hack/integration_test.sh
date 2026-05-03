@@ -96,22 +96,25 @@ section() {
 section "STRUCT OPERATIONS"
 # ============================================================================
 
-# Test 1: Add struct field
+# Test 1: Add struct field — must land INSIDE `User` body, not Post/Config.
 run_test "add-struct-field" \
     "$BINARY add-struct-field --paths $TEMP_DIR/test.rs --struct-name User --field 'email: String' --apply" \
-    "grep -q 'email: String' $TEMP_DIR/test.rs"
+    "awk '/pub struct User \{/,/^\}/' $TEMP_DIR/test.rs | grep -q 'email: String' && \
+     ! awk '/pub struct Post \{/,/^\}/' $TEMP_DIR/test.rs | grep -q 'email'"
 
-# Test 2: Update struct field
+# Test 2: Update struct field — visibility flips, field stays in User body.
 cp "$TEMP_DIR/test.rs" "$TEMP_DIR/test_backup.rs"
 run_test "update-struct-field" \
     "$BINARY update-struct-field --paths $TEMP_DIR/test.rs --struct-name User --field 'pub email: String' --apply" \
-    "grep -q 'pub email: String' $TEMP_DIR/test.rs" \
+    "awk '/pub struct User \{/,/^\}/' $TEMP_DIR/test.rs | grep -q 'pub email: String'" \
     "true"
 
-# Test 3: Remove struct field
+# Test 3: Remove struct field — field must be gone from User body
+# (other top-level mentions of `email` would be a real bug, so check the whole file too).
 run_test "remove-struct-field" \
     "$BINARY remove-struct-field --paths $TEMP_DIR/test.rs --struct-name User --field-name email --apply" \
-    "! grep -q 'email' $TEMP_DIR/test.rs" \
+    "! awk '/pub struct User \{/,/^\}/' $TEMP_DIR/test.rs | grep -q 'email' && \
+     ! grep -q 'email' $TEMP_DIR/test.rs" \
     "true"
 
 # Test 4: Add struct field with literal default (NEW FEATURE)
@@ -146,22 +149,23 @@ run_test "add-struct-field-literal-only" \
 section "ENUM OPERATIONS"
 # ============================================================================
 
-# Test 6: Add enum variant
+# Test 6: Add enum variant — must land in Status body, not MessageType.
 run_test "add-enum-variant" \
     "$BINARY add-enum-variant --paths $INPUT --enum-name Status --variant 'Archived' --output $TEMP_DIR/enum_test.rs --apply" \
-    "grep -q 'Archived' $TEMP_DIR/enum_test.rs"
+    "awk '/pub enum Status \{/,/^\}/' $TEMP_DIR/enum_test.rs | grep -q 'Archived' && \
+     ! awk '/pub enum MessageType \{/,/^\}/' $TEMP_DIR/enum_test.rs | grep -q 'Archived'"
 
-# Test 7: Update enum variant
+# Test 7: Update enum variant — Draft becomes a struct variant inside Status.
 cp "$TEMP_DIR/enum_test.rs" "$TEMP_DIR/test.rs"
 run_test "update-enum-variant" \
     "$BINARY update-enum-variant --paths $TEMP_DIR/test.rs --enum-name Status --variant 'Draft { created_at: u64 }' --apply" \
-    "grep -q 'Draft.*created_at' $TEMP_DIR/test.rs" \
+    "awk '/pub enum Status \{/,/^\}/' $TEMP_DIR/test.rs | grep -q 'Draft.*created_at'" \
     "true"
 
-# Test 8: Remove enum variant
+# Test 8: Remove enum variant — Archived must be gone from Status body.
 run_test "remove-enum-variant" \
     "$BINARY remove-enum-variant --paths $TEMP_DIR/test.rs --enum-name Status --variant-name Archived --apply" \
-    "! grep -q '^[[:space:]]*Archived' $TEMP_DIR/test.rs" \
+    "! awk '/pub enum Status \{/,/^\}/' $TEMP_DIR/test.rs | grep -q 'Archived'" \
     "true"
 
 # ============================================================================
@@ -341,18 +345,22 @@ EOF
 
 run_test "auto-detect-missing-match-arms" \
     "$BINARY add-match-arm --paths $TEMP_DIR/auto_detect_test.rs --auto-detect --enum-name Status --body 'todo!()' --function handle_status --apply" \
-    "grep -q 'Status::Published' $TEMP_DIR/auto_detect_test.rs && grep -q 'Status::Archived' $TEMP_DIR/auto_detect_test.rs && grep -q 'Status::Pending' $TEMP_DIR/auto_detect_test.rs" \
+    "awk '/fn handle_status/,/^\}/' $TEMP_DIR/auto_detect_test.rs | grep -q 'Status::Published.*=>' && \
+     awk '/fn handle_status/,/^\}/' $TEMP_DIR/auto_detect_test.rs | grep -q 'Status::Archived.*=>' && \
+     awk '/fn handle_status/,/^\}/' $TEMP_DIR/auto_detect_test.rs | grep -q 'Status::Pending.*=>' && \
+     [ \$(awk '/fn handle_status/,/^\}/' $TEMP_DIR/auto_detect_test.rs | grep -c 'todo!()') -eq 3 ]" \
     "true"
 
 # ============================================================================
 section "CODE ORGANIZATION"
 # ============================================================================
 
-# Test 13: Add derive macros
+# Test 13: Add derive macros — must merge into the User derive line, not Post or Status.
 cp "$INPUT" "$TEMP_DIR/derive_test.rs"
 run_test "add-derive" \
     "$BINARY add-derive --paths $TEMP_DIR/derive_test.rs --target-type struct --name User --derives 'Clone,Serialize' --apply" \
-    "grep -q 'Clone' $TEMP_DIR/derive_test.rs && grep -q 'Serialize' $TEMP_DIR/derive_test.rs" \
+    "grep -B1 'pub struct User' $TEMP_DIR/derive_test.rs | grep -q '#\[derive.*Clone.*Serialize\|#\[derive.*Serialize.*Clone' && \
+     ! grep -B1 'pub struct Post' $TEMP_DIR/derive_test.rs | grep -q 'Serialize'" \
     "true"
 
 # Test 14: Add impl method
@@ -878,7 +886,10 @@ EOF
 
 run_test "find-discovery-mode-all-types" \
     "$BINARY find --paths $TEMP_DIR/find_discovery.rs --name Rectangle" \
-    "grep -q 'struct:' $TEMP_DIR/cmd_output.txt && grep -q 'struct-literal:' $TEMP_DIR/cmd_output.txt && grep -q 'identifier' $TEMP_DIR/cmd_output.txt" \
+    "grep -qE '^struct:' $TEMP_DIR/cmd_output.txt && \
+     grep -qE '^struct-literal:' $TEMP_DIR/cmd_output.txt && \
+     grep -qE '^identifier( |:)' $TEMP_DIR/cmd_output.txt && \
+     grep -qE 'Found \"Rectangle\" in [0-9]+ contexts' $TEMP_DIR/cmd_output.txt" \
     "true"
 
 # Test: Enum variant filtering with --variant flag
@@ -905,10 +916,12 @@ run_test "find-hints-system" \
     "grep -q 'Hint:' $TEMP_DIR/cmd_output.txt && grep -q 'struct' $TEMP_DIR/cmd_output.txt" \
     "true"
 
-# Test: Canonical names in output (struct not ItemStruct)
+# Test: Canonical names in output (struct not ItemStruct, enum-variant not Variant, etc.)
 run_test "find-canonical-names" \
     "$BINARY find --paths $TEMP_DIR/find_discovery.rs --name Rectangle" \
-    "grep -q 'struct:' $TEMP_DIR/cmd_output.txt && ! grep -q 'ItemStruct' $TEMP_DIR/cmd_output.txt" \
+    "grep -qE '^struct:' $TEMP_DIR/cmd_output.txt && \
+     ! grep -qE 'Item(Struct|Enum|Fn|Mod|Use)' $TEMP_DIR/cmd_output.txt && \
+     ! grep -qE '^Variant( |:)' $TEMP_DIR/cmd_output.txt" \
     "true"
 
 # Test: Grouped output format
@@ -928,7 +941,7 @@ EOF
 
 run_test "add-doc-comment-struct" \
     "$BINARY add-doc-comment --paths $TEMP_DIR/doc_test.rs --target-type struct --name User --doc-comment 'User model' --apply" \
-    "grep -q '/// User model' $TEMP_DIR/doc_test.rs"
+    "grep -B1 'pub struct User' $TEMP_DIR/doc_test.rs | grep -q '/// User model'"
 
 # Test update-doc-comment
 run_test "update-doc-comment" \
@@ -1031,48 +1044,70 @@ run_test "base-default-shorthand" \
 section "DISCOVERY COMMANDS (NEW v0.5.5)"
 # ============================================================================
 
-# Test: find --context N prepends raw lines before each match
+# Test: find --context N prepends raw lines before each match.
+# User is at line 2 (1-indexed), preceded only by `#[derive(Debug)]` on line 1.
+# So with --context 2 we expect exactly the line "1: #[derive(Debug)]"
+# to appear BEFORE the match header (which contains "pub struct User").
 run_test "find-context-flag" \
     "$BINARY find --paths $INPUT --node-type struct --name User --context 2 > $TEMP_DIR/context_out.txt" \
-    "grep -qE '^[0-9]+: ' $TEMP_DIR/context_out.txt && grep -q 'pub struct User' $TEMP_DIR/context_out.txt" \
+    "grep -q '^1: #\[derive(Debug)\]' $TEMP_DIR/context_out.txt && \
+     grep -q 'pub struct User' $TEMP_DIR/context_out.txt && \
+     [ \$(awk '/^1: /{print NR; exit}' $TEMP_DIR/context_out.txt) -lt \$(awk '/pub struct User/{print NR; exit}' $TEMP_DIR/context_out.txt) ]" \
     "true"
 
-# Test: impls --trait lists implementors
-# Use the rs-hack source itself as the scan target — guaranteed Visit impls.
+# Test: impls --trait lists implementors. The rs-hack source has multiple Visit impls
+# (VariantFinder, FunctionRenameVisitor in main.rs; many in editor.rs). Require >= 2.
 run_test "impls-discovery" \
     "$BINARY impls --trait Visit --paths $PROJECT_DIR/rs-hack/src > $TEMP_DIR/impls_out.txt" \
-    "grep -q 'Trait Visit implemented by:' $TEMP_DIR/impls_out.txt && grep -q '\\.rs:[0-9]\\+' $TEMP_DIR/impls_out.txt" \
+    "grep -q 'Trait Visit implemented by:' $TEMP_DIR/impls_out.txt && \
+     [ \$(grep -cE '\\.rs:[0-9]+' $TEMP_DIR/impls_out.txt) -ge 2 ]" \
     "true"
 
-# Test: trait-impl is also reachable via find --node-type
+# Test: trait-impl is also reachable via find --node-type. Same source, same multiplicity.
 run_test "find-trait-impl-node-type" \
     "$BINARY find --paths $PROJECT_DIR/rs-hack/src --node-type trait-impl --name Visit > $TEMP_DIR/find_trait_impl_out.txt" \
-    "grep -q 'Visit for' $TEMP_DIR/find_trait_impl_out.txt" \
+    "[ \$(grep -c 'Visit for' $TEMP_DIR/find_trait_impl_out.txt) -ge 2 ]" \
     "true"
 
-# Test: match-audit reports per-site coverage
+# Test: match-audit reports per-site coverage on the Status enum.
+# sample.rs has handle_status which matches all 3 variants → "complete".
 run_test "match-audit-complete" \
     "$BINARY match-audit --enum Status --paths $INPUT > $TEMP_DIR/match_audit_out.txt" \
-    "grep -q 'Match audit for enum Status:' $TEMP_DIR/match_audit_out.txt && grep -q 'complete' $TEMP_DIR/match_audit_out.txt" \
+    "grep -q 'Match audit for enum Status:' $TEMP_DIR/match_audit_out.txt && \
+     grep -q 'handle_status' $TEMP_DIR/match_audit_out.txt && \
+     grep -q 'complete' $TEMP_DIR/match_audit_out.txt" \
     "true"
 
-# Test: doc-coverage reports missing-doc counts and offenders
+# Test: doc-coverage reports missing-doc counts and offenders.
+# sample.rs has 7 undocumented public items (User, Post, Status, MessageType, Config,
+# handle_status, main). Verify the count is 7 and that the offender list names them.
 run_test "doc-coverage-report" \
     "$BINARY doc-coverage --paths $INPUT > $TEMP_DIR/doc_coverage_out.txt" \
-    "grep -q 'Missing docs (items):' $TEMP_DIR/doc_coverage_out.txt && grep -q 'Top offenders:' $TEMP_DIR/doc_coverage_out.txt" \
+    "grep -q 'Missing docs (items): 7' $TEMP_DIR/doc_coverage_out.txt && \
+     grep -q 'Top offenders:' $TEMP_DIR/doc_coverage_out.txt && \
+     grep -qE 'User \\(struct\\)' $TEMP_DIR/doc_coverage_out.txt && \
+     grep -qE 'Status \\(enum\\)' $TEMP_DIR/doc_coverage_out.txt" \
     "true"
 
-# Test: summary prints module inventory for one file
+# Test: summary prints module inventory for one file.
+# sample.rs has 3 structs (User, Post, Config), 2 enums (Status, MessageType),
+# 0 type aliases, and pub fn handle_status.
 run_test "summary-module-inventory" \
     "$BINARY summary --path $INPUT > $TEMP_DIR/summary_out.txt" \
-    "grep -q 'Module: ' $TEMP_DIR/summary_out.txt && grep -q 'Public items:' $TEMP_DIR/summary_out.txt && grep -q 'Types:' $TEMP_DIR/summary_out.txt" \
+    "grep -q 'Module: ' $TEMP_DIR/summary_out.txt && \
+     grep -q 'Types: 3 structs, 2 enums, 0 type aliases' $TEMP_DIR/summary_out.txt && \
+     grep -q 'Public items:.*User.*Post.*Config' $TEMP_DIR/summary_out.txt && \
+     grep -q 'Functions:.*handle_status' $TEMP_DIR/summary_out.txt" \
     "true"
 
-# Test: neighbors reports siblings/twin-dirs/tests for a file
-# Use the rs-hack source — sample.rs has no siblings in examples/.
+# Test: neighbors reports siblings/twin-dirs/tests for a file.
+# main.rs lives next to editor.rs, operations.rs, state.rs etc. — require >= 3 siblings.
 run_test "neighbors-siblings" \
     "$BINARY neighbors --path $PROJECT_DIR/rs-hack/src/main.rs > $TEMP_DIR/neighbors_out.txt" \
-    "grep -q 'Neighbors for ' $TEMP_DIR/neighbors_out.txt && grep -q 'Siblings:' $TEMP_DIR/neighbors_out.txt && grep -q 'editor.rs' $TEMP_DIR/neighbors_out.txt" \
+    "grep -q 'Neighbors for ' $TEMP_DIR/neighbors_out.txt && \
+     grep -q 'Siblings:' $TEMP_DIR/neighbors_out.txt && \
+     grep -q 'editor.rs' $TEMP_DIR/neighbors_out.txt && \
+     [ \$(grep 'Siblings:' $TEMP_DIR/neighbors_out.txt | grep -oE '[a-z_]+\\.rs' | wc -l) -ge 3 ]" \
     "true"
 
 # ============================================================================
