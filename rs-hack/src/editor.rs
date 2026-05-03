@@ -3,17 +3,17 @@
 //! and emits modified code via surgical edits or prettyplease reformatting.
 
 use anyhow::{Context, Result};
+use prettyplease;
 use proc_macro2::{LineColumn, Span};
-use syn::{
-    parse_str, File, Item, ItemEnum, ItemStruct,
-    Fields, Field, spanned::Spanned, Arm, ExprMatch, ExprStruct,
-    visit_mut::VisitMut, Expr,
-};
 use quote::ToTokens;
+use syn::spanned::Spanned;
+use syn::visit_mut::VisitMut;
+use syn::{
+    parse_str, Arm, Expr, ExprMatch, ExprStruct, Field, Fields, File, Item, ItemEnum, ItemStruct,
+};
 
 use crate::operations::*;
 use crate::path_resolver::PathResolver;
-use prettyplease;
 
 pub struct RustEditor {
     content: String,
@@ -23,8 +23,14 @@ pub struct RustEditor {
 
 impl RustEditor {
     pub fn new(content: &str) -> Result<Self> {
-        let syntax_tree: File = syn::parse_str(content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse Rust code at line {}, column {}: {}", e.span().start().line, e.span().start().column, e))?;
+        let syntax_tree: File = syn::parse_str(content).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse Rust code at line {}, column {}: {}",
+                e.span().start().line,
+                e.span().start().column,
+                e
+            )
+        })?;
 
         let line_offsets = Self::compute_line_offsets(content);
 
@@ -59,7 +65,7 @@ impl RustEditor {
 
         result
     }
-    
+
     fn compute_line_offsets(content: &str) -> Vec<usize> {
         let mut offsets = vec![0];
         for (i, ch) in content.char_indices() {
@@ -74,14 +80,16 @@ impl RustEditor {
     fn find_similar_fields(target: &str, available: &[String]) -> Vec<String> {
         use strsim::levenshtein;
 
-        let mut scored: Vec<_> = available.iter()
+        let mut scored: Vec<_> = available
+            .iter()
             .map(|field| (field, levenshtein(target, field)))
-            .filter(|(_, distance)| *distance <= 3)  // Max 3 character difference
+            .filter(|(_, distance)| *distance <= 3) // Max 3 character difference
             .collect();
 
         scored.sort_by_key(|(_, distance)| *distance);
-        scored.into_iter()
-            .take(3)  // Top 3 suggestions
+        scored
+            .into_iter()
+            .take(3) // Top 3 suggestions
             .map(|(field, _)| field.to_string())
             .collect()
     }
@@ -104,29 +112,25 @@ impl RustEditor {
             Operation::Transform(op) => self.transform(op),
             Operation::RenameEnumVariant(op) => self.rename_enum_variant(op),
             Operation::RenameFunction(op) => self.rename_function(op),
-            Operation::AddDocComment(op) => self.add_doc_comment_surgical(
-                &op.target_type,
-                &op.name,
-                &op.doc_comment,
-                &op.style,
-            ),
+            Operation::AddDocComment(op) => {
+                self.add_doc_comment_surgical(&op.target_type, &op.name, &op.doc_comment, &op.style)
+            }
             Operation::UpdateDocComment(op) => self.update_doc_comment_surgical(
                 &op.target_type,
                 &op.name,
                 &op.doc_comment,
                 &DocCommentStyle::Line, // Default to line style for updates
             ),
-            Operation::RemoveDocComment(op) => self.remove_doc_comment_surgical(
-                &op.target_type,
-                &op.name,
-            ),
+            Operation::RemoveDocComment(op) => {
+                self.remove_doc_comment_surgical(&op.target_type, &op.name)
+            }
             Operation::SetStructLiteralBase(op) => self.set_struct_literal_base(op),
             Operation::AddCallArg(op) => self.add_call_arg(op),
             Operation::UpdateCallArg(op) => self.update_call_arg(op),
             Operation::RemoveCallArg(op) => self.remove_call_arg(op),
         }
     }
-    
+
     pub(crate) fn add_struct_field(&mut self, op: &AddStructFieldOp) -> Result<ModificationResult> {
         let mut modified_nodes = Vec::new();
 
@@ -150,7 +154,9 @@ impl RustEditor {
 
             let final_field_def = if let Some(literal_default) = &op.literal_default {
                 // literal_default provided - use it
-                let field_name = op.field_def.split(':')
+                let field_name = op
+                    .field_def
+                    .split(':')
                     .next()
                     .map(|s| s.trim().to_string())
                     .context("Failed to extract field name")?;
@@ -174,14 +180,18 @@ impl RustEditor {
             };
 
             // Update all struct literals
-            let literal_result = self.add_struct_literal_field(&literal_op)
+            let literal_result = self
+                .add_struct_literal_field(&literal_op)
                 .context("Failed to update struct literals")?;
 
             return Ok(literal_result);
         }
 
         // Find the struct and clone it to avoid borrowing issues
-        let item_struct = self.syntax_tree.items.iter()
+        let item_struct = self
+            .syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Struct(s) = item {
                     if s.ident == op.struct_name {
@@ -215,7 +225,8 @@ impl RustEditor {
             };
 
             // Insert the field into the struct definition
-            let modified = self.insert_struct_field(&item_struct, op)
+            let modified = self
+                .insert_struct_field(&item_struct, op)
                 .context("Failed to add field to struct definition")?;
 
             if !modified {
@@ -234,7 +245,8 @@ impl RustEditor {
         }
 
         // If literal_default IS provided:
-        // 1. Try to add to definition (idempotent - silently skips if field exists OR if field_def is incomplete)
+        // 1. Try to add to definition (idempotent - silently skips if field exists OR if field_def
+        //    is incomplete)
         // 2. Always update literals
         let literal_default = op.literal_default.as_ref().unwrap();
 
@@ -253,7 +265,8 @@ impl RustEditor {
             };
 
             // Try to insert field into definition (idempotent - returns false if already exists)
-            def_modified = self.insert_struct_field(&item_struct, op)
+            def_modified = self
+                .insert_struct_field(&item_struct, op)
                 .context("Failed to add field to struct definition")?;
 
             if def_modified {
@@ -266,8 +279,11 @@ impl RustEditor {
         }
 
         // Always update literals when literal_default is provided
-        // Extract field name from field_def (e.g., "return_type: Option<Type>" -> "return_type" or just "return_type")
-        let field_name = op.field_def.split(':')
+        // Extract field name from field_def (e.g., "return_type: Option<Type>" -> "return_type" or
+        // just "return_type")
+        let field_name = op
+            .field_def
+            .split(':')
             .next()
             .map(|s| s.trim().to_string())
             .context("Failed to extract field name from field definition")?;
@@ -277,11 +293,12 @@ impl RustEditor {
             struct_name: op.struct_name.clone(),
             field_def: format!("{}: {}", field_name, literal_default),
             position: op.position.clone(),
-            struct_path: None,  // Path resolution not available from struct field operations
+            struct_path: None, // Path resolution not available from struct field operations
         };
 
         // Update all struct literals
-        let literal_result = self.add_struct_literal_field(&literal_op)
+        let literal_result = self
+            .add_struct_literal_field(&literal_op)
             .context("Failed to update struct literals")?;
         modified_nodes.extend(literal_result.modified_nodes);
 
@@ -291,16 +308,21 @@ impl RustEditor {
             unmatched_qualified_paths: None,
         })
     }
-    
-    fn insert_struct_field(&mut self, item_struct: &ItemStruct, op: &AddStructFieldOp) -> Result<bool> {
+
+    fn insert_struct_field(
+        &mut self,
+        item_struct: &ItemStruct,
+        op: &AddStructFieldOp,
+    ) -> Result<bool> {
         if let Fields::Named(ref fields) = item_struct.fields {
             // Parse the new field
             let field_code = format!("struct Dummy {{ {} }}", op.field_def);
-            let dummy: ItemStruct = parse_str(&field_code)
-                .context("Failed to parse field definition")?;
+            let dummy: ItemStruct =
+                parse_str(&field_code).context("Failed to parse field definition")?;
 
             let new_field = if let Fields::Named(ref nf) = dummy.fields {
-                nf.named.first()
+                nf.named
+                    .first()
                     .context("No field found in definition")?
                     .clone()
             } else {
@@ -308,17 +330,21 @@ impl RustEditor {
             };
 
             // Check if field already exists
-            let new_field_name = new_field.ident.as_ref()
+            let new_field_name = new_field
+                .ident
+                .as_ref()
                 .map(|i| i.to_string())
                 .context("Field must have a name")?;
 
-            if fields.named.iter().any(|f| {
-                f.ident.as_ref().map(|i| i.to_string()) == Some(new_field_name.clone())
-            }) {
+            if fields
+                .named
+                .iter()
+                .any(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(new_field_name.clone()))
+            {
                 // Field already exists, skip adding
                 return Ok(false);
             }
-            
+
             // Determine insertion point
             let insert_pos = match &op.position {
                 InsertPosition::First => {
@@ -326,7 +352,8 @@ impl RustEditor {
                         self.span_to_byte_offset(first_field.span().start())
                     } else {
                         // Empty struct, insert after the opening brace
-                        let brace_pos = self.span_to_byte_offset(fields.brace_token.span.join().start());
+                        let brace_pos =
+                            self.span_to_byte_offset(fields.brace_token.span.join().start());
                         brace_pos + 1
                     }
                 }
@@ -337,25 +364,30 @@ impl RustEditor {
                         self.find_after_field_end(end)
                     } else {
                         // Empty struct
-                        let brace_pos = self.span_to_byte_offset(fields.brace_token.span.join().start());
+                        let brace_pos =
+                            self.span_to_byte_offset(fields.brace_token.span.join().start());
                         brace_pos + 1
                     }
                 }
                 InsertPosition::After(name) => {
-                    let field = fields.named.iter()
+                    let field = fields
+                        .named
+                        .iter()
                         .find(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(name.clone()))
                         .with_context(|| format!("Field '{}' not found", name))?;
                     let end = self.span_to_byte_offset(field.span().end());
                     self.find_after_field_end(end)
                 }
                 InsertPosition::Before(name) => {
-                    let field = fields.named.iter()
+                    let field = fields
+                        .named
+                        .iter()
                         .find(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(name.clone()))
                         .with_context(|| format!("Field '{}' not found", name))?;
                     self.span_to_byte_offset(field.span().start())
                 }
             };
-            
+
             // Format the new field
             let indent = self.get_indentation(insert_pos);
             let field_str = Self::format_field(&new_field);
@@ -368,11 +400,14 @@ impl RustEditor {
             self.content.insert_str(insert_pos, &insert_text);
             return Ok(true);
         }
-        
+
         anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
     }
 
-    pub(crate) fn update_struct_field(&mut self, op: &UpdateStructFieldOp) -> Result<ModificationResult> {
+    pub(crate) fn update_struct_field(
+        &mut self,
+        op: &UpdateStructFieldOp,
+    ) -> Result<ModificationResult> {
         // Check if this is an enum variant struct literal (contains ::)
         let is_enum_variant = op.struct_name.contains("::");
 
@@ -388,7 +423,10 @@ impl RustEditor {
         }
 
         // Find the struct and clone it to avoid borrowing issues
-        let item_struct = self.syntax_tree.items.iter()
+        let item_struct = self
+            .syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Struct(s) = item {
                     if s.ident == op.struct_name {
@@ -428,15 +466,20 @@ impl RustEditor {
         })
     }
 
-    fn replace_struct_field(&mut self, item_struct: &ItemStruct, op: &UpdateStructFieldOp) -> Result<bool> {
+    fn replace_struct_field(
+        &mut self,
+        item_struct: &ItemStruct,
+        op: &UpdateStructFieldOp,
+    ) -> Result<bool> {
         if let Fields::Named(ref fields) = item_struct.fields {
             // Parse the new field definition to get the field name
             let field_code = format!("struct Dummy {{ {} }}", op.field_def);
-            let dummy: ItemStruct = parse_str(&field_code)
-                .context("Failed to parse field definition")?;
+            let dummy: ItemStruct =
+                parse_str(&field_code).context("Failed to parse field definition")?;
 
             let new_field = if let Fields::Named(ref nf) = dummy.fields {
-                nf.named.first()
+                nf.named
+                    .first()
                     .context("No field found in definition")?
                     .clone()
             } else {
@@ -444,14 +487,24 @@ impl RustEditor {
             };
 
             // Extract the field name from the parsed field
-            let field_name = new_field.ident.as_ref()
+            let field_name = new_field
+                .ident
+                .as_ref()
                 .map(|i| i.to_string())
                 .context("Field must have a name")?;
 
             // Find the existing field
-            let existing_field = fields.named.iter()
+            let existing_field = fields
+                .named
+                .iter()
                 .find(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(field_name.clone()))
-                .ok_or_else(|| anyhow::anyhow!("Field '{}' not found in struct '{}'", field_name, op.struct_name))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Field '{}' not found in struct '{}'",
+                        field_name,
+                        op.struct_name
+                    )
+                })?;
 
             // Get the span of the existing field
             let start = self.span_to_byte_offset(existing_field.span().start());
@@ -469,7 +522,10 @@ impl RustEditor {
         anyhow::bail!("Struct '{}' does not have named fields", op.struct_name)
     }
 
-    pub(crate) fn remove_struct_field(&mut self, op: &RemoveStructFieldOp) -> Result<ModificationResult> {
+    pub(crate) fn remove_struct_field(
+        &mut self,
+        op: &RemoveStructFieldOp,
+    ) -> Result<ModificationResult> {
         let mut modified_nodes = Vec::new();
         let mut changed = false;
 
@@ -480,10 +536,14 @@ impl RustEditor {
         // (since we can't modify the enum variant definition without the full enum context)
         let effective_literal_only = op.literal_only || is_enum_variant;
 
-        // Step 1: Remove from struct definition (unless literal_only is true or it's an enum variant)
+        // Step 1: Remove from struct definition (unless literal_only is true or it's an enum
+        // variant)
         if !effective_literal_only {
             // Find the struct and clone it to avoid borrowing issues
-            let item_struct = self.syntax_tree.items.iter()
+            let item_struct = self
+                .syntax_tree
+                .items
+                .iter()
                 .find_map(|item| {
                     if let Item::Struct(s) = item {
                         if s.ident == op.struct_name {
@@ -501,7 +561,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                        unmatched_qualified_paths: None,
                     });
                 }
             }
@@ -516,12 +576,15 @@ impl RustEditor {
 
             if let Fields::Named(ref fields) = item_struct.fields {
                 // Find the field to remove
-                let field_to_remove = fields.named.iter()
-                    .find(|f| f.ident.as_ref().map(|i| i.to_string()) == Some(op.field_name.clone()));
+                let field_to_remove = fields.named.iter().find(|f| {
+                    f.ident.as_ref().map(|i| i.to_string()) == Some(op.field_name.clone())
+                });
 
                 // If field not found, provide helpful error with suggestions
                 if field_to_remove.is_none() {
-                    let field_names: Vec<String> = fields.named.iter()
+                    let field_names: Vec<String> = fields
+                        .named
+                        .iter()
                         .filter_map(|f| f.ident.as_ref().map(|i| i.to_string()))
                         .collect();
 
@@ -608,7 +671,9 @@ impl RustEditor {
             struct_name: String,
             field_name: String,
             deletion_ranges: Vec<(usize, usize)>, // (start_byte, end_byte)
-            unmatched_paths: std::collections::HashMap<String, usize>, // Collect qualified paths that didn't match
+            unmatched_paths: std::collections::HashMap<String, usize>, /* Collect qualified
+                                                                        * paths that didn't
+                                                                        * match */
             editor: &'a RustEditor,
         }
 
@@ -618,11 +683,16 @@ impl RustEditor {
                 let matches = if self.struct_name.contains("::") {
                     if self.struct_name.starts_with("*::") {
                         let target_name = &self.struct_name[3..];
-                        node.path.segments.last()
+                        node.path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string() == target_name)
                             .unwrap_or(false)
                     } else {
-                        let path_str = node.path.segments.iter()
+                        let path_str = node
+                            .path
+                            .segments
+                            .iter()
                             .map(|seg| seg.ident.to_string())
                             .collect::<Vec<_>>()
                             .join("::");
@@ -631,15 +701,22 @@ impl RustEditor {
                 } else {
                     // Simple name (no ::) - only match single-segment paths
                     let matches = node.path.segments.len() == 1
-                        && node.path.segments.last()
+                        && node
+                            .path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string())
-                            .as_ref() == Some(&self.struct_name);
+                            .as_ref()
+                            == Some(&self.struct_name);
 
                     // If doesn't match but last segment equals our struct name, track as unmatched
                     if !matches && node.path.segments.len() > 1 {
                         if let Some(last_seg) = node.path.segments.last() {
                             if last_seg.ident.to_string() == self.struct_name {
-                                let qualified_path = node.path.segments.iter()
+                                let qualified_path = node
+                                    .path
+                                    .segments
+                                    .iter()
                                     .map(|seg| seg.ident.to_string())
                                     .collect::<Vec<_>>()
                                     .join("::");
@@ -717,7 +794,8 @@ impl RustEditor {
         finder.visit_file(&self.syntax_tree);
 
         // Prepare unmatched paths hint (only if using simple name and found unmatched paths)
-        let unmatched_hint = if !op.struct_name.contains("::") && !finder.unmatched_paths.is_empty() {
+        let unmatched_hint = if !op.struct_name.contains("::") && !finder.unmatched_paths.is_empty()
+        {
             Some(finder.unmatched_paths)
         } else {
             None
@@ -749,9 +827,14 @@ impl RustEditor {
         })
     }
 
-    pub(crate) fn add_struct_literal_field(&mut self, op: &AddStructLiteralFieldOp) -> Result<ModificationResult> {
+    pub(crate) fn add_struct_literal_field(
+        &mut self,
+        op: &AddStructLiteralFieldOp,
+    ) -> Result<ModificationResult> {
         // Parse the field name from field_def (e.g., "return_type: None" -> "return_type")
-        let field_name = op.field_def.split(':')
+        let field_name = op
+            .field_def
+            .split(':')
             .next()
             .map(|s| s.trim().to_string())
             .context("Field definition must contain ':'")?;
@@ -769,7 +852,8 @@ impl RustEditor {
         };
 
         // Collect backups of all struct literal expressions that will be modified
-        let backup_nodes = self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
+        let backup_nodes =
+            self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
 
         // Find all struct literals and their field insertion points (surgical approach)
         use syn::visit::Visit;
@@ -779,7 +863,9 @@ impl RustEditor {
             field_name: String,
             path_resolver: Option<&'a PathResolver>,
             insertion_points: Vec<(usize, usize)>, // (byte_offset, indentation_spaces)
-            unmatched_paths: std::collections::HashMap<String, usize>, // Collect qualified paths that didn't match
+            unmatched_paths: std::collections::HashMap<String, usize>, /* Collect qualified
+                                                                        * paths that didn't
+                                                                        * match */
             editor: &'a RustEditor,
         }
 
@@ -788,8 +874,9 @@ impl RustEditor {
                 // Parse macro contents to find struct literals inside (e.g., vec![...])
                 use syn::parse::Parser;
 
-                if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
-                    .parse2(node.mac.tokens.clone())
+                if let Ok(exprs) =
+                    syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                        .parse2(node.mac.tokens.clone())
                 {
                     for expr in exprs.iter() {
                         syn::visit::visit_expr(self, expr);
@@ -808,11 +895,16 @@ impl RustEditor {
                     if self.struct_name.contains("::") {
                         if self.struct_name.starts_with("*::") {
                             let target_name = &self.struct_name[3..];
-                            node.path.segments.last()
+                            node.path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string() == target_name)
                                 .unwrap_or(false)
                         } else {
-                            let path_str = node.path.segments.iter()
+                            let path_str = node
+                                .path
+                                .segments
+                                .iter()
                                 .map(|seg| seg.ident.to_string())
                                 .collect::<Vec<_>>()
                                 .join("::");
@@ -821,15 +913,23 @@ impl RustEditor {
                     } else {
                         // Simple name (no ::) - only match single-segment paths
                         let matches = node.path.segments.len() == 1
-                            && node.path.segments.last()
+                            && node
+                                .path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string())
-                                .as_ref() == Some(&self.struct_name);
+                                .as_ref()
+                                == Some(&self.struct_name);
 
-                        // If doesn't match but last segment equals our struct name, track as unmatched
+                        // If doesn't match but last segment equals our struct name, track as
+                        // unmatched
                         if !matches && node.path.segments.len() > 1 {
                             if let Some(last_seg) = node.path.segments.last() {
                                 if last_seg.ident.to_string() == self.struct_name {
-                                    let qualified_path = node.path.segments.iter()
+                                    let qualified_path = node
+                                        .path
+                                        .segments
+                                        .iter()
                                         .map(|seg| seg.ident.to_string())
                                         .collect::<Vec<_>>()
                                         .join("::");
@@ -843,9 +943,10 @@ impl RustEditor {
 
                 if is_match {
                     // Check if field already exists
-                    let field_exists = node.fields.iter().any(|fv| {
-                        fv.member.to_token_stream().to_string() == self.field_name
-                    });
+                    let field_exists = node
+                        .fields
+                        .iter()
+                        .any(|fv| fv.member.to_token_stream().to_string() == self.field_name);
 
                     if !field_exists {
                         // Find insertion point after last field or after opening brace
@@ -854,13 +955,16 @@ impl RustEditor {
                             self.editor.span_to_byte_offset(last_field.span().end())
                         } else {
                             // No fields, insert after opening brace
-                            let brace_pos = self.editor.span_to_byte_offset(node.brace_token.span.join().start());
+                            let brace_pos = self
+                                .editor
+                                .span_to_byte_offset(node.brace_token.span.join().start());
                             brace_pos + 1 // After the '{'
                         };
 
                         // Determine indentation from the last field or struct context
                         let indent = if let Some(last_field) = node.fields.last() {
-                            let line_start = self.editor.span_to_byte_offset(last_field.span().start());
+                            let line_start =
+                                self.editor.span_to_byte_offset(last_field.span().start());
                             self.editor.get_indentation(line_start).len()
                         } else {
                             // Use struct opening indentation + 4 spaces
@@ -888,11 +992,12 @@ impl RustEditor {
         inserter.visit_file(&self.syntax_tree);
 
         // Prepare unmatched paths hint (only if using simple name and found unmatched paths)
-        let unmatched_hint = if !op.struct_name.contains("::") && !inserter.unmatched_paths.is_empty() {
-            Some(inserter.unmatched_paths)
-        } else {
-            None
-        };
+        let unmatched_hint =
+            if !op.struct_name.contains("::") && !inserter.unmatched_paths.is_empty() {
+                Some(inserter.unmatched_paths)
+            } else {
+                None
+            };
 
         if inserter.insertion_points.is_empty() {
             return Ok(ModificationResult {
@@ -928,7 +1033,10 @@ impl RustEditor {
 
     /// Set the base expression (..expr) on struct literals that don't already have one
     /// e.g., `Foo { a: 1 }` → `Foo { a: 1, ..Default::default() }`
-    pub(crate) fn set_struct_literal_base(&mut self, op: &SetStructLiteralBaseOp) -> Result<ModificationResult> {
+    pub(crate) fn set_struct_literal_base(
+        &mut self,
+        op: &SetStructLiteralBaseOp,
+    ) -> Result<ModificationResult> {
         // Expand "default" shorthand to "Default::default()"
         let base_expr = if op.base_expr == "default" {
             "Default::default()".to_string()
@@ -947,7 +1055,8 @@ impl RustEditor {
         };
 
         // Collect backups of all struct literal expressions that will be modified
-        let backup_nodes = self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
+        let backup_nodes =
+            self.collect_struct_literal_backups(&op.struct_name, path_resolver.as_ref());
 
         // Find all struct literals that need a base expression
         use syn::visit::Visit;
@@ -964,8 +1073,9 @@ impl RustEditor {
         impl<'ast, 'a> Visit<'ast> for BaseInserter<'a> {
             fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
                 use syn::parse::Parser;
-                if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
-                    .parse2(node.mac.tokens.clone())
+                if let Ok(exprs) =
+                    syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                        .parse2(node.mac.tokens.clone())
                 {
                     for expr in exprs.iter() {
                         syn::visit::visit_expr(self, expr);
@@ -989,11 +1099,16 @@ impl RustEditor {
                     if self.struct_name.contains("::") {
                         if self.struct_name.starts_with("*::") {
                             let target_name = &self.struct_name[3..];
-                            node.path.segments.last()
+                            node.path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string() == target_name)
                                 .unwrap_or(false)
                         } else {
-                            let path_str = node.path.segments.iter()
+                            let path_str = node
+                                .path
+                                .segments
+                                .iter()
                                 .map(|seg| seg.ident.to_string())
                                 .collect::<Vec<_>>()
                                 .join("::");
@@ -1001,14 +1116,21 @@ impl RustEditor {
                         }
                     } else {
                         let matches = node.path.segments.len() == 1
-                            && node.path.segments.last()
+                            && node
+                                .path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string())
-                                .as_ref() == Some(&self.struct_name);
+                                .as_ref()
+                                == Some(&self.struct_name);
 
                         if !matches && node.path.segments.len() > 1 {
                             if let Some(last_seg) = node.path.segments.last() {
                                 if last_seg.ident.to_string() == self.struct_name {
-                                    let qualified_path = node.path.segments.iter()
+                                    let qualified_path = node
+                                        .path
+                                        .segments
+                                        .iter()
                                         .map(|seg| seg.ident.to_string())
                                         .collect::<Vec<_>>()
                                         .join("::");
@@ -1027,7 +1149,8 @@ impl RustEditor {
 
                     let (insert_after, indent) = if let Some(last_field) = node.fields.last() {
                         let field_end = self.editor.span_to_byte_offset(last_field.span().end());
-                        let field_start_offset = self.editor.span_to_byte_offset(last_field.span().start());
+                        let field_start_offset =
+                            self.editor.span_to_byte_offset(last_field.span().start());
                         let indent = self.editor.get_indentation(field_start_offset).len();
                         (field_end, indent)
                     } else {
@@ -1038,7 +1161,8 @@ impl RustEditor {
                         (open_brace, indent)
                     };
 
-                    self.insertion_points.push((insert_after, close_brace_offset, indent));
+                    self.insertion_points
+                        .push((insert_after, close_brace_offset, indent));
                 }
 
                 syn::visit::visit_expr_struct(self, node);
@@ -1055,11 +1179,12 @@ impl RustEditor {
 
         inserter.visit_file(&self.syntax_tree);
 
-        let unmatched_hint = if !op.struct_name.contains("::") && !inserter.unmatched_paths.is_empty() {
-            Some(inserter.unmatched_paths)
-        } else {
-            None
-        };
+        let unmatched_hint =
+            if !op.struct_name.contains("::") && !inserter.unmatched_paths.is_empty() {
+                Some(inserter.unmatched_paths)
+            } else {
+                None
+            };
 
         if inserter.insertion_points.is_empty() {
             return Ok(ModificationResult {
@@ -1075,7 +1200,8 @@ impl RustEditor {
 
         // Perform surgical insertions
         for (insert_after, close_brace_offset, indent_spaces) in points {
-            // Check if there's already a comma after the last field (syn span doesn't include trailing comma)
+            // Check if there's already a comma after the last field (syn span doesn't include
+            // trailing comma)
             let after_insert = &self.content[insert_after..close_brace_offset];
             let trimmed_after = after_insert.trim_start();
             let has_trailing_comma = trimmed_after.starts_with(',');
@@ -1133,9 +1259,13 @@ impl RustEditor {
     }
 
     /// Collect backups of all struct literal expressions for a given struct name
-    fn collect_struct_literal_backups(&self, struct_name: &str, path_resolver: Option<&PathResolver>) -> Vec<BackupNode> {
-        use syn::visit::Visit;
+    fn collect_struct_literal_backups(
+        &self,
+        struct_name: &str,
+        path_resolver: Option<&PathResolver>,
+    ) -> Vec<BackupNode> {
         use syn::spanned::Spanned;
+        use syn::visit::Visit;
 
         struct LiteralCollector<'a> {
             struct_name: String,
@@ -1150,8 +1280,9 @@ impl RustEditor {
                 // Parse macro contents to find struct literals inside (e.g., vec![...])
                 use syn::parse::Parser;
 
-                if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
-                    .parse2(node.mac.tokens.clone())
+                if let Ok(exprs) =
+                    syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                        .parse2(node.mac.tokens.clone())
                 {
                     for expr in exprs.iter() {
                         syn::visit::visit_expr(self, expr);
@@ -1177,21 +1308,31 @@ impl RustEditor {
                             if self.struct_name.starts_with("*::") {
                                 // Wildcard: *::Rectangle matches any path ending with Rectangle
                                 let target_name = &self.struct_name[3..]; // Skip "*::"
-                                expr_struct.path.segments.last()
+                                expr_struct
+                                    .path
+                                    .segments
+                                    .last()
                                     .map(|seg| seg.ident.to_string() == target_name)
                                     .unwrap_or(false)
                             } else {
                                 // Exact path match: View::Rectangle
-                                let path_str = expr_struct.path.segments.iter()
+                                let path_str = expr_struct
+                                    .path
+                                    .segments
+                                    .iter()
                                     .map(|seg| seg.ident.to_string())
                                     .collect::<Vec<_>>()
                                     .join("::");
                                 path_str == self.struct_name
                             }
                         } else {
-                            // No :: in pattern - only match pure struct literals (no path qualifier)
+                            // No :: in pattern - only match pure struct literals (no path
+                            // qualifier)
                             expr_struct.path.segments.len() == 1
-                                && expr_struct.path.segments.last()
+                                && expr_struct
+                                    .path
+                                    .segments
+                                    .last()
                                     .map(|seg| seg.ident.to_string() == self.struct_name)
                                     .unwrap_or(false)
                         }
@@ -1235,7 +1376,10 @@ impl RustEditor {
 
     pub(crate) fn add_enum_variant(&mut self, op: &AddEnumVariantOp) -> Result<ModificationResult> {
         // Find the enum and clone it to avoid borrowing issues
-        let item_enum = self.syntax_tree.items.iter()
+        let item_enum = self
+            .syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Enum(e) = item {
                     if e.ident == op.enum_name {
@@ -1274,20 +1418,26 @@ impl RustEditor {
             unmatched_qualified_paths: None,
         })
     }
-    
+
     fn insert_enum_variant(&mut self, item_enum: &ItemEnum, op: &AddEnumVariantOp) -> Result<bool> {
         // Parse the new variant
         let variant_code = format!("enum Dummy {{ {} }}", op.variant_def);
-        let dummy: ItemEnum = parse_str(&variant_code)
-            .context("Failed to parse variant definition")?;
+        let dummy: ItemEnum =
+            parse_str(&variant_code).context("Failed to parse variant definition")?;
 
-        let new_variant = dummy.variants.first()
+        let new_variant = dummy
+            .variants
+            .first()
             .context("No variant found in definition")?
             .clone();
 
         // Check if variant already exists
         let variant_name = new_variant.ident.to_string();
-        if item_enum.variants.iter().any(|v| v.ident.to_string() == variant_name) {
+        if item_enum
+            .variants
+            .iter()
+            .any(|v| v.ident.to_string() == variant_name)
+        {
             // Variant already exists, skip adding
             return Ok(false);
         }
@@ -1298,7 +1448,8 @@ impl RustEditor {
                 if let Some(first_var) = item_enum.variants.first() {
                     self.span_to_byte_offset(first_var.span().start())
                 } else {
-                    let brace_pos = self.span_to_byte_offset(item_enum.brace_token.span.join().start());
+                    let brace_pos =
+                        self.span_to_byte_offset(item_enum.brace_token.span.join().start());
                     brace_pos + 1
                 }
             }
@@ -1307,36 +1458,44 @@ impl RustEditor {
                     let end = self.span_to_byte_offset(last_var.span().end());
                     self.find_after_field_end(end)
                 } else {
-                    let brace_pos = self.span_to_byte_offset(item_enum.brace_token.span.join().start());
+                    let brace_pos =
+                        self.span_to_byte_offset(item_enum.brace_token.span.join().start());
                     brace_pos + 1
                 }
             }
             InsertPosition::After(name) => {
-                let variant = item_enum.variants.iter()
+                let variant = item_enum
+                    .variants
+                    .iter()
                     .find(|v| v.ident.to_string() == *name)
                     .with_context(|| format!("Variant '{}' not found", name))?;
                 let end = self.span_to_byte_offset(variant.span().end());
                 self.find_after_field_end(end)
             }
             InsertPosition::Before(name) => {
-                let variant = item_enum.variants.iter()
+                let variant = item_enum
+                    .variants
+                    .iter()
                     .find(|v| v.ident.to_string() == *name)
                     .with_context(|| format!("Variant '{}' not found", name))?;
                 self.span_to_byte_offset(variant.span().start())
             }
         };
-        
+
         let indent = self.get_indentation(insert_pos);
         let variant_str = new_variant.to_token_stream().to_string();
         let insert_text = format!("\n{}{},", indent, variant_str);
-        
+
         self.content.insert_str(insert_pos, &insert_text);
         Ok(true)
     }
 
     fn update_enum_variant(&mut self, op: &UpdateEnumVariantOp) -> Result<ModificationResult> {
         // Find the enum and clone it
-        let item_enum = self.syntax_tree.items.iter()
+        let item_enum = self
+            .syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Enum(e) = item {
                     if e.ident == op.enum_name {
@@ -1369,19 +1528,29 @@ impl RustEditor {
 
         // Parse the new variant to get its name
         let variant_code = format!("enum Dummy {{ {} }}", op.variant_def);
-        let dummy: ItemEnum = parse_str(&variant_code)
-            .context("Failed to parse variant definition")?;
+        let dummy: ItemEnum =
+            parse_str(&variant_code).context("Failed to parse variant definition")?;
 
-        let new_variant = dummy.variants.first()
+        let new_variant = dummy
+            .variants
+            .first()
             .context("No variant found in definition")?
             .clone();
 
         let variant_name = new_variant.ident.to_string();
 
         // Find the existing variant
-        let existing_variant = item_enum.variants.iter()
+        let existing_variant = item_enum
+            .variants
+            .iter()
             .find(|v| v.ident.to_string() == variant_name)
-            .ok_or_else(|| anyhow::anyhow!("Variant '{}' not found in enum '{}'", variant_name, op.enum_name))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Variant '{}' not found in enum '{}'",
+                    variant_name,
+                    op.enum_name
+                )
+            })?;
 
         // Get the span
         let start = self.span_to_byte_offset(existing_variant.span().start());
@@ -1398,9 +1567,15 @@ impl RustEditor {
         })
     }
 
-    pub(crate) fn remove_enum_variant(&mut self, op: &RemoveEnumVariantOp) -> Result<ModificationResult> {
+    pub(crate) fn remove_enum_variant(
+        &mut self,
+        op: &RemoveEnumVariantOp,
+    ) -> Result<ModificationResult> {
         // Find the enum
-        let item_enum = self.syntax_tree.items.iter()
+        let item_enum = self
+            .syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Enum(e) = item {
                     if e.ident == op.enum_name {
@@ -1432,9 +1607,17 @@ impl RustEditor {
         };
 
         // Find the variant to remove
-        let variant_to_remove = item_enum.variants.iter()
+        let variant_to_remove = item_enum
+            .variants
+            .iter()
             .find(|v| v.ident.to_string() == op.variant_name)
-            .ok_or_else(|| anyhow::anyhow!("Variant '{}' not found in enum '{}'", op.variant_name, op.enum_name))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Variant '{}' not found in enum '{}'",
+                    op.variant_name,
+                    op.enum_name
+                )
+            })?;
 
         // Get the span including comma
         let start = self.span_to_byte_offset(variant_to_remove.span().start());
@@ -1492,12 +1675,19 @@ impl RustEditor {
     fn add_single_match_arm(&mut self, op: &AddMatchArmOp) -> Result<ModificationResult> {
         // Parse the pattern and body by creating a dummy match expression
         let dummy_match = format!("match () {{ {} => {}, }}", op.pattern, op.body);
-        let expr: syn::Expr = parse_str(&dummy_match)
-            .with_context(|| format!("Failed to parse pattern/body: {} => {}", op.pattern, op.body))?;
+        let expr: syn::Expr = parse_str(&dummy_match).with_context(|| {
+            format!(
+                "Failed to parse pattern/body: {} => {}",
+                op.pattern, op.body
+            )
+        })?;
 
         // Extract the arm from the dummy match
         let arm = if let syn::Expr::Match(match_expr) = expr {
-            match_expr.arms.into_iter().next()
+            match_expr
+                .arms
+                .into_iter()
+                .next()
                 .context("Failed to extract arm from dummy match")?
         } else {
             anyhow::bail!("Expected match expression");
@@ -1539,13 +1729,13 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                unmatched_qualified_paths: None,
             })
         } else {
             Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                unmatched_qualified_paths: None,
             })
         }
     }
@@ -1561,16 +1751,19 @@ impl RustEditor {
     }
 
     /// Isolated prettyplease: Reformat only a specific item, preserving the rest of the file
-    /// This finds an item in the original syntax tree, formats it with prettyplease, and surgically replaces it
+    /// This finds an item in the original syntax tree, formats it with prettyplease, and surgically
+    /// replaces it
     fn reformat_item_isolated<F>(&mut self, predicate: F) -> Result<bool>
     where
         F: Fn(&Item) -> bool,
     {
         // Find the item index in the ORIGINAL syntax tree (before mutations)
-        let original_syntax_tree: syn::File = syn::parse_str(&self.content)
-            .context("Failed to parse original content")?;
+        let original_syntax_tree: syn::File =
+            syn::parse_str(&self.content).context("Failed to parse original content")?;
 
-        let (item_index, original_item) = original_syntax_tree.items.iter()
+        let (item_index, original_item) = original_syntax_tree
+            .items
+            .iter()
             .enumerate()
             .find(|(_, item)| predicate(item))
             .ok_or_else(|| anyhow::anyhow!("Item not found"))?;
@@ -1618,7 +1811,9 @@ impl RustEditor {
 
     fn add_missing_match_arms(&mut self, op: &AddMatchArmOp) -> Result<ModificationResult> {
         // Get the enum name
-        let enum_name = op.enum_name.as_ref()
+        let enum_name = op
+            .enum_name
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("enum_name is required for auto-detect"))?;
 
         // Find all enum variants
@@ -1637,9 +1832,9 @@ impl RustEditor {
             let pattern = format!("{}::{}", enum_name, variant);
             let pattern_normalized = pattern.replace(" ", "");
 
-            let exists = existing_patterns.iter().any(|p| {
-                p.replace(" ", "") == pattern_normalized
-            });
+            let exists = existing_patterns
+                .iter()
+                .any(|p| p.replace(" ", "") == pattern_normalized);
 
             if !exists {
                 missing_variants.push(variant.clone());
@@ -1677,8 +1872,9 @@ impl RustEditor {
         for variant in &missing_variants {
             let pattern = format!("{}::{}", enum_name, variant);
             let dummy_match = format!("match () {{ {} => {}, }}", pattern, op.body);
-            let expr: syn::Expr = parse_str(&dummy_match)
-                .with_context(|| format!("Failed to parse pattern/body: {} => {}", pattern, op.body))?;
+            let expr: syn::Expr = parse_str(&dummy_match).with_context(|| {
+                format!("Failed to parse pattern/body: {} => {}", pattern, op.body)
+            })?;
 
             if let syn::Expr::Match(match_expr) = expr {
                 if let Some(arm) = match_expr.arms.into_iter().next() {
@@ -1709,13 +1905,13 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                unmatched_qualified_paths: None,
             })
         } else {
             Ok(ModificationResult {
                 changed: false,
                 modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                unmatched_qualified_paths: None,
             })
         }
     }
@@ -1725,9 +1921,8 @@ impl RustEditor {
         for item in &self.syntax_tree.items {
             if let Item::Enum(e) = item {
                 if e.ident == enum_name {
-                    let variants: Vec<String> = e.variants.iter()
-                        .map(|v| v.ident.to_string())
-                        .collect();
+                    let variants: Vec<String> =
+                        e.variants.iter().map(|v| v.ident.to_string()).collect();
                     return Ok(variants);
                 }
             }
@@ -1821,7 +2016,7 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Pattern '{}' not found in any match expression", op.pattern)
@@ -1863,7 +2058,7 @@ impl RustEditor {
             Ok(ModificationResult {
                 changed: true,
                 modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                unmatched_qualified_paths: None,
             })
         } else {
             anyhow::bail!("Pattern '{}' not found in any match expression", op.pattern)
@@ -1873,10 +2068,12 @@ impl RustEditor {
     pub(crate) fn add_impl_method(&mut self, op: &AddImplMethodOp) -> Result<ModificationResult> {
         // Parse the method definition
         let method_code = format!("impl Dummy {{ {} }}", op.method_def);
-        let dummy: syn::ItemImpl = parse_str(&method_code)
-            .context("Failed to parse method definition")?;
+        let dummy: syn::ItemImpl =
+            parse_str(&method_code).context("Failed to parse method definition")?;
 
-        let new_method = dummy.items.first()
+        let new_method = dummy
+            .items
+            .first()
             .context("No method found in definition")?
             .clone();
 
@@ -1887,17 +2084,22 @@ impl RustEditor {
         };
 
         // Find the impl block
-        let impl_index = self.syntax_tree.items.iter().position(|item| {
-            if let Item::Impl(impl_block) = item {
-                // Check if this is the right impl block
-                if let syn::Type::Path(type_path) = &*impl_block.self_ty {
-                    if let Some(segment) = type_path.path.segments.last() {
-                        return segment.ident == op.target;
+        let impl_index = self
+            .syntax_tree
+            .items
+            .iter()
+            .position(|item| {
+                if let Item::Impl(impl_block) = item {
+                    // Check if this is the right impl block
+                    if let syn::Type::Path(type_path) = &*impl_block.self_ty {
+                        if let Some(segment) = type_path.path.segments.last() {
+                            return segment.ident == op.target;
+                        }
                     }
                 }
-            }
-            false
-        }).ok_or_else(|| anyhow::anyhow!("impl block for '{}' not found", op.target))?;
+                false
+            })
+            .ok_or_else(|| anyhow::anyhow!("impl block for '{}' not found", op.target))?;
 
         // Check if method already exists (idempotent)
         let impl_block = match &self.syntax_tree.items[impl_index] {
@@ -1944,23 +2146,31 @@ impl RustEditor {
                         impl_block.items.push(new_method);
                     }
                     InsertPosition::After(name) => {
-                        let pos = impl_block.items.iter().position(|item| {
-                            if let syn::ImplItem::Fn(f) = item {
-                                f.sig.ident == name
-                            } else {
-                                false
-                            }
-                        }).with_context(|| format!("Method '{}' not found", name))?;
+                        let pos = impl_block
+                            .items
+                            .iter()
+                            .position(|item| {
+                                if let syn::ImplItem::Fn(f) = item {
+                                    f.sig.ident == name
+                                } else {
+                                    false
+                                }
+                            })
+                            .with_context(|| format!("Method '{}' not found", name))?;
                         impl_block.items.insert(pos + 1, new_method);
                     }
                     InsertPosition::Before(name) => {
-                        let pos = impl_block.items.iter().position(|item| {
-                            if let syn::ImplItem::Fn(f) = item {
-                                f.sig.ident == name
-                            } else {
-                                false
-                            }
-                        }).with_context(|| format!("Method '{}' not found", name))?;
+                        let pos = impl_block
+                            .items
+                            .iter()
+                            .position(|item| {
+                                if let syn::ImplItem::Fn(f) = item {
+                                    f.sig.ident == name
+                                } else {
+                                    false
+                                }
+                            })
+                            .with_context(|| format!("Method '{}' not found", name))?;
                         impl_block.items.insert(pos, new_method);
                     }
                 }
@@ -1978,18 +2188,21 @@ impl RustEditor {
         })
     }
 
-    pub(crate) fn add_use_statement(&mut self, op: &AddUseStatementOp) -> Result<ModificationResult> {
+    pub(crate) fn add_use_statement(
+        &mut self,
+        op: &AddUseStatementOp,
+    ) -> Result<ModificationResult> {
         // Parse the use statement
         let use_code = format!("use {};", op.use_path);
-        let use_item: syn::ItemUse = parse_str(&use_code)
-            .context("Failed to parse use statement")?;
+        let use_item: syn::ItemUse =
+            parse_str(&use_code).context("Failed to parse use statement")?;
 
         // Check if this use statement already exists (idempotent)
         let use_exists = self.syntax_tree.items.iter().any(|item| {
             if let Item::Use(existing_use) = item {
                 // Compare the use trees
-                existing_use.tree.to_token_stream().to_string() ==
-                    use_item.tree.to_token_stream().to_string()
+                existing_use.tree.to_token_stream().to_string()
+                    == use_item.tree.to_token_stream().to_string()
             } else {
                 false
             }
@@ -2021,36 +2234,49 @@ impl RustEditor {
             InsertPosition::First => 0,
             InsertPosition::Last => {
                 // Find the last use statement
-                self.syntax_tree.items.iter()
+                self.syntax_tree
+                    .items
+                    .iter()
                     .rposition(|item| matches!(item, Item::Use(_)))
                     .map(|i| i + 1)
                     .unwrap_or(0)
             }
             InsertPosition::After(path) => {
                 // Find the use statement matching the path
-                let pos = self.syntax_tree.items.iter().position(|item| {
-                    if let Item::Use(u) = item {
-                        u.tree.to_token_stream().to_string().contains(path)
-                    } else {
-                        false
-                    }
-                }).with_context(|| format!("Use statement for '{}' not found", path))?;
+                let pos = self
+                    .syntax_tree
+                    .items
+                    .iter()
+                    .position(|item| {
+                        if let Item::Use(u) = item {
+                            u.tree.to_token_stream().to_string().contains(path)
+                        } else {
+                            false
+                        }
+                    })
+                    .with_context(|| format!("Use statement for '{}' not found", path))?;
                 pos + 1
             }
             InsertPosition::Before(path) => {
                 // Find the use statement matching the path
-                self.syntax_tree.items.iter().position(|item| {
-                    if let Item::Use(u) = item {
-                        u.tree.to_token_stream().to_string().contains(path)
-                    } else {
-                        false
-                    }
-                }).with_context(|| format!("Use statement for '{}' not found", path))?
+                self.syntax_tree
+                    .items
+                    .iter()
+                    .position(|item| {
+                        if let Item::Use(u) = item {
+                            u.tree.to_token_stream().to_string().contains(path)
+                        } else {
+                            false
+                        }
+                    })
+                    .with_context(|| format!("Use statement for '{}' not found", path))?
             }
         };
 
         // Insert the use statement into the AST
-        self.syntax_tree.items.insert(insert_index, Item::Use(use_item));
+        self.syntax_tree
+            .items
+            .insert(insert_index, Item::Use(use_item));
 
         // Find the byte position in the source where we need to insert
         // We want to insert at the beginning of a line
@@ -2093,19 +2319,26 @@ impl RustEditor {
 
     pub(crate) fn add_derive(&mut self, op: &AddDeriveOp) -> Result<ModificationResult> {
         // Find the target item (struct or enum)
-        let item_index = self.syntax_tree.items.iter().position(|item| {
-            match (&op.target_type as &str, item) {
+        let item_index = self
+            .syntax_tree
+            .items
+            .iter()
+            .position(|item| match (&op.target_type as &str, item) {
                 ("struct", Item::Struct(s)) => s.ident == op.target_name,
                 ("enum", Item::Enum(e)) => e.ident == op.target_name,
                 _ => false,
-            }
-        }).ok_or_else(|| anyhow::anyhow!("{} '{}' not found", op.target_type, op.target_name))?;
+            })
+            .ok_or_else(|| anyhow::anyhow!("{} '{}' not found", op.target_type, op.target_name))?;
 
         // Get the item and check for existing derives
         let (existing_derives, item_span, item_attrs) = match &self.syntax_tree.items[item_index] {
             Item::Struct(s) => (Self::extract_derives(&s.attrs), s.span(), &s.attrs),
             Item::Enum(e) => (Self::extract_derives(&e.attrs), e.span(), &e.attrs),
-            _ => (Vec::new(), proc_macro2::Span::call_site(), &Vec::new() as &Vec<syn::Attribute>),
+            _ => (
+                Vec::new(),
+                proc_macro2::Span::call_site(),
+                &Vec::new() as &Vec<syn::Attribute>,
+            ),
         };
 
         // Check if the item matches the where filter (if specified)
@@ -2122,14 +2355,21 @@ impl RustEditor {
 
         // Create backup of original item before modification
         let backup_node = BackupNode {
-            node_type: if op.target_type == "struct" { "struct" } else { "enum" }.to_string(),
+            node_type: if op.target_type == "struct" {
+                "struct"
+            } else {
+                "enum"
+            }
+            .to_string(),
             identifier: op.target_name.clone(),
             original_content: self.unparse_item(&self.syntax_tree.items[item_index].clone()),
             location: self.span_to_location(item_span),
         };
 
         // Filter out derives that already exist (idempotent)
-        let new_derives: Vec<String> = op.derives.iter()
+        let new_derives: Vec<String> = op
+            .derives
+            .iter()
             .filter(|d| !existing_derives.contains(&d.to_string()))
             .cloned()
             .collect();
@@ -2224,7 +2464,8 @@ impl RustEditor {
         let formatted = formatted.trim();
 
         // Replace in content
-        self.content.replace_range(actual_start..item_end_pos, formatted);
+        self.content
+            .replace_range(actual_start..item_end_pos, formatted);
 
         Ok(())
     }
@@ -2274,10 +2515,12 @@ impl RustEditor {
 
         // Parse a dummy struct with the derive to extract the attribute
         let dummy = format!("#[derive({})]\nstruct Dummy;", derive_str);
-        let parsed: syn::ItemStruct = parse_str(&dummy)
-            .context("Failed to parse derive attribute")?;
+        let parsed: syn::ItemStruct =
+            parse_str(&dummy).context("Failed to parse derive attribute")?;
 
-        let new_attr = parsed.attrs.into_iter()
+        let new_attr = parsed
+            .attrs
+            .into_iter()
             .find(|a| a.path().is_ident("derive"))
             .context("Failed to extract derive attribute")?;
 
@@ -2294,22 +2537,25 @@ impl RustEditor {
 
     /// Replace the modified function(s) in the content with formatted versions
     fn replace_modified_functions(&mut self, modified_function: &Option<String>) -> Result<()> {
-        // If no specific function was targeted, use isolated prettyplease for all modified functions
+        // If no specific function was targeted, use isolated prettyplease for all modified
+        // functions
         if modified_function.is_none() {
-            // This case shouldn't happen in practice, but if it does, fall back to whole-file format
-            // TODO: Track which functions were modified and format only those
+            // This case shouldn't happen in practice, but if it does, fall back to whole-file
+            // format TODO: Track which functions were modified and format only those
             self.content = prettyplease::unparse(&self.syntax_tree);
             return Ok(());
         }
 
         // Parse the ORIGINAL content to get the correct spans
-        let original_syntax_tree: File = syn::parse_str(&self.content)
-            .context("Failed to re-parse original content")?;
+        let original_syntax_tree: File =
+            syn::parse_str(&self.content).context("Failed to re-parse original content")?;
 
         let function_name = modified_function.as_ref().unwrap();
 
         // Find the function in the ORIGINAL syntax tree to get correct byte positions
-        let original_fn = original_syntax_tree.items.iter()
+        let original_fn = original_syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Fn(f) = item {
                     if f.sig.ident == function_name {
@@ -2325,7 +2571,10 @@ impl RustEditor {
         let end = self.span_to_byte_offset(original_fn.span().end());
 
         // Find the MODIFIED function in the modified syntax tree
-        let modified_fn = self.syntax_tree.items.iter()
+        let modified_fn = self
+            .syntax_tree
+            .items
+            .iter()
             .find_map(|item| {
                 if let Item::Fn(f) = item {
                     if f.sig.ident == function_name {
@@ -2334,7 +2583,9 @@ impl RustEditor {
                 }
                 None
             })
-            .ok_or_else(|| anyhow::anyhow!("Function '{}' not found in modified AST", function_name))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Function '{}' not found in modified AST", function_name)
+            })?;
 
         // Format just the modified function using prettyplease
         let dummy_file = syn::File {
@@ -2362,7 +2613,7 @@ impl RustEditor {
             self.content.len()
         }
     }
-    
+
     fn find_after_field_end(&self, pos: usize) -> usize {
         // Look for comma or newline after the field
         let mut i = pos;
@@ -2375,14 +2626,14 @@ impl RustEditor {
         }
         pos
     }
-    
+
     fn get_indentation(&self, pos: usize) -> String {
         // Find the start of the current line
         let mut line_start = pos;
         while line_start > 0 && self.content.as_bytes()[line_start - 1] != b'\n' {
             line_start -= 1;
         }
-        
+
         // Count spaces/tabs at the start of the line
         let mut indent = String::new();
         let mut i = line_start;
@@ -2395,7 +2646,7 @@ impl RustEditor {
                 _ => break,
             }
         }
-        
+
         // If we're inserting in an empty struct/enum, add default indentation
         if indent.is_empty() {
             "    ".to_string()
@@ -2403,7 +2654,7 @@ impl RustEditor {
             indent
         }
     }
-    
+
     pub fn to_string(&self) -> String {
         self.content.clone()
     }
@@ -2416,23 +2667,32 @@ impl RustEditor {
     /// Replace a range of bytes with new content (for revert operations)
     pub fn replace_range(&mut self, start: usize, end: usize, new_content: &str) -> Result<()> {
         if start > end || end > self.content.len() {
-            anyhow::bail!("Invalid range: {}..{} (content length: {})", start, end, self.content.len());
+            anyhow::bail!(
+                "Invalid range: {}..{} (content length: {})",
+                start,
+                end,
+                self.content.len()
+            );
         }
 
         self.content.replace_range(start..end, new_content);
 
         // Re-parse the syntax tree
-        self.syntax_tree = syn::parse_str(&self.content)
-            .context("Failed to re-parse after replace_range")?;
+        self.syntax_tree =
+            syn::parse_str(&self.content).context("Failed to re-parse after replace_range")?;
         self.line_offsets = Self::compute_line_offsets(&self.content);
 
         Ok(())
     }
 
     /// Find all locations where a field appears in the codebase
-    pub fn find_field_locations(&self, field_name: &str) -> Result<Vec<crate::operations::FieldLocation>> {
+    pub fn find_field_locations(
+        &self,
+        field_name: &str,
+    ) -> Result<Vec<crate::operations::FieldLocation>> {
         use syn::visit::Visit;
-        use crate::operations::{FieldLocation, FieldContext};
+
+        use crate::operations::{FieldContext, FieldLocation};
 
         let mut locations = Vec::new();
 
@@ -2443,7 +2703,8 @@ impl RustEditor {
                     for field in &fields.named {
                         if let Some(ident) = &field.ident {
                             if ident == field_name {
-                                let field_type = quote::quote!(#field).to_string()
+                                let field_type = quote::quote!(#field)
+                                    .to_string()
                                     .split(':')
                                     .nth(1)
                                     .map(|s| s.trim().to_string())
@@ -2469,7 +2730,8 @@ impl RustEditor {
                         for field in &fields.named {
                             if let Some(ident) = &field.ident {
                                 if ident == field_name {
-                                    let field_type = quote::quote!(#field).to_string()
+                                    let field_type = quote::quote!(#field)
+                                        .to_string()
                                         .split(':')
                                         .nth(1)
                                         .map(|s| s.trim().to_string())
@@ -2504,7 +2766,10 @@ impl RustEditor {
                     for field_value in &expr_struct.fields {
                         if let syn::Member::Named(ident) = &field_value.member {
                             if ident == self.field_name {
-                                let struct_name = expr_struct.path.segments.iter()
+                                let struct_name = expr_struct
+                                    .path
+                                    .segments
+                                    .iter()
                                     .map(|seg| seg.ident.to_string())
                                     .collect::<Vec<_>>()
                                     .join("::");
@@ -2512,9 +2777,7 @@ impl RustEditor {
                                 self.locations.push(FieldLocation {
                                     file_path: String::new(),
                                     line: expr_struct.span().start().line,
-                                    context: FieldContext::StructLiteral {
-                                        struct_name,
-                                    },
+                                    context: FieldContext::StructLiteral { struct_name },
                                 });
                                 break;
                             }
@@ -2537,8 +2800,15 @@ impl RustEditor {
     }
 
     /// Inspect and list AST nodes (e.g., struct literals) in the file
-    pub fn inspect(&self, node_type: Option<&str>, name_filter: Option<&str>, variant_filter: Option<&str>, include_comments: bool) -> Result<Vec<crate::operations::InspectResult>> {
+    pub fn inspect(
+        &self,
+        node_type: Option<&str>,
+        name_filter: Option<&str>,
+        variant_filter: Option<&str>,
+        include_comments: bool,
+    ) -> Result<Vec<crate::operations::InspectResult>> {
         use syn::visit::Visit;
+
         use crate::operations::InspectResult;
 
         let mut results = Vec::new();
@@ -2546,11 +2816,28 @@ impl RustEditor {
         // If node_type is None, search all node types
         if node_type.is_none() {
             let all_types = vec![
-                "struct", "enum", "function", "impl-method", "trait", "trait-impl", "const", "static", "type-alias", "mod",
-                "struct-literal", "match-arm", "enum-usage", "function-call", "method-call", "macro-call", "identifier", "type-ref",
+                "struct",
+                "enum",
+                "function",
+                "impl-method",
+                "trait",
+                "trait-impl",
+                "const",
+                "static",
+                "type-alias",
+                "mod",
+                "struct-literal",
+                "match-arm",
+                "enum-usage",
+                "function-call",
+                "method-call",
+                "macro-call",
+                "identifier",
+                "type-ref",
             ];
             for nt in all_types {
-                let mut type_results = self.inspect(Some(nt), name_filter, variant_filter, include_comments)?;
+                let mut type_results =
+                    self.inspect(Some(nt), name_filter, variant_filter, include_comments)?;
                 results.append(&mut type_results);
             }
             return Ok(results);
@@ -2574,7 +2861,8 @@ impl RustEditor {
                         // This handles cases like: vec![View::Rectangle { ... }]
                         use syn::parse::Parser;
 
-                        // Try to parse the macro tokens as a punctuated list of expressions (common in vec!, etc.)
+                        // Try to parse the macro tokens as a punctuated list of expressions (common
+                        // in vec!, etc.)
                         if let Ok(exprs) = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
                             .parse2(node.mac.tokens.clone())
                         {
@@ -2599,12 +2887,16 @@ impl RustEditor {
                                 // No filter - match anything
                                 // If path has multiple segments, include the full qualified path
                                 let struct_name = if node.path.segments.len() > 1 {
-                                    node.path.segments.iter()
+                                    node.path
+                                        .segments
+                                        .iter()
                                         .map(|seg| seg.ident.to_string())
                                         .collect::<Vec<_>>()
                                         .join("::")
                                 } else {
-                                    node.path.segments.last()
+                                    node.path
+                                        .segments
+                                        .last()
                                         .map(|seg| seg.ident.to_string())
                                         .unwrap_or_default()
                                 };
@@ -2612,12 +2904,12 @@ impl RustEditor {
                                 let snippet = self.editor.format_expr_struct(node);
                                 let location = self.editor.span_to_location(node.span());
 
-                        // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
-                            extract_preceding_comment(&self.editor.content, location.line)
-                        } else {
-                            None
-                        };
+                                // Extract preceding comment if requested
+                                let preceding_comment = if self.include_comments {
+                                    extract_preceding_comment(&self.editor.content, location.line)
+                                } else {
+                                    None
+                                };
 
                                 // Extract preceding comment if requested
                                 let preceding_comment = if self.include_comments {
@@ -2646,12 +2938,17 @@ impl RustEditor {
                             if filter.starts_with("*::") {
                                 // Wildcard: *::Rectangle matches any path ending with Rectangle
                                 let target_name = &filter[3..]; // Skip "*::"
-                                node.path.segments.last()
+                                node.path
+                                    .segments
+                                    .last()
                                     .map(|seg| seg.ident.to_string() == target_name)
                                     .unwrap_or(false)
                             } else {
                                 // Exact path match: View::Rectangle
-                                let path_str = node.path.segments.iter()
+                                let path_str = node
+                                    .path
+                                    .segments
+                                    .iter()
                                     .map(|seg| seg.ident.to_string())
                                     .collect::<Vec<_>>()
                                     .join("::");
@@ -2659,8 +2956,11 @@ impl RustEditor {
                             }
                         } else {
                             // No :: in pattern - eagerly match any path ending with this name
-                            // This matches both "Rectangle" and "View::Rectangle" when searching for "Rectangle"
-                            node.path.segments.last()
+                            // This matches both "Rectangle" and "View::Rectangle" when searching
+                            // for "Rectangle"
+                            node.path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string() == filter)
                                 .unwrap_or(false)
                         };
@@ -2673,12 +2973,16 @@ impl RustEditor {
                         // Get the struct name for the identifier
                         // If path has multiple segments, include the full qualified path
                         let struct_name = if node.path.segments.len() > 1 {
-                            node.path.segments.iter()
+                            node.path
+                                .segments
+                                .iter()
                                 .map(|seg| seg.ident.to_string())
                                 .collect::<Vec<_>>()
                                 .join("::")
                         } else {
-                            node.path.segments.last()
+                            node.path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string())
                                 .unwrap_or_default()
                         };
@@ -2759,12 +3063,12 @@ impl RustEditor {
                             let snippet = self.editor.format_match_arm(arm);
                             let location = self.editor.span_to_location(arm.span());
 
-                        // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
-                            extract_preceding_comment(&self.editor.content, location.line)
-                        } else {
-                            None
-                        };
+                            // Extract preceding comment if requested
+                            let preceding_comment = if self.include_comments {
+                                extract_preceding_comment(&self.editor.content, location.line)
+                            } else {
+                                None
+                            };
 
                             // Extract preceding comment if requested
                             let preceding_comment = if self.include_comments {
@@ -2885,7 +3189,10 @@ impl RustEditor {
                         // Extract function name from the call expression
                         let func_name = if let syn::Expr::Path(expr_path) = &*node.func {
                             // Get the last segment of the path as the function name
-                            expr_path.path.segments.last()
+                            expr_path
+                                .path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string())
                                 .unwrap_or_default()
                         } else {
@@ -3151,7 +3458,10 @@ impl RustEditor {
                 impl<'ast, 'a> Visit<'ast> for TypeRefVisitor<'a> {
                     fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
                         // Extract type name (last segment of path)
-                        let type_name = node.path.segments.last()
+                        let type_name = node
+                            .path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string())
                             .unwrap_or_default();
 
@@ -3216,7 +3526,11 @@ impl RustEditor {
                 impl<'ast, 'a> Visit<'ast> for MacroCallVisitor<'a> {
                     fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
                         // Extract macro name from the path
-                        let macro_name = node.mac.path.segments.last()
+                        let macro_name = node
+                            .mac
+                            .path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string())
                             .unwrap_or_default();
 
@@ -3255,7 +3569,11 @@ impl RustEditor {
                     fn visit_stmt(&mut self, node: &'ast syn::Stmt) {
                         // Also catch macro calls at statement level (e.g., println! as statement)
                         if let syn::Stmt::Macro(macro_stmt) = node {
-                            let macro_name = macro_stmt.mac.path.segments.last()
+                            let macro_name = macro_stmt
+                                .mac
+                                .path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string())
                                 .unwrap_or_default();
 
@@ -3271,12 +3589,12 @@ impl RustEditor {
                             let snippet = self.editor.format_stmt_macro(macro_stmt);
                             let location = self.editor.span_to_location(macro_stmt.span());
 
-                        // Extract preceding comment if requested
-                        let preceding_comment = if self.include_comments {
-                            extract_preceding_comment(&self.editor.content, location.line)
-                        } else {
-                            None
-                        };
+                            // Extract preceding comment if requested
+                            let preceding_comment = if self.include_comments {
+                                extract_preceding_comment(&self.editor.content, location.line)
+                            } else {
+                                None
+                            };
 
                             self.results.push(InspectResult {
                                 file_path: String::new(), // Will be filled in by caller
@@ -3381,7 +3699,9 @@ impl RustEditor {
                         let enum_name = node.ident.to_string();
 
                         // Parse name_filter for :: syntax
-                        let (enum_name_filter, implicit_variant_filter) = if let Some(filter) = self.name_filter {
+                        let (enum_name_filter, implicit_variant_filter) = if let Some(filter) =
+                            self.name_filter
+                        {
                             if filter.contains("::") {
                                 // View::Rectangle or *::Rectangle
                                 let parts: Vec<&str> = filter.split("::").collect();
@@ -3405,8 +3725,10 @@ impl RustEditor {
                             (None, None)
                         };
 
-                        // Determine which variant filter to use (explicit --variant flag or implicit from ::)
-                        let effective_variant_filter = self.variant_filter.or(implicit_variant_filter);
+                        // Determine which variant filter to use (explicit --variant flag or
+                        // implicit from ::)
+                        let effective_variant_filter =
+                            self.variant_filter.or(implicit_variant_filter);
 
                         // Apply enum name filter if specified
                         if let Some(filter) = enum_name_filter {
@@ -3418,7 +3740,10 @@ impl RustEditor {
 
                         // If variant filter is specified, check if this enum has that variant
                         if let Some(variant_name) = effective_variant_filter {
-                            let has_variant = node.variants.iter().any(|v| v.ident.to_string() == variant_name);
+                            let has_variant = node
+                                .variants
+                                .iter()
+                                .any(|v| v.ident.to_string() == variant_name);
                             if !has_variant {
                                 syn::visit::visit_item_enum(self, node);
                                 return;
@@ -3428,7 +3753,8 @@ impl RustEditor {
                         // Format the enum definition
                         let snippet = if let Some(variant_name) = effective_variant_filter {
                             // Filter to show only the matching variant
-                            self.editor.format_item_enum_variant_only(node, variant_name)
+                            self.editor
+                                .format_item_enum_variant_only(node, variant_name)
                         } else {
                             self.editor.format_item_enum(node)
                         };
@@ -3537,7 +3863,10 @@ impl RustEditor {
                     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
                         // Track which type this impl is for
                         let impl_type = if let syn::Type::Path(type_path) = &*node.self_ty {
-                            type_path.path.segments.last()
+                            type_path
+                                .path
+                                .segments
+                                .last()
                                 .map(|seg| seg.ident.to_string())
                         } else {
                             None
@@ -3903,27 +4232,36 @@ impl RustEditor {
                         }
 
                         let trait_path = &node.trait_.as_ref().unwrap().1;
-                        let trait_name = trait_path.segments.last()
+                        let trait_name = trait_path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string())
                             .unwrap_or_default();
 
-                        // Apply name filter to the trait name (same wildcard semantics as struct-literal)
+                        // Apply name filter to the trait name (same wildcard semantics as
+                        // struct-literal)
                         if let Some(filter) = self.name_filter {
                             let matches = if filter.contains("::") {
                                 if filter.starts_with("*::") {
                                     let target = &filter[3..];
-                                    trait_path.segments.last()
+                                    trait_path
+                                        .segments
+                                        .last()
                                         .map(|seg| seg.ident.to_string() == target)
                                         .unwrap_or(false)
                                 } else {
-                                    let path_str = trait_path.segments.iter()
+                                    let path_str = trait_path
+                                        .segments
+                                        .iter()
                                         .map(|seg| seg.ident.to_string())
                                         .collect::<Vec<_>>()
                                         .join("::");
                                     path_str == filter
                                 }
                             } else {
-                                trait_path.segments.last()
+                                trait_path
+                                    .segments
+                                    .last()
                                     .map(|seg| seg.ident.to_string() == filter)
                                     .unwrap_or(false)
                             };
@@ -3935,11 +4273,12 @@ impl RustEditor {
 
                         // Extract the implementing type name
                         let type_name = match &*node.self_ty {
-                            syn::Type::Path(tp) => {
-                                tp.path.segments.last()
-                                    .map(|seg| seg.ident.to_string())
-                                    .unwrap_or_else(|| quote::quote!(#tp).to_string())
-                            }
+                            syn::Type::Path(tp) => tp
+                                .path
+                                .segments
+                                .last()
+                                .map(|seg| seg.ident.to_string())
+                                .unwrap_or_else(|| quote::quote!(#tp).to_string()),
                             other => quote::quote!(#other).to_string(),
                         };
 
@@ -4104,7 +4443,9 @@ impl RustEditor {
     /// Format an ItemEnum showing only a specific variant
     fn format_item_enum_variant_only(&self, item: &syn::ItemEnum, variant_name: &str) -> String {
         // Find the matching variant
-        let variant = item.variants.iter()
+        let variant = item
+            .variants
+            .iter()
             .find(|v| v.ident.to_string() == variant_name);
 
         if let Some(variant) = variant {
@@ -4125,11 +4466,16 @@ impl RustEditor {
             let variant_source = &self.content[variant_start..variant_end];
 
             // Build the filtered output
-            format!("{}\n    {},\n    // ... {} other variant{}\n}}",
+            format!(
+                "{}\n    {},\n    // ... {} other variant{}\n}}",
                 header,
                 variant_source,
                 item.variants.len() - 1,
-                if item.variants.len() - 1 == 1 { "" } else { "s" }
+                if item.variants.len() - 1 == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             )
         } else {
             // Fallback: show full enum if variant not found
@@ -4264,20 +4610,25 @@ impl RustEditor {
     }
 
     /// Generic transform operation - find matching nodes and apply action
-    pub(crate) fn transform(&mut self, op: &crate::operations::TransformOp) -> Result<ModificationResult> {
+    pub(crate) fn transform(
+        &mut self,
+        op: &crate::operations::TransformOp,
+    ) -> Result<ModificationResult> {
         use crate::operations::{InspectResult, TransformAction};
 
         // First, use inspect to find all matching nodes (comments not needed for transform)
         let matches = self.inspect(Some(&op.node_type), op.name_filter.as_deref(), None, false)?;
 
         // Apply content filter if specified
-        let filtered_matches: Vec<InspectResult> = if let Some(ref content_filter) = op.content_filter {
-            matches.into_iter()
-                .filter(|m| m.snippet.contains(content_filter))
-                .collect()
-        } else {
-            matches
-        };
+        let filtered_matches: Vec<InspectResult> =
+            if let Some(ref content_filter) = op.content_filter {
+                matches
+                    .into_iter()
+                    .filter(|m| m.snippet.contains(content_filter))
+                    .collect()
+            } else {
+                matches
+            };
 
         if filtered_matches.is_empty() {
             return Ok(ModificationResult {
@@ -4291,7 +4642,9 @@ impl RustEditor {
         // We need to work backwards through the file to avoid offset issues
         let mut sorted_matches = filtered_matches;
         sorted_matches.sort_by(|a, b| {
-            b.location.line.cmp(&a.location.line)
+            b.location
+                .line
+                .cmp(&a.location.line)
                 .then(b.location.column.cmp(&a.location.column))
         });
 
@@ -4309,11 +4662,11 @@ impl RustEditor {
             // Find the byte offsets for this node
             let start_offset = self.line_column_to_byte_offset(
                 match_result.location.line,
-                match_result.location.column
+                match_result.location.column,
             )?;
             let end_offset = self.line_column_to_byte_offset(
                 match_result.location.end_line,
-                match_result.location.end_column
+                match_result.location.end_column,
             )?;
 
             // Extract the original text
@@ -4336,7 +4689,8 @@ impl RustEditor {
             };
 
             // Replace in content
-            self.content.replace_range(start_offset..end_offset, &replacement);
+            self.content
+                .replace_range(start_offset..end_offset, &replacement);
 
             // Recompute line offsets after each change
             self.line_offsets = Self::compute_line_offsets(&self.content);
@@ -4360,7 +4714,11 @@ impl RustEditor {
 
     /// Add an argument to function or method calls
     pub(crate) fn add_call_arg(&mut self, op: &AddCallArgOp) -> Result<ModificationResult> {
-        let call_matches = self.find_call_sites(&op.call_name, op.call_type.as_deref(), op.content_filter.as_deref())?;
+        let call_matches = self.find_call_sites(
+            &op.call_name,
+            op.call_type.as_deref(),
+            op.content_filter.as_deref(),
+        )?;
 
         if call_matches.is_empty() {
             return Ok(ModificationResult {
@@ -4373,7 +4731,9 @@ impl RustEditor {
         // Sort by position (backwards) to avoid offset issues
         let mut sorted_matches = call_matches;
         sorted_matches.sort_by(|a, b| {
-            b.location.line.cmp(&a.location.line)
+            b.location
+                .line
+                .cmp(&a.location.line)
                 .then(b.location.column.cmp(&a.location.column))
         });
 
@@ -4446,7 +4806,11 @@ impl RustEditor {
 
     /// Update an argument at a specific index in function or method calls
     pub(crate) fn update_call_arg(&mut self, op: &UpdateCallArgOp) -> Result<ModificationResult> {
-        let call_matches = self.find_call_sites(&op.call_name, op.call_type.as_deref(), op.content_filter.as_deref())?;
+        let call_matches = self.find_call_sites(
+            &op.call_name,
+            op.call_type.as_deref(),
+            op.content_filter.as_deref(),
+        )?;
 
         if call_matches.is_empty() {
             return Ok(ModificationResult {
@@ -4459,7 +4823,9 @@ impl RustEditor {
         // Sort by position (backwards) to avoid offset issues
         let mut sorted_matches = call_matches;
         sorted_matches.sort_by(|a, b| {
-            b.location.line.cmp(&a.location.line)
+            b.location
+                .line
+                .cmp(&a.location.line)
                 .then(b.location.column.cmp(&a.location.column))
         });
 
@@ -4503,7 +4869,11 @@ impl RustEditor {
 
     /// Remove an argument at a specific index from function or method calls
     pub(crate) fn remove_call_arg(&mut self, op: &RemoveCallArgOp) -> Result<ModificationResult> {
-        let call_matches = self.find_call_sites(&op.call_name, op.call_type.as_deref(), op.content_filter.as_deref())?;
+        let call_matches = self.find_call_sites(
+            &op.call_name,
+            op.call_type.as_deref(),
+            op.content_filter.as_deref(),
+        )?;
 
         if call_matches.is_empty() {
             return Ok(ModificationResult {
@@ -4516,7 +4886,9 @@ impl RustEditor {
         // Sort by position (backwards) to avoid offset issues
         let mut sorted_matches = call_matches;
         sorted_matches.sort_by(|a, b| {
-            b.location.line.cmp(&a.location.line)
+            b.location
+                .line
+                .cmp(&a.location.line)
                 .then(b.location.column.cmp(&a.location.column))
         });
 
@@ -4540,7 +4912,8 @@ impl RustEditor {
             };
 
             // Find the span of the argument to remove (including comma)
-            let (remove_start, remove_end) = self.find_arg_span_with_comma(&call_match, op.arg_index, arg_count)?;
+            let (remove_start, remove_end) =
+                self.find_arg_span_with_comma(&call_match, op.arg_index, arg_count)?;
 
             // Remove the argument
             self.content.replace_range(remove_start..remove_end, "");
@@ -4559,7 +4932,12 @@ impl RustEditor {
     }
 
     /// Find all function and/or method call sites matching the given name
-    fn find_call_sites(&self, call_name: &str, call_type: Option<&str>, content_filter: Option<&str>) -> Result<Vec<InspectResult>> {
+    fn find_call_sites(
+        &self,
+        call_name: &str,
+        call_type: Option<&str>,
+        content_filter: Option<&str>,
+    ) -> Result<Vec<InspectResult>> {
         let mut results = Vec::new();
 
         // Determine which types to search
@@ -4578,7 +4956,8 @@ impl RustEditor {
 
         // Apply content filter if specified
         if let Some(filter) = content_filter {
-            results = results.into_iter()
+            results = results
+                .into_iter()
                 .filter(|r| r.snippet.contains(filter))
                 .collect();
         }
@@ -4586,22 +4965,21 @@ impl RustEditor {
         Ok(results)
     }
 
-    /// Find the byte offsets of the arguments list (just after opening paren, just before closing paren)
-    /// Returns (start_offset, end_offset, arg_count)
+    /// Find the byte offsets of the arguments list (just after opening paren, just before closing
+    /// paren) Returns (start_offset, end_offset, arg_count)
     fn find_call_args_span(&self, call_match: &InspectResult) -> Result<(usize, usize, usize)> {
-        let start_offset = self.line_column_to_byte_offset(
-            call_match.location.line,
-            call_match.location.column
-        )?;
+        let start_offset =
+            self.line_column_to_byte_offset(call_match.location.line, call_match.location.column)?;
         let end_offset = self.line_column_to_byte_offset(
             call_match.location.end_line,
-            call_match.location.end_column
+            call_match.location.end_column,
         )?;
 
         let call_text = &self.content[start_offset..end_offset];
 
         // Find the opening parenthesis
-        let paren_start = call_text.find('(')
+        let paren_start = call_text
+            .find('(')
             .ok_or_else(|| anyhow::anyhow!("Could not find opening parenthesis in call"))?;
 
         // Find the closing parenthesis (accounting for nested parens)
@@ -4616,7 +4994,7 @@ impl RustEditor {
         Ok((
             start_offset + paren_start + 1,
             start_offset + paren_end,
-            arg_count
+            arg_count,
         ))
     }
 
@@ -4721,7 +5099,11 @@ impl RustEditor {
     }
 
     /// Find the byte offset of the boundary before the nth argument
-    fn find_arg_boundary_offset(&self, call_match: &InspectResult, arg_index: usize) -> Result<usize> {
+    fn find_arg_boundary_offset(
+        &self,
+        call_match: &InspectResult,
+        arg_index: usize,
+    ) -> Result<usize> {
         let (args_start, args_end, _) = self.find_call_args_span(call_match)?;
         let args_text = &self.content[args_start..args_end];
 
@@ -4778,7 +5160,11 @@ impl RustEditor {
     }
 
     /// Find the byte span of a specific argument
-    fn find_arg_span(&self, call_match: &InspectResult, arg_index: usize) -> Result<(usize, usize)> {
+    fn find_arg_span(
+        &self,
+        call_match: &InspectResult,
+        arg_index: usize,
+    ) -> Result<(usize, usize)> {
         let (args_start, args_end, _) = self.find_call_args_span(call_match)?;
         let args_text = &self.content[args_start..args_end];
 
@@ -4830,7 +5216,10 @@ impl RustEditor {
                         // Trim trailing whitespace from the argument
                         let arg_text = &args_text[arg_start_in_text..i];
                         let trimmed_len = arg_text.trim_end().len();
-                        return Ok((args_start + arg_start_in_text, args_start + arg_start_in_text + trimmed_len));
+                        return Ok((
+                            args_start + arg_start_in_text,
+                            args_start + arg_start_in_text + trimmed_len,
+                        ));
                     }
                     current_arg += 1;
                     // Next arg starts after comma and whitespace
@@ -4846,14 +5235,22 @@ impl RustEditor {
         if current_arg == arg_index {
             let arg_text = &args_text[arg_start_in_text..];
             let trimmed_len = arg_text.trim_end().len();
-            return Ok((args_start + arg_start_in_text, args_start + arg_start_in_text + trimmed_len));
+            return Ok((
+                args_start + arg_start_in_text,
+                args_start + arg_start_in_text + trimmed_len,
+            ));
         }
 
         anyhow::bail!("Argument index {} not found", arg_index)
     }
 
     /// Find the byte span of a specific argument including comma for removal
-    fn find_arg_span_with_comma(&self, call_match: &InspectResult, arg_index: usize, arg_count: usize) -> Result<(usize, usize)> {
+    fn find_arg_span_with_comma(
+        &self,
+        call_match: &InspectResult,
+        arg_index: usize,
+        arg_count: usize,
+    ) -> Result<(usize, usize)> {
         let (args_start, args_end, _) = self.find_call_args_span(call_match)?;
         let args_text = &self.content[args_start..args_end];
 
@@ -4906,7 +5303,10 @@ impl RustEditor {
                             // First arg, but not only - include comma and whitespace after
                             let rest = &args_text[i + 1..];
                             let whitespace_len = rest.len() - rest.trim_start().len();
-                            return Ok((args_start + arg_start_in_text, args_start + i + 1 + whitespace_len));
+                            return Ok((
+                                args_start + arg_start_in_text,
+                                args_start + i + 1 + whitespace_len,
+                            ));
                         } else {
                             // Include comma (and preceding whitespace from previous arg separator)
                             return Ok((args_start + arg_start_in_text, args_start + i + 1));
@@ -4928,9 +5328,13 @@ impl RustEditor {
                 // Not the only arg - need to remove preceding comma too
                 // Find the comma before this arg
                 let before_text = &args_text[..arg_start_in_text];
-                let comma_pos = before_text.rfind(',')
+                let comma_pos = before_text
+                    .rfind(',')
                     .ok_or_else(|| anyhow::anyhow!("Could not find comma before argument"))?;
-                return Ok((args_start + comma_pos, args_start + args_text.trim_end().len()));
+                return Ok((
+                    args_start + comma_pos,
+                    args_start + args_text.trim_end().len(),
+                ));
             } else {
                 // Only argument - just remove it
                 let trimmed_end = args_text.trim_end().len();
@@ -4942,7 +5346,10 @@ impl RustEditor {
     }
 
     /// Rename an enum variant across the entire file
-    pub(crate) fn rename_enum_variant(&mut self, op: &crate::operations::RenameEnumVariantOp) -> Result<ModificationResult> {
+    pub(crate) fn rename_enum_variant(
+        &mut self,
+        op: &crate::operations::RenameEnumVariantOp,
+    ) -> Result<ModificationResult> {
         use crate::operations::EditMode;
 
         // Create a path resolver if a canonical path was provided
@@ -4961,6 +5368,7 @@ impl RustEditor {
             EditMode::Surgical => {
                 // Use non-mutating visitor to collect replacement locations
                 use syn::visit::Visit;
+
                 use crate::surgical::Replacement;
 
                 let mut collector = EnumVariantReplacementCollector {
@@ -4977,12 +5385,13 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                        unmatched_qualified_paths: None,
                     });
                 }
 
                 // Apply surgical edits to original content
-                self.content = crate::surgical::apply_surgical_edits(&self.content, collector.replacements);
+                self.content =
+                    crate::surgical::apply_surgical_edits(&self.content, collector.replacements);
 
                 // Recompute line offsets
                 self.line_offsets = Self::compute_line_offsets(&self.content);
@@ -4993,8 +5402,14 @@ impl RustEditor {
 
                 let backup_node = BackupNode {
                     node_type: "EnumVariantRename".to_string(),
-                    identifier: format!("{}::{} -> {} (surgical)", op.enum_name, op.old_variant, op.new_variant),
-                    original_content: format!("Renamed {} to {} in enum {} (surgical mode)", op.old_variant, op.new_variant, op.enum_name),
+                    identifier: format!(
+                        "{}::{} -> {} (surgical)",
+                        op.enum_name, op.old_variant, op.new_variant
+                    ),
+                    original_content: format!(
+                        "Renamed {} to {} in enum {} (surgical mode)",
+                        op.old_variant, op.new_variant, op.enum_name
+                    ),
                     location: NodeLocation {
                         line: 1,
                         column: 0,
@@ -5006,7 +5421,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                    unmatched_qualified_paths: None,
                 })
             }
             EditMode::Reformat => {
@@ -5026,7 +5441,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                        unmatched_qualified_paths: None,
                     });
                 }
 
@@ -5039,8 +5454,14 @@ impl RustEditor {
                 // Create a backup node for the entire file operation
                 let backup_node = BackupNode {
                     node_type: "EnumVariantRename".to_string(),
-                    identifier: format!("{}::{} -> {}", op.enum_name, op.old_variant, op.new_variant),
-                    original_content: format!("Renamed {} to {} in enum {}", op.old_variant, op.new_variant, op.enum_name),
+                    identifier: format!(
+                        "{}::{} -> {}",
+                        op.enum_name, op.old_variant, op.new_variant
+                    ),
+                    original_content: format!(
+                        "Renamed {} to {} in enum {}",
+                        op.old_variant, op.new_variant, op.enum_name
+                    ),
                     location: NodeLocation {
                         line: 1,
                         column: 0,
@@ -5052,14 +5473,17 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                    unmatched_qualified_paths: None,
                 })
             }
         }
     }
 
     /// Rename a function across the entire file
-    pub(crate) fn rename_function(&mut self, op: &crate::operations::RenameFunctionOp) -> Result<ModificationResult> {
+    pub(crate) fn rename_function(
+        &mut self,
+        op: &crate::operations::RenameFunctionOp,
+    ) -> Result<ModificationResult> {
         use crate::operations::EditMode;
 
         // Create a path resolver if a canonical path was provided
@@ -5092,12 +5516,13 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                        unmatched_qualified_paths: None,
                     });
                 }
 
                 // Apply surgical edits to original content
-                self.content = crate::surgical::apply_surgical_edits(&self.content, collector.replacements);
+                self.content =
+                    crate::surgical::apply_surgical_edits(&self.content, collector.replacements);
 
                 // Recompute line offsets
                 self.line_offsets = Self::compute_line_offsets(&self.content);
@@ -5109,7 +5534,10 @@ impl RustEditor {
                 let backup_node = BackupNode {
                     node_type: "FunctionRename".to_string(),
                     identifier: format!("{} -> {} (surgical)", op.old_name, op.new_name),
-                    original_content: format!("Renamed {} to {} (surgical mode)", op.old_name, op.new_name),
+                    original_content: format!(
+                        "Renamed {} to {} (surgical mode)",
+                        op.old_name, op.new_name
+                    ),
                     location: NodeLocation {
                         line: 1,
                         column: 0,
@@ -5121,7 +5549,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                    unmatched_qualified_paths: None,
                 })
             }
             EditMode::Reformat => {
@@ -5140,7 +5568,7 @@ impl RustEditor {
                     return Ok(ModificationResult {
                         changed: false,
                         modified_nodes: vec![],
-            unmatched_qualified_paths: None,
+                        unmatched_qualified_paths: None,
                     });
                 }
 
@@ -5166,7 +5594,7 @@ impl RustEditor {
                 Ok(ModificationResult {
                     changed: true,
                     modified_nodes: vec![backup_node],
-            unmatched_qualified_paths: None,
+                    unmatched_qualified_paths: None,
                 })
             }
         }
@@ -5215,9 +5643,10 @@ impl VisitMut for MatchArmAdder {
 
         // Check if the pattern already exists (idempotent)
         let pattern_str = self.arm_to_add.pat.to_token_stream().to_string();
-        let already_exists = node.arms.iter().any(|arm| {
-            arm.pat.to_token_stream().to_string() == pattern_str
-        });
+        let already_exists = node
+            .arms
+            .iter()
+            .any(|arm| arm.pat.to_token_stream().to_string() == pattern_str);
 
         if !already_exists {
             // Add the arm to the end
@@ -5334,7 +5763,7 @@ impl VisitMut for MatchArmRemover {
 // Visitor for adding multiple match arms at once (for auto-detect)
 struct MultiMatchArmAdder {
     target_function: Option<String>,
-    arms_to_add: Vec<(String, Arm)>,  // (pattern_string, arm)
+    arms_to_add: Vec<(String, Arm)>, // (pattern_string, arm)
     modified: bool,
     current_function: Option<String>,
     modified_function: Option<String>,
@@ -5362,9 +5791,10 @@ impl VisitMut for MultiMatchArmAdder {
         // Add all missing arms
         for (pattern_str, arm) in &self.arms_to_add {
             // Check if the pattern already exists (idempotent)
-            let already_exists = node.arms.iter().any(|existing_arm| {
-                existing_arm.pat.to_token_stream().to_string() == *pattern_str
-            });
+            let already_exists = node
+                .arms
+                .iter()
+                .any(|existing_arm| existing_arm.pat.to_token_stream().to_string() == *pattern_str);
 
             if !already_exists {
                 node.arms.push(arm.clone());
@@ -5405,12 +5835,18 @@ impl VisitMut for StructLiteralFieldAdder {
                     if self.struct_name.starts_with("*::") {
                         // Wildcard: *::Rectangle matches any path ending with Rectangle
                         let target_name = &self.struct_name[3..]; // Skip "*::"
-                        expr_struct.path.segments.last()
+                        expr_struct
+                            .path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string() == target_name)
                             .unwrap_or(false)
                     } else {
                         // Exact path match: View::Rectangle
-                        let path_str = expr_struct.path.segments.iter()
+                        let path_str = expr_struct
+                            .path
+                            .segments
+                            .iter()
                             .map(|seg| seg.ident.to_string())
                             .collect::<Vec<_>>()
                             .join("::");
@@ -5419,23 +5855,30 @@ impl VisitMut for StructLiteralFieldAdder {
                 } else {
                     // No :: in pattern - only match pure struct literals (no path qualifier)
                     expr_struct.path.segments.len() == 1
-                        && expr_struct.path.segments.last()
+                        && expr_struct
+                            .path
+                            .segments
+                            .last()
                             .map(|seg| seg.ident.to_string())
-                            .as_ref() == Some(&self.struct_name)
+                            .as_ref()
+                            == Some(&self.struct_name)
                 }
             };
 
             if is_match {
                 // Check if field already exists (idempotent)
-                let field_exists = expr_struct.fields.iter().any(|fv| {
-                    fv.member.to_token_stream().to_string() == self.field_name
-                });
+                let field_exists = expr_struct
+                    .fields
+                    .iter()
+                    .any(|fv| fv.member.to_token_stream().to_string() == self.field_name);
 
                 if !field_exists {
                     // Parse the field value from field_def
                     // field_def is like "return_type: None"
                     let field_value_code = format!("{{ {} }}", self.field_def);
-                    if let Ok(expr) = parse_str::<ExprStruct>(&format!("Dummy {}", field_value_code)) {
+                    if let Ok(expr) =
+                        parse_str::<ExprStruct>(&format!("Dummy {}", field_value_code))
+                    {
                         if let Some(new_fv) = expr.fields.first() {
                             // Determine where to insert
                             match &self.position {
@@ -5507,8 +5950,7 @@ impl EnumVariantRenamer {
             let potential_variant = &segments[len - 1];
             let potential_enum = &segments[len - 2];
 
-            if potential_enum.ident == self.enum_name
-                && potential_variant.ident == self.old_variant
+            if potential_enum.ident == self.enum_name && potential_variant.ident == self.old_variant
             {
                 // Path ends with EnumName::VariantName
 
@@ -5517,28 +5959,21 @@ impl EnumVariantRenamer {
                     // Extract just the enum path (everything except the variant)
                     let enum_path = syn::Path {
                         leading_colon: path.leading_colon,
-                        segments: path.segments.iter()
-                            .take(len - 1)
-                            .cloned()
-                            .collect(),
+                        segments: path.segments.iter().take(len - 1).cloned().collect(),
                     };
 
                     // Only rename if the enum path matches our target
                     if resolver.matches_target(&enum_path) {
-                        path.segments[len - 1].ident = syn::Ident::new(
-                            &self.new_variant,
-                            path.segments[len - 1].ident.span()
-                        );
+                        path.segments[len - 1].ident =
+                            syn::Ident::new(&self.new_variant, path.segments[len - 1].ident.span());
                         self.modified = true;
                     }
                 } else {
                     // No resolver - use simple matching (backward compatible)
                     // Only match if it's exactly EnumName::Variant (2 segments)
                     if len == 2 {
-                        path.segments[1].ident = syn::Ident::new(
-                            &self.new_variant,
-                            path.segments[1].ident.span()
-                        );
+                        path.segments[1].ident =
+                            syn::Ident::new(&self.new_variant, path.segments[1].ident.span());
                         self.modified = true;
                     }
                 }
@@ -5550,10 +5985,8 @@ impl EnumVariantRenamer {
                 // unless they're explicitly imported (which would be unusual for variants)
                 // For backward compatibility, we still rename them when no resolver is present
                 if self.path_resolver.is_none() {
-                    path.segments[0].ident = syn::Ident::new(
-                        &self.new_variant,
-                        path.segments[0].ident.span()
-                    );
+                    path.segments[0].ident =
+                        syn::Ident::new(&self.new_variant, path.segments[0].ident.span());
                     self.modified = true;
                 }
             }
@@ -5637,8 +6070,7 @@ impl EnumVariantReplacementCollector {
             let potential_variant = &segments[len - 1];
             let potential_enum = &segments[len - 2];
 
-            if potential_enum.ident == self.enum_name
-                && potential_variant.ident == self.old_variant
+            if potential_enum.ident == self.enum_name && potential_variant.ident == self.old_variant
             {
                 // Path ends with EnumName::VariantName
 
@@ -5646,10 +6078,7 @@ impl EnumVariantReplacementCollector {
                 let should_rename = if let Some(resolver) = &self.path_resolver {
                     let enum_path = syn::Path {
                         leading_colon: path.leading_colon,
-                        segments: path.segments.iter()
-                            .take(len - 1)
-                            .cloned()
-                            .collect(),
+                        segments: path.segments.iter().take(len - 1).cloned().collect(),
                     };
                     resolver.matches_target(&enum_path)
                 } else {
@@ -5924,7 +6353,8 @@ fn generate_doc_comment(text: &str, style: &DocCommentStyle) -> String {
             // Simple block comment
             if text.contains('\n') {
                 // Multi-line block comment
-                let lines = text.lines()
+                let lines = text
+                    .lines()
                     .map(|line| format!(" * {}", line))
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -6056,10 +6486,7 @@ impl RustEditor {
         use syn::visit::Visit;
 
         // Find the target item
-        let mut finder = TargetFinder::new(
-            target_type.to_string(),
-            target_name.to_string(),
-        );
+        let mut finder = TargetFinder::new(target_type.to_string(), target_name.to_string());
         finder.visit_file(&self.syntax_tree);
 
         if let Some((line_num, _indent)) = finder.found_position {
@@ -6102,8 +6529,8 @@ impl RustEditor {
             self.content = new_lines.join("\n");
 
             // Re-parse to update syntax tree
-            self.syntax_tree = syn::parse_str(&self.content)
-                .context("Failed to re-parse after adding comment")?;
+            self.syntax_tree =
+                syn::parse_str(&self.content).context("Failed to re-parse after adding comment")?;
 
             Ok(ModificationResult {
                 changed: true,
@@ -6136,10 +6563,7 @@ impl RustEditor {
         use syn::visit::Visit;
 
         // Find the target item
-        let mut finder = TargetFinder::new(
-            target_type.to_string(),
-            target_name.to_string(),
-        );
+        let mut finder = TargetFinder::new(target_type.to_string(), target_name.to_string());
         finder.visit_file(&self.syntax_tree);
 
         if let Some((line_num, _indent)) = finder.found_position {
@@ -6165,10 +6589,13 @@ impl RustEditor {
             let mut doc_comment_start = line_idx;
             while doc_comment_start > 0 {
                 let prev_line = lines[doc_comment_start - 1].trim();
-                if prev_line.starts_with("///") || prev_line.starts_with("//!") ||
-                   prev_line.starts_with("/**") || prev_line.starts_with("/*!") ||
-                   (prev_line.starts_with("*") && !prev_line.starts_with("*/")) ||
-                   prev_line == "*/" {
+                if prev_line.starts_with("///")
+                    || prev_line.starts_with("//!")
+                    || prev_line.starts_with("/**")
+                    || prev_line.starts_with("/*!")
+                    || (prev_line.starts_with("*") && !prev_line.starts_with("*/"))
+                    || prev_line == "*/"
+                {
                     doc_comment_start -= 1;
                 } else {
                     break;
@@ -6235,10 +6662,7 @@ impl RustEditor {
         use syn::visit::Visit;
 
         // Find the target item
-        let mut finder = TargetFinder::new(
-            target_type.to_string(),
-            target_name.to_string(),
-        );
+        let mut finder = TargetFinder::new(target_type.to_string(), target_name.to_string());
         finder.visit_file(&self.syntax_tree);
 
         if let Some((line_num, _indent)) = finder.found_position {
@@ -6258,10 +6682,13 @@ impl RustEditor {
             let mut doc_comment_start = line_idx;
             while doc_comment_start > 0 {
                 let prev_line = lines[doc_comment_start - 1].trim();
-                if prev_line.starts_with("///") || prev_line.starts_with("//!") ||
-                   prev_line.starts_with("/**") || prev_line.starts_with("/*!") ||
-                   (prev_line.starts_with("*") && !prev_line.starts_with("*/")) ||
-                   prev_line == "*/" {
+                if prev_line.starts_with("///")
+                    || prev_line.starts_with("//!")
+                    || prev_line.starts_with("/**")
+                    || prev_line.starts_with("/*!")
+                    || (prev_line.starts_with("*") && !prev_line.starts_with("*/"))
+                    || prev_line == "*/"
+                {
                     doc_comment_start -= 1;
                 } else {
                     break;

@@ -281,8 +281,8 @@ fn process_item(
                 }
             }
         }
-        // Skip: Use, Impl (without --fields), Macro, ExternCrate, ForeignMod, TraitAlias, Union, Verbatim
+        // Skip: Use, Impl (without --fields), Macro, ExternCrate, ForeignMod, TraitAlias, Union,
+        // Verbatim
         _ => {}
     }
 }
-

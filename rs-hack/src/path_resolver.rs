@@ -10,9 +10,10 @@
 /// But will NOT match:
 /// - `OtherEnum::Variant` (different enum entirely)
 /// - `IRValue::Variant` (if no appropriate use statement exists)
-
 use std::collections::HashMap;
-use syn::{visit::Visit, File, ItemUse, Path, UseTree};
+
+use syn::visit::Visit;
+use syn::{File, ItemUse, Path, UseTree};
 
 /// Tracks use statements and validates whether paths refer to a specific target.
 ///
@@ -57,10 +58,7 @@ impl PathResolver {
             return None;
         }
 
-        let segments: Vec<String> = canonical_path
-            .split("::")
-            .map(String::from)
-            .collect();
+        let segments: Vec<String> = canonical_path.split("::").map(String::from).collect();
 
         if segments.is_empty() {
             return None;
@@ -232,7 +230,8 @@ impl<'a> UseStatementScanner<'a> {
                 self.local_aliases.insert(local_name, full_path.clone());
 
                 // Also map intermediate paths
-                // e.g., `use crate::compiler::types;` maps "types" to ["crate", "compiler", "types"]
+                // e.g., `use crate::compiler::types;` maps "types" to ["crate", "compiler",
+                // "types"]
                 if !prefix.is_empty() {
                     let prefix_str = prefix.join("::");
                     self.local_aliases.insert(prefix_str, prefix);
@@ -292,8 +291,9 @@ impl<'ast, 'a> Visit<'ast> for UseStatementScanner<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn test_exact_canonical_path_match() {

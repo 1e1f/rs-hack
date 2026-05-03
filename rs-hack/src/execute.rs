@@ -78,10 +78,7 @@ pub fn execute(files: &[PathBuf], op: &Operation, opts: &ExecuteOpts) -> Result<
             Ok(op_result) => {
                 if let Some(unmatched) = op_result.unmatched_qualified_paths {
                     for (path, count) in unmatched {
-                        *result
-                            .unmatched_qualified_paths
-                            .entry(path)
-                            .or_insert(0) += count;
+                        *result.unmatched_qualified_paths.entry(path).or_insert(0) += count;
                     }
                 }
 
@@ -91,9 +88,8 @@ pub fn execute(files: &[PathBuf], op: &Operation, opts: &ExecuteOpts) -> Result<
 
                     if opts.apply {
                         let write_path = opts.output.as_ref().unwrap_or(file_path);
-                        std::fs::write(write_path, &new_content).with_context(|| {
-                            format!("Failed to write {}", write_path.display())
-                        })?;
+                        std::fs::write(write_path, &new_content)
+                            .with_context(|| format!("Failed to write {}", write_path.display()))?;
                     }
 
                     result.changes.push(FileChange {
@@ -167,10 +163,7 @@ pub fn execute_with_state(
             Ok(op_result) => {
                 if let Some(unmatched) = op_result.unmatched_qualified_paths {
                     for (path, count) in unmatched {
-                        *result
-                            .unmatched_qualified_paths
-                            .entry(path)
-                            .or_insert(0) += count;
+                        *result.unmatched_qualified_paths.entry(path).or_insert(0) += count;
                     }
                 }
 

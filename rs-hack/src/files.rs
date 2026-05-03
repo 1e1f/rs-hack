@@ -69,7 +69,13 @@ pub fn collect_rust_files_with_exclusions(
 pub fn expand_kind_to_node_types(kind: &str) -> Vec<&'static str> {
     match kind {
         "struct" => vec!["struct", "struct-literal"],
-        "function" => vec!["function", "function-call", "method-call", "impl-method", "trait-method"],
+        "function" => vec![
+            "function",
+            "function-call",
+            "method-call",
+            "impl-method",
+            "trait-method",
+        ],
         "enum" => vec!["enum", "enum-usage"],
         "match" => vec!["match-arm"],
         "identifier" => vec!["identifier"],

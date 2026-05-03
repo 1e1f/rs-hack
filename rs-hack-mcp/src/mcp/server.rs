@@ -1,9 +1,10 @@
 //! MCP server: stdio-based JSON-RPC loop that handles initialize,
 //! tools/list, and tools/call methods.
 
+use std::io::{BufRead, Write};
+
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::io::{BufRead, Write};
 use tracing::{debug, error, info};
 
 use super::protocol::{JsonRpcRequest, JsonRpcResponse};
@@ -37,11 +38,7 @@ impl Server {
 
             let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
                 Ok(request) => self.handle_request(request).await,
-                Err(e) => JsonRpcResponse::error(
-                    None,
-                    -32700,
-                    format!("Parse error: {}", e),
-                ),
+                Err(e) => JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e)),
             };
 
             let response_json = serde_json::to_string(&response)?;
@@ -96,13 +93,18 @@ impl Server {
     fn handle_tools_list(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         debug!("Listing tools");
 
-        let tools_list: Vec<Value> = self.tools.list().iter().map(|tool| {
-            json!({
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema
+        let tools_list: Vec<Value> = self
+            .tools
+            .list()
+            .iter()
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema
+                })
             })
-        }).collect();
+            .collect();
 
         JsonRpcResponse::success(request.id, json!({ "tools": tools_list }))
     }
@@ -110,12 +112,22 @@ impl Server {
     async fn handle_tools_call(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         let params = match request.params {
             Some(p) => p,
-            None => return JsonRpcResponse::invalid_params(request.id.clone(), "Missing params".to_string()),
+            None => {
+                return JsonRpcResponse::invalid_params(
+                    request.id.clone(),
+                    "Missing params".to_string(),
+                )
+            }
         };
 
         let tool_name = match params.get("name").and_then(|v| v.as_str()) {
             Some(name) => name,
-            None => return JsonRpcResponse::invalid_params(request.id.clone(), "Missing tool name".to_string()),
+            None => {
+                return JsonRpcResponse::invalid_params(
+                    request.id.clone(),
+                    "Missing tool name".to_string(),
+                )
+            }
         };
 
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
@@ -125,7 +137,10 @@ impl Server {
         match self.tools.call(tool_name, arguments).await {
             Ok(result) => {
                 info!("Tool {} completed successfully", tool_name);
-                JsonRpcResponse::success(request.id, json!({ "content": [{ "type": "text", "text": result }] }))
+                JsonRpcResponse::success(
+                    request.id,
+                    json!({ "content": [{ "type": "text", "text": result }] }),
+                )
             }
             Err(e) => {
                 error!("Tool {} failed: {}", tool_name, e);

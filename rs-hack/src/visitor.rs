@@ -1,8 +1,9 @@
 //! AST visitor that walks syn trees to collect node matches
 //! (structs, enums, functions, match expressions).
 
+use syn::spanned::Spanned;
 use syn::visit::Visit;
-use syn::{*, spanned::Spanned};
+use syn::*;
 
 #[allow(dead_code)]
 pub struct NodeFinder {
@@ -12,10 +13,21 @@ pub struct NodeFinder {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum NodeMatch {
-    Struct { name: String, span: proc_macro2::Span },
-    Enum { name: String, span: proc_macro2::Span },
-    Function { name: String, span: proc_macro2::Span },
-    MatchExpr { span: proc_macro2::Span },
+    Struct {
+        name: String,
+        span: proc_macro2::Span,
+    },
+    Enum {
+        name: String,
+        span: proc_macro2::Span,
+    },
+    Function {
+        name: String,
+        span: proc_macro2::Span,
+    },
+    MatchExpr {
+        span: proc_macro2::Span,
+    },
 }
 
 #[allow(dead_code)]
@@ -35,7 +47,7 @@ impl<'ast> Visit<'ast> for NodeFinder {
         });
         syn::visit::visit_item_struct(self, node);
     }
-    
+
     fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
         self.matches.push(NodeMatch::Enum {
             name: node.ident.to_string(),
@@ -43,7 +55,7 @@ impl<'ast> Visit<'ast> for NodeFinder {
         });
         syn::visit::visit_item_enum(self, node);
     }
-    
+
     fn visit_item_fn(&mut self, node: &'ast ItemFn) {
         self.matches.push(NodeMatch::Function {
             name: node.sig.ident.to_string(),
@@ -51,11 +63,10 @@ impl<'ast> Visit<'ast> for NodeFinder {
         });
         syn::visit::visit_item_fn(self, node);
     }
-    
+
     fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
-        self.matches.push(NodeMatch::MatchExpr {
-            span: node.span(),
-        });
+        self.matches
+            .push(NodeMatch::MatchExpr { span: node.span() });
         syn::visit::visit_expr_match(self, node);
     }
 }

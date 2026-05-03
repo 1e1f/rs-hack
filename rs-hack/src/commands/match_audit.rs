@@ -48,11 +48,7 @@ pub fn run(paths: &[PathBuf], enum_name: &str, exclude: &[String]) -> Result<Mat
         for item in &syntax.items {
             if let syn::Item::Enum(e) = item {
                 if e.ident == enum_name {
-                    all_variants = e
-                        .variants
-                        .iter()
-                        .map(|v| v.ident.to_string())
-                        .collect();
+                    all_variants = e.variants.iter().map(|v| v.ident.to_string()).collect();
                     break;
                 }
             }
@@ -113,7 +109,10 @@ pub fn render(report: &MatchReport) {
     println!();
 
     if report.match_sites.is_empty() {
-        println!("  No match expressions found for enum {}.", report.enum_name);
+        println!(
+            "  No match expressions found for enum {}.",
+            report.enum_name
+        );
         return;
     }
 
@@ -121,7 +120,10 @@ pub fn render(report: &MatchReport) {
     let mut any_missing = false;
     for site in &report.match_sites {
         if site.has_wildcard {
-            println!("  {} ({}:{}): (wildcard — covers all)", site.fn_name, site.file_path, site.line);
+            println!(
+                "  {} ({}:{}): (wildcard — covers all)",
+                site.fn_name, site.file_path, site.line
+            );
         } else if site.missing_variants.is_empty() {
             println!("  {}: complete", site.fn_name);
         } else {
@@ -152,7 +154,10 @@ struct MatchAuditVisitor<'a> {
 
 impl<'a> MatchAuditVisitor<'a> {
     fn current_fn(&self) -> String {
-        self.fn_stack.last().cloned().unwrap_or_else(|| "<top-level>".to_string())
+        self.fn_stack
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "<top-level>".to_string())
     }
 }
 

@@ -1,8 +1,9 @@
 //! Surgical edit engine: applies precise, minimal text replacements
 //! to source code while preserving all formatting, comments, and whitespace.
 
-use proc_macro2::LineColumn;
 use std::cmp::Ordering;
+
+use proc_macro2::LineColumn;
 
 /// Represents a single textual replacement in the source code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,25 +56,26 @@ impl PartialOrd for Replacement {
 ///
 /// # Example
 /// ```
-/// use rs_hack::surgical::{Replacement, apply_surgical_edits};
 /// use proc_macro2::LineColumn;
+/// use rs_hack::surgical::{apply_surgical_edits, Replacement};
 ///
 /// let source = "fn foo() {\n    let x = 1;\n}\n";
-/// let replacements = vec![
-///     Replacement::new(
-///         LineColumn { line: 2, column: 12 },
-///         LineColumn { line: 2, column: 13 },
-///         "42".to_string(),
-///     ),
-/// ];
+/// let replacements = vec![Replacement::new(
+///     LineColumn {
+///         line: 2,
+///         column: 12,
+///     },
+///     LineColumn {
+///         line: 2,
+///         column: 13,
+///     },
+///     "42".to_string(),
+/// )];
 ///
 /// let result = apply_surgical_edits(source, replacements);
 /// assert_eq!(result, "fn foo() {\n    let x = 42;\n}");
 /// ```
-pub fn apply_surgical_edits(
-    original_source: &str,
-    mut replacements: Vec<Replacement>,
-) -> String {
+pub fn apply_surgical_edits(original_source: &str, mut replacements: Vec<Replacement>) -> String {
     if replacements.is_empty() {
         return original_source.to_string();
     }
@@ -86,17 +88,21 @@ pub fn apply_surgical_edits(
         let prev = &replacements[i - 1];
         let curr = &replacements[i];
 
-        if prev.end.line > curr.start.line ||
-           (prev.end.line == curr.start.line && prev.end.column > curr.start.column) {
-            panic!("Overlapping replacements detected: {:?} and {:?}", prev, curr);
+        if prev.end.line > curr.start.line
+            || (prev.end.line == curr.start.line && prev.end.column > curr.start.column)
+        {
+            panic!(
+                "Overlapping replacements detected: {:?} and {:?}",
+                prev, curr
+            );
         }
     }
 
     let lines: Vec<&str> = original_source.lines().collect();
     let mut result = String::new();
 
-    let mut current_line = 1usize;  // 1-indexed to match proc_macro2
-    let mut current_col = 0usize;    // 0-indexed
+    let mut current_line = 1usize; // 1-indexed to match proc_macro2
+    let mut current_col = 0usize; // 0-indexed
 
     for replacement in replacements {
         // Copy unchanged text up to this replacement
@@ -119,7 +125,8 @@ pub fn apply_surgical_edits(
         // Copy partial line up to replacement start (on the same line)
         if current_line == replacement.start.line {
             if let Some(line) = lines.get(current_line - 1) {
-                if current_col < replacement.start.column && replacement.start.column <= line.len() {
+                if current_col < replacement.start.column && replacement.start.column <= line.len()
+                {
                     result.push_str(&line[current_col..replacement.start.column]);
                 }
             }
@@ -157,13 +164,17 @@ mod tests {
     #[test]
     fn test_single_replacement() {
         let source = "fn foo() {\n    let x = 1;\n}";
-        let replacements = vec![
-            Replacement::new(
-                LineColumn { line: 2, column: 12 },
-                LineColumn { line: 2, column: 13 },
-                "42".to_string(),
-            ),
-        ];
+        let replacements = vec![Replacement::new(
+            LineColumn {
+                line: 2,
+                column: 12,
+            },
+            LineColumn {
+                line: 2,
+                column: 13,
+            },
+            "42".to_string(),
+        )];
 
         let result = apply_surgical_edits(source, replacements);
         assert_eq!(result, "fn foo() {\n    let x = 42;\n}");
@@ -192,13 +203,17 @@ mod tests {
     #[test]
     fn test_preserves_whitespace() {
         let source = "fn foo() {\n\n    // comment\n    let x = old;\n}";
-        let replacements = vec![
-            Replacement::new(
-                LineColumn { line: 4, column: 12 },
-                LineColumn { line: 4, column: 15 },
-                "new".to_string(),
-            ),
-        ];
+        let replacements = vec![Replacement::new(
+            LineColumn {
+                line: 4,
+                column: 12,
+            },
+            LineColumn {
+                line: 4,
+                column: 15,
+            },
+            "new".to_string(),
+        )];
 
         let result = apply_surgical_edits(source, replacements);
         assert_eq!(result, "fn foo() {\n\n    // comment\n    let x = new;\n}");
@@ -219,8 +234,14 @@ mod tests {
         // Add replacements out of order
         let replacements = vec![
             Replacement::new(
-                LineColumn { line: 1, column: 19 },
-                LineColumn { line: 1, column: 20 },
+                LineColumn {
+                    line: 1,
+                    column: 19,
+                },
+                LineColumn {
+                    line: 1,
+                    column: 20,
+                },
                 "20".to_string(),
             ),
             Replacement::new(

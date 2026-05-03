@@ -1,9 +1,10 @@
 //! Tool registry: defines MCP tool schemas and executes them
 //! by shelling out to the rs-hack CLI binary.
 
+use std::process::Command;
+
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
-use std::process::Command;
 use tracing::debug;
 
 #[derive(Debug, Clone)]
@@ -320,10 +321,19 @@ impl ToolRegistry {
             // (skip for read-only tools that don't have an apply parameter)
             let is_read_only = matches!(
                 name,
-                "find" | "history" | "impls" | "match_audit" | "doc_coverage" | "summary" | "neighbors"
+                "find"
+                    | "history"
+                    | "impls"
+                    | "match_audit"
+                    | "doc_coverage"
+                    | "summary"
+                    | "neighbors"
             );
             if !is_read_only && !self.get_bool(&arguments, "apply") && !result.is_empty() {
-                Ok(format!("{}\n\n💡 This was a DRY RUN. Use apply=true to make actual changes.", result))
+                Ok(format!(
+                    "{}\n\n💡 This was a DRY RUN. Use apply=true to make actual changes.",
+                    result
+                ))
             } else {
                 Ok(result)
             }
@@ -339,11 +349,13 @@ impl ToolRegistry {
     /// of the MCP server want structured data, not the CLI's grouped/snippet
     /// rendering.
     fn call_find_inproc(arguments: &Value) -> Result<String> {
-        use rs_hack::commands::find::{run, FindArgs};
         use std::path::PathBuf;
 
-        let str_arg =
-            |k: &str| -> Option<String> { arguments.get(k).and_then(|v| v.as_str()).map(String::from) };
+        use rs_hack::commands::find::{run, FindArgs};
+
+        let str_arg = |k: &str| -> Option<String> {
+            arguments.get(k).and_then(|v| v.as_str()).map(String::from)
+        };
 
         let paths: Vec<PathBuf> = arguments
             .get("paths")
@@ -366,7 +378,10 @@ impl ToolRegistry {
             content_filter: str_arg("content_filter"),
             field_name: str_arg("field_name"),
             include_comments,
-            context: arguments.get("context").and_then(|v| v.as_u64()).map(|n| n as usize),
+            context: arguments
+                .get("context")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize),
         };
 
         let result = run(&args)?;
@@ -484,7 +499,8 @@ impl ToolRegistry {
         }
 
         // Add include_comments (default is true, only add flag if explicitly set to false)
-        if let Some(include_comments) = arguments.get("include_comments").and_then(|v| v.as_bool()) {
+        if let Some(include_comments) = arguments.get("include_comments").and_then(|v| v.as_bool())
+        {
             if !include_comments {
                 args.push("--include-comments".to_string());
                 args.push("false".to_string());
@@ -564,11 +580,17 @@ impl ToolRegistry {
                 match value {
                     Value::Bool(true) => {
                         // Handle boolean true values as flags
-                        if key == "apply" || key == "literal_only" || key == "summary" || key == "force" || key == "auto_detect" || key == "fields" {
+                        if key == "apply"
+                            || key == "literal_only"
+                            || key == "summary"
+                            || key == "force"
+                            || key == "auto_detect"
+                            || key == "fields"
+                        {
                             args.push(flag);
                         }
                     }
-                    Value::Bool(false) => {}, // Skip false booleans (they're usually the default)
+                    Value::Bool(false) => {} // Skip false booleans (they're usually the default)
                     Value::String(s) => {
                         args.push(flag);
                         args.push(s.clone());
@@ -584,7 +606,10 @@ impl ToolRegistry {
     }
 
     fn get_bool(&self, arguments: &Value, key: &str) -> bool {
-        arguments.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+        arguments
+            .get(key)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 
     // ============================================================
@@ -897,5 +922,4 @@ impl ToolRegistry {
             args.push("--apply".to_string());
         }
     }
-
 }

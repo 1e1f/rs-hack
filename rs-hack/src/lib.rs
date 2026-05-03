@@ -15,8 +15,8 @@ pub mod visitor;
 #[cfg(test)]
 mod tests;
 
-pub use operations::*;
-pub use editor::RustEditor;
 pub use diff::{generate_unified_diff, print_diff, print_summary_diff, DiffStats};
-pub use surgical::{Replacement, apply_surgical_edits};
+pub use editor::RustEditor;
+pub use operations::*;
 pub use state::*;
+pub use surgical::{apply_surgical_edits, Replacement};

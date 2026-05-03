@@ -20,16 +20,22 @@ pub fn run(path: &PathBuf) -> Result<SummaryReport> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {:?}", path))?;
 
-    let syntax = syn::parse_file(&content)
-        .with_context(|| format!("Failed to parse file: {:?}", path))?;
+    let syntax =
+        syn::parse_file(&content).with_context(|| format!("Failed to parse file: {:?}", path))?;
 
     // Module-level doc: inner doc attrs (//! or #![doc = ...])
     let mut module_doc_parts: Vec<String> = Vec::new();
     for attr in &syntax.attrs {
         if let syn::AttrStyle::Inner(_) = attr.style {
             if attr.path().is_ident("doc") {
-                if let Ok(syn::MetaNameValue { value: syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }), .. }) =
-                    attr.meta.require_name_value().cloned()
+                if let Ok(syn::MetaNameValue {
+                    value:
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(s),
+                            ..
+                        }),
+                    ..
+                }) = attr.meta.require_name_value().cloned()
                 {
                     let text = s.value().trim().to_string();
                     if !text.is_empty() {
@@ -101,7 +107,12 @@ pub fn run(path: &PathBuf) -> Result<SummaryReport> {
             syn::Item::Use(u) => {
                 if is_public(&u.vis) {
                     let tokens = quote::quote!(#u);
-                    reexports.push(tokens.to_string().replace(" :: ", "::").replace(" as ", " as "));
+                    reexports.push(
+                        tokens
+                            .to_string()
+                            .replace(" :: ", "::")
+                            .replace(" as ", " as "),
+                    );
                 }
             }
             _ => {}
@@ -136,7 +147,11 @@ pub fn render(report: &SummaryReport) {
         report.enum_count,
         if report.enum_count == 1 { "" } else { "s" },
         report.type_alias_count,
-        if report.type_alias_count == 1 { "" } else { "es" },
+        if report.type_alias_count == 1 {
+            ""
+        } else {
+            "es"
+        },
     );
 
     if report.function_names.is_empty() {
@@ -160,5 +175,8 @@ pub fn render(report: &SummaryReport) {
 }
 
 fn is_public(vis: &syn::Visibility) -> bool {
-    matches!(vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_))
+    matches!(
+        vis,
+        syn::Visibility::Public(_) | syn::Visibility::Restricted(_)
+    )
 }

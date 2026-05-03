@@ -207,7 +207,8 @@ impl User {
         let mut editor = RustEditor::new(&format!("{}\n{}", SAMPLE_STRUCT, SAMPLE_IMPL)).unwrap();
         let op = AddImplMethodOp {
             target: "User".to_string(),
-            method_def: "pub fn new(id: u64, name: String) -> Self { Self { id, name } }".to_string(),
+            method_def: "pub fn new(id: u64, name: String) -> Self { Self { id, name } }"
+                .to_string(),
             position: InsertPosition::Last,
         };
 
@@ -938,7 +939,9 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("struct-literal"), Some("User"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("struct-literal"), Some("User"), None, false)
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].identifier, "User");
@@ -957,7 +960,9 @@ fn handle(op: Operator) {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("match-arm"), Some("Error"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("match-arm"), Some("Error"), None, false)
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         assert!(results[0].identifier.contains("Error"));
@@ -979,7 +984,9 @@ fn check() -> Operator {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("enum-usage"), Some("Operator::Error"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("enum-usage"), Some("Operator::Error"), None, false)
+            .unwrap();
 
         // Should find both: in match arm and in return
         assert!(results.len() >= 2);
@@ -996,7 +1003,9 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("function-call"), Some("handle_error"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("function-call"), Some("handle_error"), None, false)
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].snippet.contains("handle_error"));
@@ -1012,7 +1021,9 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("method-call"), Some("unwrap"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("method-call"), Some("unwrap"), None, false)
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].snippet.contains("unwrap"));
@@ -1028,7 +1039,9 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("identifier"), Some("config"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("identifier"), Some("config"), None, false)
+            .unwrap();
 
         // Should find: let binding, println argument, process argument
         // Note: May find more instances as identifiers appear in various contexts
@@ -1045,7 +1058,9 @@ fn process(items: Vec<String>) -> Option<i32> {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("type-ref"), Some("Vec"), None, false).unwrap();
+        let results = editor
+            .inspect(Some("type-ref"), Some("Vec"), None, false)
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.identifier.contains("Vec")));
@@ -1060,7 +1075,9 @@ fn main() {
 }
 "#;
         let editor = RustEditor::new(code).unwrap();
-        let results = editor.inspect(Some("struct-literal"), None, None, false).unwrap();
+        let results = editor
+            .inspect(Some("struct-literal"), None, None, false)
+            .unwrap();
 
         // Should find both User and Config
         assert_eq!(results.len(), 2);
@@ -1073,6 +1090,9 @@ fn main() {
         let result = editor.inspect(Some("invalid-type"), None, None, false);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported node type"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported node type"));
     }
 }

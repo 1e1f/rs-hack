@@ -100,7 +100,9 @@ pub fn run(args: &FindArgs) -> Result<FindResult> {
         }
     }
 
-    Ok(FindResult::Nodes { matches: all_results })
+    Ok(FindResult::Nodes {
+        matches: all_results,
+    })
 }
 
 /// Re-search across all node types — used by the CLI to suggest near-misses
@@ -118,12 +120,8 @@ pub fn run_unfiltered_by_node_type(args: &FindArgs) -> Result<Vec<InspectResult>
             Ok(e) => e,
             Err(_) => continue,
         };
-        let mut results = editor.inspect(
-            None,
-            args.name.as_deref(),
-            args.variant.as_deref(),
-            false,
-        )?;
+        let mut results =
+            editor.inspect(None, args.name.as_deref(), args.variant.as_deref(), false)?;
 
         for result in &mut results {
             result.file_path = file.to_string_lossy().to_string();

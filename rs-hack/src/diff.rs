@@ -2,6 +2,7 @@
 //! before applying them (dry-run mode).
 
 use std::path::Path;
+
 use similar::{ChangeTag, TextDiff};
 
 /// Represents statistics about a diff
@@ -62,7 +63,8 @@ pub fn generate_unified_diff(
     }
 
     // Generate the unified diff with context
-    let unified = diff.unified_diff()
+    let unified = diff
+        .unified_diff()
         .context_radius(context_lines)
         .to_string();
 
@@ -161,8 +163,9 @@ pub fn print_summary_diff(path: &Path, original: &str, modified: &str) -> DiffSt
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     #[test]
     fn test_generate_unified_diff() {
@@ -204,7 +207,8 @@ mod tests {
 
     #[test]
     fn test_generate_unified_diff_with_removal() {
-        let original = "pub struct User {\n    id: u64,\n    name: String,\n    email: String,\n}\n";
+        let original =
+            "pub struct User {\n    id: u64,\n    name: String,\n    email: String,\n}\n";
         let modified = "pub struct User {\n    id: u64,\n    name: String,\n}\n";
         let path = PathBuf::from("src/user.rs");
 

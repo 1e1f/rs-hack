@@ -1,14 +1,15 @@
 //! State management: tracks run history with unique IDs, stores
 //! backup nodes for revert, and manages the .hack/rs state directory.
 
-use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Utc, Duration};
-use directories::ProjectDirs;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Duration, Utc};
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 
 use crate::operations::BackupNode;
 
@@ -98,18 +99,16 @@ impl RunsIndex {
             return Ok(Self::default());
         }
 
-        let content = fs::read_to_string(&index_path)
-            .context("Failed to read runs index")?;
+        let content = fs::read_to_string(&index_path).context("Failed to read runs index")?;
 
-        let index: RunsIndex = serde_json::from_str(&content)
-            .map_err(|e| {
-                if e.to_string().contains("missing field") {
-                    eprintln!("⚠️  Incompatible state format detected from previous hack version.");
-                    eprintln!("   The state directory will be reset.");
-                    eprintln!("   Location: {}", state_dir.display());
-                }
-                anyhow::anyhow!("Failed to parse runs index: {}", e)
-            })?;
+        let index: RunsIndex = serde_json::from_str(&content).map_err(|e| {
+            if e.to_string().contains("missing field") {
+                eprintln!("⚠️  Incompatible state format detected from previous hack version.");
+                eprintln!("   The state directory will be reset.");
+                eprintln!("   Location: {}", state_dir.display());
+            }
+            anyhow::anyhow!("Failed to parse runs index: {}", e)
+        })?;
         Ok(index)
     }
 
@@ -209,11 +208,7 @@ pub fn save_backup_nodes(
 /// 1. Parsing the current file into an AST
 /// 2. For each backup node, finding and replacing the corresponding node in the AST
 /// 3. Writing the restored content back to the file
-pub fn restore_from_nodes(
-    file_path: &Path,
-    nodes: &[BackupNode],
-    _state_dir: &Path,
-) -> Result<()> {
+pub fn restore_from_nodes(file_path: &Path, nodes: &[BackupNode], _state_dir: &Path) -> Result<()> {
     use crate::editor::RustEditor;
 
     if nodes.is_empty() {
@@ -228,14 +223,24 @@ pub fn restore_from_nodes(
     let mut editor = RustEditor::new(&content)?;
 
     // Separate struct-literal backups from others (they need special ordering)
-    let (mut struct_literal_backups, other_backups): (Vec<_>, Vec<_>) = nodes.iter()
-        .partition(|b| b.node_type == "struct-literal");
+    let (mut struct_literal_backups, other_backups): (Vec<_>, Vec<_>) =
+        nodes.iter().partition(|b| b.node_type == "struct-literal");
 
-    // Sort struct-literal backups by counter in REVERSE order (process from end of file to beginning)
-    // This ensures byte offsets remain valid as we restore
+    // Sort struct-literal backups by counter in REVERSE order (process from end of file to
+    // beginning) This ensures byte offsets remain valid as we restore
     struct_literal_backups.sort_by(|a, b| {
-        let counter_a = a.identifier.split('#').nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
-        let counter_b = b.identifier.split('#').nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+        let counter_a = a
+            .identifier
+            .split('#')
+            .nth(1)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        let counter_b = b
+            .identifier
+            .split('#')
+            .nth(1)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
         counter_b.cmp(&counter_a) // Reverse order
     });
 
@@ -274,7 +279,10 @@ pub fn restore_from_nodes(
             }
             _ => {
                 // For other node types, log a warning but don't fail
-                eprintln!("Warning: Unsupported node type for revert: {}", backup.node_type);
+                eprintln!(
+                    "Warning: Unsupported node type for revert: {}",
+                    backup.node_type
+                );
             }
         }
     }
@@ -290,11 +298,12 @@ fn restore_struct(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -
     use syn::{parse_str, Item};
 
     // Parse the backup content
-    let backup_item: Item = parse_str(&backup.original_content)
-        .context("Failed to parse backup struct content")?;
+    let backup_item: Item =
+        parse_str(&backup.original_content).context("Failed to parse backup struct content")?;
 
     // Find the struct in the current AST by name
-    let struct_index = editor.find_item_index("struct", &backup.identifier)
+    let struct_index = editor
+        .find_item_index("struct", &backup.identifier)
         .with_context(|| format!("Struct '{}' not found for revert", backup.identifier))?;
 
     // Replace with the backup using the editor's method
@@ -307,11 +316,12 @@ fn restore_enum(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> 
     use syn::{parse_str, Item};
 
     // Parse the backup content
-    let backup_item: Item = parse_str(&backup.original_content)
-        .context("Failed to parse backup enum content")?;
+    let backup_item: Item =
+        parse_str(&backup.original_content).context("Failed to parse backup enum content")?;
 
     // Find the enum in the current AST by name
-    let enum_index = editor.find_item_index("enum", &backup.identifier)
+    let enum_index = editor
+        .find_item_index("enum", &backup.identifier)
         .with_context(|| format!("Enum '{}' not found for revert", backup.identifier))?;
 
     // Replace with the backup
@@ -324,12 +334,18 @@ fn restore_impl(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> 
     use syn::{parse_str, Item};
 
     // Parse the backup content
-    let backup_item: Item = parse_str(&backup.original_content)
-        .context("Failed to parse backup impl content")?;
+    let backup_item: Item =
+        parse_str(&backup.original_content).context("Failed to parse backup impl content")?;
 
     // Find impl block by matching on the self_ty
-    let impl_index = editor.find_item_index("impl", &backup.identifier)
-        .with_context(|| format!("Impl block for '{}' not found for revert", backup.identifier))?;
+    let impl_index = editor
+        .find_item_index("impl", &backup.identifier)
+        .with_context(|| {
+            format!(
+                "Impl block for '{}' not found for revert",
+                backup.identifier
+            )
+        })?;
 
     // Replace with the backup
     editor.replace_item_at_index(impl_index, backup_item)?;
@@ -341,11 +357,12 @@ fn restore_function(editor: &mut crate::editor::RustEditor, backup: &BackupNode)
     use syn::{parse_str, Item};
 
     // Parse the backup content
-    let backup_item: Item = parse_str(&backup.original_content)
-        .context("Failed to parse backup function content")?;
+    let backup_item: Item =
+        parse_str(&backup.original_content).context("Failed to parse backup function content")?;
 
     // Find the function in the current AST by name
-    let fn_index = editor.find_item_index("fn", &backup.identifier)
+    let fn_index = editor
+        .find_item_index("fn", &backup.identifier)
         .with_context(|| format!("Function '{}' not found for revert", backup.identifier))?;
 
     // Replace with the backup
@@ -354,17 +371,24 @@ fn restore_function(editor: &mut crate::editor::RustEditor, backup: &BackupNode)
     Ok(())
 }
 
-fn restore_struct_literal(editor: &mut crate::editor::RustEditor, backup: &BackupNode) -> Result<()> {
-    use syn::{visit::Visit, ExprStruct, spanned::Spanned};
+fn restore_struct_literal(
+    editor: &mut crate::editor::RustEditor,
+    backup: &BackupNode,
+) -> Result<()> {
     use quote::ToTokens;
+    use syn::spanned::Spanned;
+    use syn::visit::Visit;
+    use syn::ExprStruct;
 
-    // Extract the struct name and counter from the identifier (format: "StructName#counter" or "Enum::Variant#counter")
+    // Extract the struct name and counter from the identifier (format: "StructName#counter" or
+    // "Enum::Variant#counter")
     let parts: Vec<&str> = backup.identifier.split('#').collect();
     if parts.len() != 2 {
         anyhow::bail!("Invalid struct literal identifier: {}", backup.identifier);
     }
     let struct_name = parts[0];
-    let target_counter: usize = parts[1].parse()
+    let target_counter: usize = parts[1]
+        .parse()
         .context("Invalid counter in struct literal identifier")?;
 
     // Parse the backup content as an expression
@@ -383,7 +407,10 @@ fn restore_struct_literal(editor: &mut crate::editor::RustEditor, backup: &Backu
             // Check if this matches our target struct name
             let matches = if self.struct_name.contains("::") {
                 // Enum variant case
-                let path_str = node.path.segments.iter()
+                let path_str = node
+                    .path
+                    .segments
+                    .iter()
                     .map(|seg| seg.ident.to_string())
                     .collect::<Vec<_>>()
                     .join("::");
@@ -391,9 +418,13 @@ fn restore_struct_literal(editor: &mut crate::editor::RustEditor, backup: &Backu
             } else {
                 // Simple struct case
                 node.path.segments.len() == 1
-                    && node.path.segments.last()
+                    && node
+                        .path
+                        .segments
+                        .last()
                         .map(|seg| seg.ident.to_string())
-                        .as_ref() == Some(&self.struct_name.to_string())
+                        .as_ref()
+                        == Some(&self.struct_name.to_string())
             };
 
             if matches {
@@ -460,10 +491,9 @@ pub fn load_run_metadata(run_id: &str, state_dir: &Path) -> Result<RunMetadata> 
         bail!("Run {} not found", run_id);
     }
 
-    let content = fs::read_to_string(&metadata_path)
-        .context("Failed to read run metadata")?;
-    let metadata: RunMetadata = serde_json::from_str(&content)
-        .context("Failed to parse run metadata")?;
+    let content = fs::read_to_string(&metadata_path).context("Failed to read run metadata")?;
+    let metadata: RunMetadata =
+        serde_json::from_str(&content).context("Failed to parse run metadata")?;
     Ok(metadata)
 }
 
@@ -485,7 +515,10 @@ pub fn revert_run(run_id: &str, force: bool, state_dir: &Path) -> Result<()> {
     if !force {
         for file in &run.files_modified {
             if !file.path.exists() {
-                bail!("File {} no longer exists (use --force to ignore)", file.path.display());
+                bail!(
+                    "File {} no longer exists (use --force to ignore)",
+                    file.path.display()
+                );
             }
 
             let current_hash = hash_file(&file.path)?;
@@ -540,7 +573,13 @@ pub fn show_history(limit: usize, state_dir: &Path) -> Result<()> {
 
     for run in runs.iter().take(limit) {
         let status_str = match run.status {
-            RunStatus::Applied => if run.can_revert { "[can revert]" } else { "[applied]" },
+            RunStatus::Applied => {
+                if run.can_revert {
+                    "[can revert]"
+                } else {
+                    "[applied]"
+                }
+            }
             RunStatus::Reverted => "[reverted]",
         };
 
@@ -602,7 +641,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len-3])
+        format!("{}...", &s[..max_len - 3])
     }
 }
 
@@ -625,8 +664,9 @@ pub fn get_state_size(state_dir: &Path) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_generate_run_id() {

@@ -72,7 +72,9 @@ pub fn run(path: &Path) -> Result<NeighborsReport> {
                 // Twin: parent_name + at least one digit suffix
                 if dir_name.starts_with(&parent_name)
                     && dir_name.len() > parent_name.len()
-                    && dir_name[parent_name.len()..].chars().all(|c| c.is_ascii_digit())
+                    && dir_name[parent_name.len()..]
+                        .chars()
+                        .all(|c| c.is_ascii_digit())
                 {
                     // Walk into this twin dir looking for files whose stem matches
                     collect_matching_files(&ep, &stem, &mut twin_files);
@@ -112,10 +114,7 @@ fn collect_matching_files(dir: &Path, stem: &str, out: &mut Vec<PathBuf>) {
             if ep.is_dir() {
                 collect_matching_files(&ep, stem, out);
             } else if ep.extension().and_then(|s| s.to_str()) == Some("rs") {
-                let file_stem = ep
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
+                let file_stem = ep.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                 if file_stem.contains(stem) {
                     out.push(ep);
                 }
