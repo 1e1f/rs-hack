@@ -67,20 +67,20 @@ run_test() {
         # Check result
         if eval "$check_cmd"; then
             printf "%bPASSED%b\n" "$GREEN" "$NC"
-            ((PASSED++))
+            PASSED=$((PASSED + 1))
             return 0
         else
             printf "%bFAILED%b (check failed)\n" "$RED" "$NC"
             echo "Command output:"
             cat "$TEMP_DIR/cmd_output.txt"
-            ((FAILED++))
+            FAILED=$((FAILED + 1))
             return 1
         fi
     else
         printf "%bFAILED%b (command failed)\n" "$RED" "$NC"
         echo "Command output:"
         cat "$TEMP_DIR/cmd_output.txt"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
         return 1
     fi
 }
