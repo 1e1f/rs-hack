@@ -306,7 +306,7 @@ pub struct RenameEnumVariantOp {
     pub new_variant: String, // New variant name (e.g., "HashMap")
     #[serde(default)]
     pub enum_path: Option<String>, /* Optional canonical path (e.g.,
-                                    * "crate::compiler::types::IRValue") */
+                              * "crate::compiler::types::IRValue") */
     #[serde(default)]
     pub edit_mode: EditMode, // How to apply changes (surgical vs reformat)
 }

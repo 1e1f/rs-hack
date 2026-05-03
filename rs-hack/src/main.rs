@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use rs_hack::diff::{print_diff, print_summary_diff, DiffStats};
+use rs_hack::diff::{DiffStats, print_diff, print_summary_diff};
 use rs_hack::editor::RustEditor;
 use rs_hack::files::{collect_rust_files_with_exclusions, expand_kind_to_node_types};
 use rs_hack::operations::{self, *};
@@ -1550,8 +1550,8 @@ fn validate_enum_variant_rename(
     old_variant: &str,
     enum_path: Option<&str>,
 ) -> Result<()> {
-    use syn::visit::Visit;
     use syn::File;
+    use syn::visit::Visit;
 
     struct VariantFinder<'a> {
         enum_name: &'a str,
@@ -2173,32 +2173,36 @@ fn main() -> Result<()> {
             ];
 
             if let Some(nt) = &node_type
-                && granular_types.contains(&nt.as_str()) {
-                    // Use Transform operation for granular renaming
-                    let op = Operation::Transform(TransformOp {
-                        node_type: nt.clone(),
-                        name_filter: Some(name),
-                        content_filter: None,
-                        action: TransformAction::Replace { with: to },
-                    });
-                    execute_operation_with_state(
-                        &files,
-                        &op,
-                        apply,
-                        None,
-                        &cli.local_state,
-                        &cli.format,
-                        cli.summary,
-                        cli.limit,
-                    )?;
-                    return Ok(());
-                }
+                && granular_types.contains(&nt.as_str())
+            {
+                // Use Transform operation for granular renaming
+                let op = Operation::Transform(TransformOp {
+                    node_type: nt.clone(),
+                    name_filter: Some(name),
+                    content_filter: None,
+                    action: TransformAction::Replace { with: to },
+                });
+                execute_operation_with_state(
+                    &files,
+                    &op,
+                    apply,
+                    None,
+                    &cli.local_state,
+                    &cli.format,
+                    cli.summary,
+                    cli.limit,
+                )?;
+                return Ok(());
+            }
 
             // Handle --kind expansion for semantic grouping
             if let Some(k) = &kind {
                 let expanded = expand_kind_to_node_types(k);
                 if expanded.is_empty() {
-                    anyhow::bail!("Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use", k);
+                    anyhow::bail!(
+                        "Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use",
+                        k
+                    );
                 }
 
                 // For "function" kind, rename both definition and all calls
@@ -2225,7 +2229,9 @@ fn main() -> Result<()> {
                     )?;
                     return Ok(());
                 } else {
-                    anyhow::bail!("Rename with --kind is only supported for 'function' and 'identifier' kinds. For other kinds, use --node-type.");
+                    anyhow::bail!(
+                        "Rename with --kind is only supported for 'function' and 'identifier' kinds. For other kinds, use --node-type."
+                    );
                 }
             }
 
@@ -2319,7 +2325,11 @@ fn main() -> Result<()> {
                          - For enum variant: rs-hack rename --name <EnumName>::{} --to {} --paths ... --apply\n\
                          \n\
                          Found in enums: {}",
-                        name, name, to, name, to,
+                        name,
+                        name,
+                        to,
+                        name,
+                        to,
                         enum_candidates.join(", ")
                     );
                 } else if is_function {
@@ -2592,8 +2602,10 @@ fn main() -> Result<()> {
                                 "  - {}:{} in struct {} (type: {})",
                                 loc.file_path, loc.line, struct_name, field_type
                             );
-                            println!("    Remove: rs-hack remove --name {} --field-name {} --paths {} --apply",
-                                struct_name, field, loc.file_path);
+                            println!(
+                                "    Remove: rs-hack remove --name {} --field-name {} --paths {} --apply",
+                                struct_name, field, loc.file_path
+                            );
                         }
                     }
                     println!();
@@ -2612,8 +2624,10 @@ fn main() -> Result<()> {
                                 "  - {}:{} in enum {}::{} (type: {})",
                                 loc.file_path, loc.line, enum_name, variant_name, field_type
                             );
-                            println!("    Remove: rs-hack remove --name {}::{} --field-name {} --paths {} --apply",
-                                enum_name, variant_name, field, loc.file_path);
+                            println!(
+                                "    Remove: rs-hack remove --name {}::{} --field-name {} --paths {} --apply",
+                                enum_name, variant_name, field, loc.file_path
+                            );
                         }
                     }
                     println!();
@@ -2625,10 +2639,7 @@ fn main() -> Result<()> {
                         HashMap::new();
                     for loc in &struct_literals {
                         if let FieldContext::StructLiteral { struct_name } = &loc.context {
-                            by_struct
-                                .entry(struct_name.clone())
-                                .or_default()
-                                .push(loc);
+                            by_struct.entry(struct_name.clone()).or_default().push(loc);
                         }
                     }
 
@@ -2646,8 +2657,10 @@ fn main() -> Result<()> {
                         for loc in locs {
                             println!("    - {}:{}", loc.file_path, loc.line);
                         }
-                        println!("    Remove from literals: rs-hack remove --name {} --field-name {} --literal-only --paths src --apply",
-                            struct_name, field);
+                        println!(
+                            "    Remove from literals: rs-hack remove --name {} --field-name {} --literal-only --paths src --apply",
+                            struct_name, field
+                        );
                     }
                     println!();
                 }
@@ -2721,7 +2734,9 @@ fn main() -> Result<()> {
             }
 
             // Fallback: If we still found nothing with a name filter, do a text search
-            if all_results.is_empty() && let Some(search_name) = name.as_deref() {
+            if all_results.is_empty()
+                && let Some(search_name) = name.as_deref()
+            {
                 let mut text_matches: Vec<(String, usize)> = Vec::new();
                 let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
@@ -2873,74 +2888,77 @@ fn main() -> Result<()> {
                         // Add hints for struct-literal searches with simple names
                         if let Some(ref search_name) = name
                             && !search_name.contains("::")
-                                && (node_type.as_deref() == Some("struct-literal")
-                                    || kind.as_deref() == Some("struct"))
-                            {
-                                // Check if we found struct literals with qualified paths
-                                if let Some(struct_lit_results) = by_type.get("struct-literal") {
-                                    use std::collections::HashMap;
-                                    let mut qualified_paths: HashMap<String, usize> =
-                                        HashMap::new();
+                            && (node_type.as_deref() == Some("struct-literal")
+                                || kind.as_deref() == Some("struct"))
+                        {
+                            // Check if we found struct literals with qualified paths
+                            if let Some(struct_lit_results) = by_type.get("struct-literal") {
+                                use std::collections::HashMap;
+                                let mut qualified_paths: HashMap<String, usize> = HashMap::new();
 
-                                    for result in struct_lit_results {
-                                        // Check if identifier contains :: (qualified path)
-                                        if result.identifier.contains("::") {
-                                            *qualified_paths
-                                                .entry(result.identifier.clone())
-                                                .or_insert(0) += 1;
-                                        }
-                                    }
-
-                                    if !qualified_paths.is_empty() {
-                                        println!("💡 Hint: Found {} struct literal(s) with fully qualified paths:",
-                                            qualified_paths.values().sum::<usize>());
-
-                                        let mut paths: Vec<_> = qualified_paths.iter().collect();
-                                        paths.sort_by_key(|(path, _)| *path);
-
-                                        for (path, count) in &paths {
-                                            println!(
-                                                "   {} ({} instance{})",
-                                                path,
-                                                count,
-                                                if **count == 1 { "" } else { "s" }
-                                            );
-                                        }
-
-                                        println!("\nTo find only these:");
-                                        for (path, _) in paths.iter().take(3) {
-                                            println!("   rs-hack find --name \"{}\" --node-type struct-literal --paths ...", path);
-                                        }
-                                        if paths.len() > 3 {
-                                            println!("   (and {} more...)", paths.len() - 3);
-                                        }
-                                        println!();
+                                for result in struct_lit_results {
+                                    // Check if identifier contains :: (qualified path)
+                                    if result.identifier.contains("::") {
+                                        *qualified_paths
+                                            .entry(result.identifier.clone())
+                                            .or_insert(0) += 1;
                                     }
                                 }
+
+                                if !qualified_paths.is_empty() {
+                                    println!(
+                                        "💡 Hint: Found {} struct literal(s) with fully qualified paths:",
+                                        qualified_paths.values().sum::<usize>()
+                                    );
+
+                                    let mut paths: Vec<_> = qualified_paths.iter().collect();
+                                    paths.sort_by_key(|(path, _)| *path);
+
+                                    for (path, count) in &paths {
+                                        println!(
+                                            "   {} ({} instance{})",
+                                            path,
+                                            count,
+                                            if **count == 1 { "" } else { "s" }
+                                        );
+                                    }
+
+                                    println!("\nTo find only these:");
+                                    for (path, _) in paths.iter().take(3) {
+                                        println!(
+                                            "   rs-hack find --name \"{}\" --node-type struct-literal --paths ...",
+                                            path
+                                        );
+                                    }
+                                    if paths.len() > 3 {
+                                        println!("   (and {} more...)", paths.len() - 3);
+                                    }
+                                    println!();
+                                }
                             }
+                        }
                     } else {
                         // Standard non-grouped output
                         let mut prev_file: Option<&str> = None;
                         for result in &all_results {
                             // Context lines (--context N): show N raw lines before the snippet
                             if let Some(n) = context
-                                && n > 0 {
-                                    // Separator between matches (grep-B style)
-                                    if prev_file.is_some() {
-                                        println!("--");
-                                    }
-                                    // Read the file and print N lines before the match
-                                    if let Ok(content) = std::fs::read_to_string(&result.file_path)
-                                    {
-                                        let lines: Vec<&str> = content.lines().collect();
-                                        let match_line = result.location.line; // already 0-indexed
-                                        let start = match_line.saturating_sub(n);
-                                        for (i, line) in lines[start..match_line].iter().enumerate()
-                                        {
-                                            println!("{}: {}", start + i + 1, line);
-                                        }
+                                && n > 0
+                            {
+                                // Separator between matches (grep-B style)
+                                if prev_file.is_some() {
+                                    println!("--");
+                                }
+                                // Read the file and print N lines before the match
+                                if let Ok(content) = std::fs::read_to_string(&result.file_path) {
+                                    let lines: Vec<&str> = content.lines().collect();
+                                    let match_line = result.location.line; // already 0-indexed
+                                    let start = match_line.saturating_sub(n);
+                                    for (i, line) in lines[start..match_line].iter().enumerate() {
+                                        println!("{}: {}", start + i + 1, line);
                                     }
                                 }
+                            }
                             println!(
                                 "// {}:{}:{} - {}",
                                 result.file_path,
@@ -3025,7 +3043,9 @@ fn main() -> Result<()> {
                 for m in &matches {
                     // identifier = "TraitName for TypeName" — split to get type name
                     let type_name = m
-                        .identifier.split_once(" for ").map(|x| x.1)
+                        .identifier
+                        .split_once(" for ")
+                        .map(|x| x.1)
                         .unwrap_or(&m.identifier);
                     println!("  {} ({}:{})", type_name, m.file_path, m.location.line);
                 }
@@ -3234,7 +3254,9 @@ fn main() -> Result<()> {
             .count();
 
             if op_count == 0 {
-                anyhow::bail!("Must specify one of: --field/--field-name, --variant, --method, --derive, --use, --match-arm, --default-rest, --base, --call, or --doc-comment");
+                anyhow::bail!(
+                    "Must specify one of: --field/--field-name, --variant, --method, --derive, --use, --match-arm, --default-rest, --base, --call, or --doc-comment"
+                );
             }
 
             if op_count > 1 {
@@ -3249,7 +3271,9 @@ fn main() -> Result<()> {
                         variant.as_deref().unwrap_or("VariantName")
                     );
                 }
-                anyhow::bail!("Can only specify one operation flag at a time (--field/--field-name, --variant, --method, --derive, --use, --match-arm, --call, or --doc-comment)");
+                anyhow::bail!(
+                    "Can only specify one operation flag at a time (--field/--field-name, --variant, --method, --derive, --use, --match-arm, --call, or --doc-comment)"
+                );
             }
 
             // Handle --match-arm operations
@@ -3265,7 +3289,9 @@ fn main() -> Result<()> {
 
                     // Warn if --match-arm was also specified (it will be ignored)
                     if match_arm.is_some() {
-                        eprintln!("⚠️  Note: --match-arm is ignored with --auto-detect. Auto-detect adds ALL missing variants.");
+                        eprintln!(
+                            "⚠️  Note: --match-arm is ignored with --auto-detect. Auto-detect adds ALL missing variants."
+                        );
                         eprintln!("   To add a specific arm only, remove --auto-detect.");
                     }
 
@@ -3318,10 +3344,16 @@ fn main() -> Result<()> {
                 let target_type = if let Some(k) = &kind {
                     let expanded = expand_kind_to_node_types(k);
                     if expanded.is_empty() {
-                        anyhow::bail!("Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use", k);
+                        anyhow::bail!(
+                            "Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use",
+                            k
+                        );
                     }
                     if expanded.len() > 1 {
-                        anyhow::bail!("Kind '{}' expands to multiple node types. Use --node-type for doc comments to specify exactly which type.", k);
+                        anyhow::bail!(
+                            "Kind '{}' expands to multiple node types. Use --node-type for doc comments to specify exactly which type.",
+                            k
+                        );
                     }
                     expanded[0].to_string()
                 } else if let Some(nt) = &node_type {
@@ -3393,7 +3425,9 @@ fn main() -> Result<()> {
                             (fname, Some(fvalue.clone()))
                         }
                         (None, None) => {
-                            anyhow::bail!("--field-name requires either --field-type (for definitions) or --field-value (for literals) or both");
+                            anyhow::bail!(
+                                "--field-name requires either --field-type (for definitions) or --field-value (for literals) or both"
+                            );
                         }
                     }
                 } else {
@@ -3585,11 +3619,15 @@ fn main() -> Result<()> {
             .count();
 
             if op_count == 0 {
-                anyhow::bail!("Must specify one of: --field-name, --variant, --method, --derive, --match-arm, --call, or --doc-comment");
+                anyhow::bail!(
+                    "Must specify one of: --field-name, --variant, --method, --derive, --match-arm, --call, or --doc-comment"
+                );
             }
 
             if op_count > 1 {
-                anyhow::bail!("Can only specify one operation flag at a time (--field-name, --variant, --method, --derive, --match-arm, --call, or --doc-comment)");
+                anyhow::bail!(
+                    "Can only specify one operation flag at a time (--field-name, --variant, --method, --derive, --match-arm, --call, or --doc-comment)"
+                );
             }
 
             // Handle --match-arm operations
@@ -3621,10 +3659,16 @@ fn main() -> Result<()> {
                 let target_type = if let Some(k) = &kind {
                     let expanded = expand_kind_to_node_types(k);
                     if expanded.is_empty() {
-                        anyhow::bail!("Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use", k);
+                        anyhow::bail!(
+                            "Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use",
+                            k
+                        );
                     }
                     if expanded.len() > 1 {
-                        anyhow::bail!("Kind '{}' expands to multiple node types. Use --node-type for doc comments to specify exactly which type.", k);
+                        anyhow::bail!(
+                            "Kind '{}' expands to multiple node types. Use --node-type for doc comments to specify exactly which type.",
+                            k
+                        );
                     }
                     expanded[0].to_string()
                 } else if let Some(nt) = &node_type {
@@ -3740,11 +3784,16 @@ fn main() -> Result<()> {
             } else if let Some(method_name) = method {
                 // Removing impl method
                 // Note: We don't have RemoveImplMethod operation yet, so bail with helpful message
-                anyhow::bail!("Remove impl method is not yet implemented. Use the transform command to comment out methods:\n  rs-hack transform --paths src --node-type impl-method --name {} --action comment --apply", method_name);
+                anyhow::bail!(
+                    "Remove impl method is not yet implemented. Use the transform command to comment out methods:\n  rs-hack transform --paths src --node-type impl-method --name {} --action comment --apply",
+                    method_name
+                );
             } else if let Some(_derive_macro) = derive {
                 // Removing derive macro
                 // Note: We don't have RemoveDerive operation yet, so bail with helpful message
-                anyhow::bail!("Remove derive macro is not yet implemented. This is planned for a future release.\nFor now, you can manually edit the derive attribute or use the transform command.");
+                anyhow::bail!(
+                    "Remove derive macro is not yet implemented. This is planned for a future release.\nFor now, you can manually edit the derive attribute or use the transform command."
+                );
             }
         }
 
@@ -3810,11 +3859,15 @@ fn main() -> Result<()> {
             .count();
 
             if op_count == 0 {
-                anyhow::bail!("Must specify one of: --field, --variant, --match-arm, --call, or --doc-comment");
+                anyhow::bail!(
+                    "Must specify one of: --field, --variant, --match-arm, --call, or --doc-comment"
+                );
             }
 
             if op_count > 1 {
-                anyhow::bail!("Can only specify one operation flag at a time (--field, --variant, --match-arm, --call, or --doc-comment)");
+                anyhow::bail!(
+                    "Can only specify one operation flag at a time (--field, --variant, --match-arm, --call, or --doc-comment)"
+                );
             }
 
             // Handle --match-arm operations
@@ -3851,10 +3904,16 @@ fn main() -> Result<()> {
                 let target_type = if let Some(k) = &kind {
                     let expanded = expand_kind_to_node_types(k);
                     if expanded.is_empty() {
-                        anyhow::bail!("Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use", k);
+                        anyhow::bail!(
+                            "Unknown kind '{}'. Valid kinds: struct, function, enum, match, identifier, type, macro, const, trait, mod, use",
+                            k
+                        );
                     }
                     if expanded.len() > 1 {
-                        anyhow::bail!("Kind '{}' expands to multiple node types. Use --node-type for doc comments to specify exactly which type.", k);
+                        anyhow::bail!(
+                            "Kind '{}' expands to multiple node types. Use --node-type for doc comments to specify exactly which type.",
+                            k
+                        );
                     }
                     expanded[0].to_string()
                 } else if let Some(nt) = &node_type {
@@ -4099,10 +4158,7 @@ fn main() -> Result<()> {
         } => {
             let files = collect_rust_files_with_exclusions(&paths, &cli.exclude)?;
 
-            let op = Operation::RemoveDocComment(RemoveDocCommentOp {
-                target_type,
-                name,
-            });
+            let op = Operation::RemoveDocComment(RemoveDocCommentOp { target_type, name });
 
             execute_operation_with_state(
                 &files,
@@ -4222,7 +4278,10 @@ fn main() -> Result<()> {
                 for loc in &all_struct_defs {
                     if let FieldContext::StructDefinition { struct_name, .. } = &loc.context {
                         println!("  # Remove from struct definition AND all literals");
-                        println!("  rs-hack remove-struct-field --struct-name \"{}\" --field-name \"{}\" --paths src --apply", struct_name, field_name);
+                        println!(
+                            "  rs-hack remove-struct-field --struct-name \"{}\" --field-name \"{}\" --paths src --apply",
+                            struct_name, field_name
+                        );
                         println!();
                     }
                 }
@@ -4234,7 +4293,10 @@ fn main() -> Result<()> {
                     } = &loc.context
                     {
                         println!("  # Remove from enum variant definition AND all literals");
-                        println!("  rs-hack remove-struct-field --struct-name \"{}::{}\" --field-name \"{}\" --paths src --apply", enum_name, variant_name, field_name);
+                        println!(
+                            "  rs-hack remove-struct-field --struct-name \"{}::{}\" --field-name \"{}\" --paths src --apply",
+                            enum_name, variant_name, field_name
+                        );
                         println!();
                     }
                 }
@@ -4404,7 +4466,9 @@ fn render_execute_result(
     if format == "diff" && show_summary {
         total_stats.print_summary();
     } else if format == "default" && !apply {
-        println!("\n🔍 Dry run complete. Use --apply to make changes, or --format diff to generate a patch.");
+        println!(
+            "\n🔍 Dry run complete. Use --apply to make changes, or --format diff to generate a patch."
+        );
         println!(
             "Summary: {} file(s) would be modified",
             result.changes.len()
@@ -4433,25 +4497,25 @@ fn render_unmatched_paths(unmatched: &std::collections::HashMap<String, usize>) 
     println!("\nTo match all of these, use:");
 
     if let Some((first_path, _)) = paths.first()
-        && let Some(simple_name) = first_path.split("::").last() {
-            println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
-            println!("\nOr match specific paths:");
-            for (path, _) in paths.iter().take(3) {
-                println!("   rs-hack ... --name \"{}\" ...", path);
-            }
-            if paths.len() > 3 {
-                println!("   (and {} more...)", paths.len() - 3);
-            }
+        && let Some(simple_name) = first_path.split("::").last()
+    {
+        println!("   rs-hack ... --name \"*::{}\" ...", simple_name);
+        println!("\nOr match specific paths:");
+        for (path, _) in paths.iter().take(3) {
+            println!("   rs-hack ... --name \"{}\" ...", path);
         }
+        if paths.len() > 3 {
+            println!("   (and {} more...)", paths.len() - 3);
+        }
+    }
 }
 
 fn execute_batch(batch: &BatchSpec, apply: bool, exclude_patterns: &[String]) -> Result<()> {
     for op in &batch.operations {
-        let files =
-            collect_rust_files_with_exclusions(
-                std::slice::from_ref(&batch.base_path),
-                exclude_patterns,
-            )?;
+        let files = collect_rust_files_with_exclusions(
+            std::slice::from_ref(&batch.base_path),
+            exclude_patterns,
+        )?;
         execute_operation(&files, op, apply, None, "default", false, None)?;
     }
     Ok(())

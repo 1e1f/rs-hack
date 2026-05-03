@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::editor::RustEditor;
 use crate::operations::{BackupNode, Operation};
 use crate::state::{
-    generate_run_id, get_state_dir, hash_file, save_backup_nodes, save_run_metadata,
-    FileModification, RunMetadata, RunStatus,
+    FileModification, RunMetadata, RunStatus, generate_run_id, get_state_dir, hash_file,
+    save_backup_nodes, save_run_metadata,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -100,10 +100,11 @@ pub fn execute(files: &[PathBuf], op: &Operation, opts: &ExecuteOpts) -> Result<
                     });
 
                     if let Some(limit) = opts.limit
-                        && result.total_modifications >= limit {
-                            result.limit_hit = true;
-                            break;
-                        }
+                        && result.total_modifications >= limit
+                    {
+                        result.limit_hit = true;
+                        break;
+                    }
                 }
             }
             Err(e) => {
@@ -193,10 +194,11 @@ pub fn execute_with_state(
                     });
 
                     if let Some(limit) = opts.limit
-                        && result.total_modifications >= limit {
-                            result.limit_hit = true;
-                            break;
-                        }
+                        && result.total_modifications >= limit
+                    {
+                        result.limit_hit = true;
+                        break;
+                    }
                 }
             }
             Err(e) => {

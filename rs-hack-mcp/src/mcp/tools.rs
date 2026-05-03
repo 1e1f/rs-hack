@@ -218,7 +218,6 @@ impl ToolRegistry {
                         }
                     }),
                 },
-
                 // ============================================================
                 // DISCOVERY COMMANDS (5) - v0.5.5
                 // Read-only summary/audit views over the AST. Each shells out
@@ -348,7 +347,7 @@ impl ToolRegistry {
     fn call_find_inproc(arguments: &Value) -> Result<String> {
         use std::path::PathBuf;
 
-        use rs_hack::commands::find::{run, FindArgs};
+        use rs_hack::commands::find::{FindArgs, run};
 
         let str_arg = |k: &str| -> Option<String> {
             arguments.get(k).and_then(|v| v.as_str()).map(String::from)

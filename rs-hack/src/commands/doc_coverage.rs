@@ -130,25 +130,24 @@ fn process_item(
                     label: format!("{} (struct)", s.ident),
                 });
             }
-            if check_fields
-                && let syn::Fields::Named(ref named) = s.fields {
-                    for field in &named.named {
-                        *total_fields += 1;
-                        if !has_doc(&field.attrs) {
-                            *missing_field_count += 1;
-                            let field_name = field
-                                .ident
-                                .as_ref()
-                                .map(|i| i.to_string())
-                                .unwrap_or_default();
-                            missing.push(MissingDoc {
-                                file_path: file_path.to_string(),
-                                line: line_of(field.span()),
-                                label: format!("{}::{} (field)", s.ident, field_name),
-                            });
-                        }
+            if check_fields && let syn::Fields::Named(ref named) = s.fields {
+                for field in &named.named {
+                    *total_fields += 1;
+                    if !has_doc(&field.attrs) {
+                        *missing_field_count += 1;
+                        let field_name = field
+                            .ident
+                            .as_ref()
+                            .map(|i| i.to_string())
+                            .unwrap_or_default();
+                        missing.push(MissingDoc {
+                            file_path: file_path.to_string(),
+                            line: line_of(field.span()),
+                            label: format!("{}::{} (field)", s.ident, field_name),
+                        });
                     }
                 }
+            }
         }
         Item::Enum(e) => {
             *total_items += 1;

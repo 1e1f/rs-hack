@@ -672,8 +672,8 @@ impl RustEditor {
             field_name: String,
             deletion_ranges: Vec<(usize, usize)>, // (start_byte, end_byte)
             unmatched_paths: std::collections::HashMap<String, usize>, /* Collect qualified
-                                                                        * paths that didn't
-                                                                        * match */
+                                                   * paths that didn't
+                                                   * match */
             editor: &'a RustEditor,
         }
 
@@ -864,8 +864,8 @@ impl RustEditor {
             path_resolver: Option<&'a PathResolver>,
             insertion_points: Vec<(usize, usize)>, // (byte_offset, indentation_spaces)
             unmatched_paths: std::collections::HashMap<String, usize>, /* Collect qualified
-                                                                        * paths that didn't
-                                                                        * match */
+                                                    * paths that didn't
+                                                    * match */
             editor: &'a RustEditor,
         }
 

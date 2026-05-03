@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use syn::visit::Visit;
 
 use crate::files::collect_rust_files_with_exclusions;
@@ -47,10 +47,11 @@ pub fn run(paths: &[PathBuf], enum_name: &str, exclude: &[String]) -> Result<Mat
 
         for item in &syntax.items {
             if let syn::Item::Enum(e) = item
-                && e.ident == enum_name {
-                    all_variants = e.variants.iter().map(|v| v.ident.to_string()).collect();
-                    break;
-                }
+                && e.ident == enum_name
+            {
+                all_variants = e.variants.iter().map(|v| v.ident.to_string()).collect();
+                break;
+            }
         }
         if !all_variants.is_empty() {
             break;
