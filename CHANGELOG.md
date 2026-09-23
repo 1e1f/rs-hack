@@ -5,6 +5,30 @@ All notable changes to rs-hack will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-09-22
+
+### ⚠️ Breaking (`comments` batch format)
+
+- `comments apply` resolves each op by `hash` alone; the `span` field is gone
+  from ops. The hash now also mixes in the span's occurrence ordinal among
+  same-text spans in the file, so it is unique per file — hashes (and batches)
+  produced by 0.5.6 will not resolve. Re-run `comments list`.
+
+### Added
+
+- `comments list --format batch`: emits ready-made op stubs
+  (`{file, hash, op: "keep", lines, text}`) that can be fed straight back to
+  `comments apply` after flipping `op` on the entries being changed; `keep`
+  ops are ignored.
+- `comments list --lines A-B`: keep only spans entirely inside a 1-indexed,
+  inclusive line range, for slicing large files into worker-sized batches.
+- Both exposed on the `comments_list` MCP tool (`format`, `lines`).
+
+### Changed
+
+- Batches built against different byte offsets of the same file (e.g.
+  different `--lines` slices) now apply correctly in any order.
+
 ## [0.5.6] - 2026-09-22
 
 ### Added

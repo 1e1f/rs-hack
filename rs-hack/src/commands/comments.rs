@@ -11,7 +11,7 @@
 //! Every `apply` is gated by the same `verify` check before anything is written, and records
 //! a whole-file backup under one run_id so `rs-hack revert <run_id>` undoes the batch.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -281,8 +281,14 @@ impl LineIndex {
     }
 }
 
-fn short_hash(text: &str) -> String {
-    blake3::hash(text.as_bytes()).to_hex().as_str()[..16].to_string()
+/// `ordinal` is this span's 0-based position among every span in the file whose text is
+/// byte-identical to this one (see `file_spans`), so two bare `//!` lines with the same text
+/// hash differently. A hash therefore identifies exactly one span in its file.
+fn short_hash(text: &str, ordinal: usize) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&(ordinal as u64).to_le_bytes());
+    hasher.update(text.as_bytes());
+    hasher.finalize().to_hex().as_str()[..16].to_string()
 }
 
 fn is_ws(s: &str) -> bool {
@@ -652,7 +658,9 @@ pub struct CommentSpan {
     pub kind: CommentKind,
     /// Raw source text of the span, comment markers included.
     pub text: String,
-    /// Guard for `apply`: blake3 of `text`, first 16 hex chars.
+    /// Guard for `apply` and the sole key it resolves an op by: blake3 of `text` plus this
+    /// span's occurrence ordinal among same-text spans in the file, first 16 hex chars. Unique
+    /// per file by construction — `file_spans` hard-errors if it ever were not.
     pub hash: String,
     pub attached_item: Option<AttachedItem>,
     pub in_body: bool,
@@ -678,12 +686,37 @@ pub struct ListArgs {
     pub exclude: Vec<String>,
     /// Drop annotation spans from the output (still counted).
     pub exclude_annotations: bool,
+    /// 1-indexed inclusive line range: keep only spans whose `lines` falls entirely inside it.
+    pub lines: Option<[usize; 2]>,
+}
+
+/// Parse a `--lines A-B` argument: 1-indexed, inclusive, `A <= B`.
+pub fn parse_line_range(s: &str) -> Result<[usize; 2]> {
+    let (a, b) = s
+        .split_once('-')
+        .ok_or_else(|| anyhow!("--lines expects A-B (e.g. 1-200), got {s:?}"))?;
+    let a: usize = a
+        .trim()
+        .parse()
+        .with_context(|| format!("--lines: {a:?} is not a line number"))?;
+    let b: usize = b
+        .trim()
+        .parse()
+        .with_context(|| format!("--lines: {b:?} is not a line number"))?;
+    if a == 0 || b < a {
+        bail!("--lines {s:?}: lines are 1-indexed and the range must not be inverted");
+    }
+    Ok([a, b])
 }
 
 /// Spans of one file. Consecutive own-line `//`-style comments of the same kind on adjacent
 /// lines merge into one span; a run splits where the annotation flag flips, so the prose
 /// around an annotation block stays editable while the annotation itself stays guarded.
-fn file_spans(path: &Path, src: &str) -> (Vec<CommentSpan>, Option<String>) {
+///
+/// Hard-errors if two spans in this file would hash identically — should be impossible given
+/// `short_hash`'s occurrence-ordinal scheme, but `apply` resolves ops by hash alone, so a
+/// collision here must stop everything rather than silently pick one of the two spans.
+fn file_spans(path: &Path, src: &str) -> Result<(Vec<CommentSpan>, Option<String>)> {
     let lines = LineIndex::new(src);
     let raws = lex_comments(src);
     let flags = annotation_flags(src, &raws, &lines);
@@ -726,7 +759,8 @@ fn file_spans(path: &Path, src: &str) -> (Vec<CommentSpan>, Option<String>) {
         groups.push((idx, idx));
     }
 
-    let spans = groups
+    let mut occurrences: HashMap<String, usize> = HashMap::new();
+    let spans: Vec<CommentSpan> = groups
         .into_iter()
         .map(|(gs, ge)| {
             let start = raws[gs].start;
@@ -738,12 +772,15 @@ fn file_spans(path: &Path, src: &str) -> (Vec<CommentSpan>, Option<String>) {
             } else {
                 next_code_offset(src, &raws, ge).and_then(|p| map.heads.get(&p).cloned())
             };
+            let ordinal = occurrences.entry(text.clone()).or_insert(0);
+            let hash = short_hash(&text, *ordinal);
+            *ordinal += 1;
             CommentSpan {
                 file: path.to_path_buf(),
                 span: [start, end],
                 lines: [lines.line_of(start), lines.line_of(end.max(start + 1) - 1)],
                 kind,
-                hash: short_hash(&text),
+                hash,
                 text,
                 attached_item,
                 in_body: map.bodies.iter().any(|(o, c)| *o < start && start < *c),
@@ -751,7 +788,20 @@ fn file_spans(path: &Path, src: &str) -> (Vec<CommentSpan>, Option<String>) {
             }
         })
         .collect();
-    (spans, parse_err)
+
+    let mut seen_hashes: HashSet<&str> = HashSet::with_capacity(spans.len());
+    for s in &spans {
+        if !seen_hashes.insert(s.hash.as_str()) {
+            bail!(
+                "duplicate hash {} in {}: two spans hashed identically, which should be \
+                 impossible under the occurrence-ordinal scheme -- refusing to list this file",
+                s.hash,
+                path.display()
+            );
+        }
+    }
+
+    Ok((spans, parse_err))
 }
 
 /// Offset of the first code byte after raw comment `idx`, skipping whitespace and comments.
@@ -781,11 +831,16 @@ pub fn list(args: &ListArgs) -> Result<ListReport> {
     for path in files {
         let src = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let (spans, err) = file_spans(&path, &src);
+        let (spans, err) = file_spans(&path, &src)?;
         if let Some(e) = err {
             report.parse_errors.push((path.clone(), e));
         }
         for s in spans {
+            if let Some([a, b]) = args.lines
+                && (s.lines[0] < a || s.lines[1] > b)
+            {
+                continue;
+            }
             report.span_count += 1;
             if s.annotation {
                 report.annotation_span_count += 1;
@@ -798,6 +853,27 @@ pub fn list(args: &ListArgs) -> Result<ListReport> {
         }
     }
     Ok(report)
+}
+
+/// The `comments list --format batch` payload: one ready-made `"keep"` op stub per
+/// non-annotation span in `report`.
+///
+/// `{file, hash, op: "keep", lines, text}` -- copy the array verbatim and flip `op` on the
+/// entries you're changing. `lines`/`text` are read-only context on anything but `replace`;
+/// `apply` ignores a `"keep"` op entirely.
+pub fn to_batch(report: &ListReport) -> Vec<CommentOp> {
+    report
+        .spans
+        .iter()
+        .filter(|s| !s.annotation)
+        .map(|s| CommentOp {
+            file: s.file.clone(),
+            hash: s.hash.clone(),
+            op: OpKind::Keep,
+            text: Some(s.text.clone()),
+            lines: Some(s.lines),
+        })
+        .collect()
 }
 
 pub fn render_list(report: &ListReport) {
@@ -1214,23 +1290,38 @@ pub fn render_verify(report: &VerifyReport) {
 // apply
 // ---------------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "op", rename_all = "lowercase")]
-pub enum CommentAction {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OpKind {
+    /// `comments list --format batch`'s default: no change. `apply` ignores this op entirely.
+    Keep,
     /// Remove the span; an own-line span takes its whole lines with it.
     Delete,
-    /// Replace the span's text. `text` must itself be only comments and whitespace.
-    Replace { text: String },
+    /// Replace the span's text with `text`, which must itself be only comments and whitespace.
+    Replace,
 }
 
+/// One op in an apply batch, resolved by `hash` alone -- pre-1.0, there is no `span` field and
+/// no fallback.
+///
+/// `hash` is looked up against a fresh `comments list` of `file` at apply time, so a batch
+/// built before a sibling op shifted the file's byte offsets still resolves correctly (see
+/// `apply`'s per-file hash table).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommentOp {
     pub file: PathBuf,
-    pub span: [usize; 2],
-    /// The `hash` `comments list` reported for this span.
+    /// The `hash` `comments list` reported for this span. The only thing that identifies which
+    /// span this op targets.
     pub hash: String,
-    #[serde(flatten)]
-    pub action: CommentAction,
+    pub op: OpKind,
+    /// Required for `replace`. Read-only context on `keep`/`delete` (ignored by `apply`) --
+    /// `comments list --format batch` fills it with the span's current text so a worker can
+    /// read what it's deciding about without a second lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Read-only context from `comments list --format batch`; ignored by `apply`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines: Option<[usize; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -1253,7 +1344,9 @@ pub struct OpOutcome {
     /// Index of the op in the batch.
     pub index: usize,
     pub file: PathBuf,
-    pub span: [usize; 2],
+    /// The span this op resolved to, if `hash` was found. `None` for an unknown-hash refusal
+    /// and for a whole file that could not be read -- there is nothing to resolve against.
+    pub span: Option<[usize; 2]>,
     /// Why the op was refused; None for an accepted op.
     pub reason: Option<String>,
 }
@@ -1279,45 +1372,6 @@ pub struct ApplyArgs {
     pub command_line: String,
 }
 
-/// Why `[s, e)` is not an editable comment span of `src`, if it is not.
-fn check_span(
-    src: &str,
-    raws: &[RawComment],
-    flags: &[bool],
-    [s, e]: [usize; 2],
-    allow_annotations: bool,
-) -> Option<String> {
-    if s >= e || e > src.len() || !src.is_char_boundary(s) || !src.is_char_boundary(e) {
-        return Some(format!("span [{s}, {e}) is out of bounds for this file"));
-    }
-    let Some(first) = raws.iter().position(|r| r.start == s) else {
-        return Some("span does not start at a comment".to_string());
-    };
-    let mut pos = s;
-    for (idx, r) in raws.iter().enumerate().skip(first) {
-        if r.start >= e {
-            break;
-        }
-        if !is_ws(&src[pos..r.start]) {
-            return Some(format!("span covers code at byte {pos}"));
-        }
-        if r.end > e {
-            return Some("span ends inside a comment".to_string());
-        }
-        if flags[idx] && !allow_annotations {
-            return Some(
-                "span holds an @yah:/@arch: annotation (pass --allow-annotations to edit it)"
-                    .to_string(),
-            );
-        }
-        pos = r.end;
-    }
-    if pos != e {
-        return Some("span does not end at a comment".to_string());
-    }
-    None
-}
-
 /// Resolve a delete to the byte range actually removed: whole lines for an own-line span, the
 /// comment plus its leading horizontal whitespace for a trailing one.
 fn delete_range(src: &str, [s, e]: [usize; 2]) -> (usize, usize) {
@@ -1339,6 +1393,9 @@ pub fn apply(args: &ApplyArgs) -> Result<ApplyReport> {
 
     let mut by_file: BTreeMap<PathBuf, Vec<(usize, &CommentOp)>> = BTreeMap::new();
     for (i, op) in args.ops.iter().enumerate() {
+        if op.op == OpKind::Keep {
+            continue;
+        }
         by_file.entry(op.file.clone()).or_default().push((i, op));
     }
 
@@ -1346,50 +1403,75 @@ pub fn apply(args: &ApplyArgs) -> Result<ApplyReport> {
     let mut modifications = Vec::new();
 
     for (file, ops) in by_file {
-        let refuse = |report: &mut ApplyReport, i: usize, op: &CommentOp, why: String| {
-            report.refused.push(OpOutcome {
-                index: i,
-                file: op.file.clone(),
-                span: op.span,
-                reason: Some(why),
-            });
-        };
+        let refuse =
+            |report: &mut ApplyReport, i: usize, op: &CommentOp, span: Option<[usize; 2]>, why: String| {
+                report.refused.push(OpOutcome {
+                    index: i,
+                    file: op.file.clone(),
+                    span,
+                    reason: Some(why),
+                });
+            };
         let src = match std::fs::read_to_string(&file) {
             Ok(s) => s,
             Err(e) => {
                 for (i, op) in ops {
-                    refuse(&mut report, i, op, format!("cannot read file: {e}"));
+                    refuse(&mut report, i, op, None, format!("cannot read file: {e}"));
                 }
                 continue;
             }
         };
         let lines = LineIndex::new(&src);
-        let raws = lex_comments(&src);
-        let flags = annotation_flags(&src, &raws, &lines);
+        // Fresh per file, per call: resolving by hash against a table built from THIS read is
+        // what lets a batch built before a sibling op shifted the file's byte offsets still
+        // resolve correctly, and it's why an op can no longer carry its own span.
+        let (spans, _parse_err) = file_spans(&file, &src)?;
+        let by_hash: HashMap<&str, &CommentSpan> =
+            spans.iter().map(|s| (s.hash.as_str(), s)).collect();
 
         // (index, op, removed range, replacement)
         let mut edits: Vec<(usize, &CommentOp, (usize, usize), String)> = Vec::new();
         for (i, op) in ops {
-            if let Some(why) = check_span(&src, &raws, &flags, op.span, args.allow_annotations) {
-                refuse(&mut report, i, op, why);
-                continue;
-            }
-            let current = short_hash(&src[op.span[0]..op.span[1]]);
-            if current != op.hash {
+            let Some(span) = by_hash.get(op.hash.as_str()).copied() else {
                 refuse(
                     &mut report,
                     i,
                     op,
+                    None,
                     format!(
-                        "stale span: hash is {current}, batch expected {} — re-run `comments list`",
-                        op.hash
+                        "unknown hash {} in {}: no span currently has this hash — re-run \
+                         `comments list`",
+                        op.hash,
+                        file.display()
                     ),
                 );
                 continue;
+            };
+            if span.annotation && !args.allow_annotations {
+                refuse(
+                    &mut report,
+                    i,
+                    op,
+                    Some(span.span),
+                    "span holds an @yah:/@arch: annotation (pass --allow-annotations to edit it)"
+                        .to_string(),
+                );
+                continue;
             }
-            let (range, text) = match &op.action {
-                CommentAction::Delete => (delete_range(&src, op.span), String::new()),
-                CommentAction::Replace { text } => {
+            let (range, text) = match op.op {
+                OpKind::Keep => unreachable!("keep ops are filtered out of by_file above"),
+                OpKind::Delete => (delete_range(&src, span.span), String::new()),
+                OpKind::Replace => {
+                    let Some(text) = op.text.as_deref() else {
+                        refuse(
+                            &mut report,
+                            i,
+                            op,
+                            Some(span.span),
+                            "op: \"replace\" with no `text`".to_string(),
+                        );
+                        continue;
+                    };
                     let rep = lex_comments(text);
                     let mut pos = 0;
                     let mut only_comments = true;
@@ -1403,6 +1485,7 @@ pub fn apply(args: &ApplyArgs) -> Result<ApplyReport> {
                             &mut report,
                             i,
                             op,
+                            Some(span.span),
                             "replacement text must contain only comments and whitespace"
                                 .to_string(),
                         );
@@ -1413,19 +1496,20 @@ pub fn apply(args: &ApplyArgs) -> Result<ApplyReport> {
                             &mut report,
                             i,
                             op,
+                            Some(span.span),
                             "replacement text introduces an @yah:/@arch: annotation (pass --allow-annotations)"
                                 .to_string(),
                         );
                         continue;
                     }
                     if text.is_empty() {
-                        (delete_range(&src, op.span), String::new())
+                        (delete_range(&src, span.span), String::new())
                     } else {
-                        ((op.span[0], op.span[1]), text.clone())
+                        ((span.span[0], span.span[1]), text.to_string())
                     }
                 }
             };
-            if let Some((j, other, ..)) = edits
+            if let Some((j, _, r, _)) = edits
                 .iter()
                 .find(|(_, _, r, _)| range.0 < r.1 && r.0 < range.1)
             {
@@ -1433,10 +1517,8 @@ pub fn apply(args: &ApplyArgs) -> Result<ApplyReport> {
                     &mut report,
                     i,
                     op,
-                    format!(
-                        "overlaps op #{j} span [{}, {})",
-                        other.span[0], other.span[1]
-                    ),
+                    Some(span.span),
+                    format!("overlaps op #{j} range [{}, {})", r.0, r.1),
                 );
                 continue;
             }
@@ -1461,18 +1543,18 @@ pub fn apply(args: &ApplyArgs) -> Result<ApplyReport> {
                     Err(e) => format!("batch would leave this file unparseable: {e:#}"),
                     Ok(None) => unreachable!(),
                 };
-                for (i, op, ..) in edits {
-                    refuse(&mut report, i, op, why.clone());
+                for (i, op, range, _) in edits {
+                    refuse(&mut report, i, op, Some(range.into()), why.clone());
                 }
                 continue;
             }
         }
 
-        for (i, op, ..) in &edits {
+        for (i, op, range, _) in &edits {
             report.accepted.push(OpOutcome {
                 index: *i,
                 file: op.file.clone(),
-                span: op.span,
+                span: Some((*range).into()),
                 reason: None,
             });
         }
@@ -1538,12 +1620,14 @@ pub fn render_apply(report: &ApplyReport) {
         println!("{}", report.diff);
     }
     for r in &report.refused {
+        let loc = r
+            .span
+            .map(|[s, e]| format!(" [{s}, {e})"))
+            .unwrap_or_default();
         println!(
-            "✗ op #{} {} [{}, {}): {}",
+            "✗ op #{} {}{loc}: {}",
             r.index,
             r.file.display(),
-            r.span[0],
-            r.span[1],
             r.reason.as_deref().unwrap_or("")
         );
     }

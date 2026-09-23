@@ -286,19 +286,21 @@ impl ToolRegistry {
                 // ============================================================
                 Tool {
                     name: "comments_list",
-                    description: "List every comment span (line `//`, block `/* */`, doc `///`/`/**`, inner-doc `//!`/`/*!`), including inside fn bodies. Each span: {file, span:[start,end] byte range, lines:[first,last], kind, text, hash, attached_item:{node_type,name,visibility}|null, in_body, annotation}. `annotation` is true for spans holding @yah:/@arch: (incl. wrapped continuation lines). Feed span+hash to comments_apply.",
+                    description: "List every comment span (line `//`, block `/* */`, doc `///`/`/**`, inner-doc `//!`/`/*!`), including inside fn bodies. Each span: {file, span:[start,end] byte range, lines:[first,last], kind, text, hash, attached_item:{node_type,name,visibility}|null, in_body, annotation}. `annotation` is true for spans holding @yah:/@arch: (incl. wrapped continuation lines). `hash` is the sole key comments_apply resolves an op by -- unique per file, never re-derive it by hand. Pass `format: \"batch\"` to get ready-made op stubs instead ({file, hash, op:\"keep\", lines, text}, one per non-annotation span) -- copy the array verbatim into comments_apply and flip `op` on the entries you're changing. `lines: \"A-B\"` (1-indexed, inclusive) keeps only spans whose range falls entirely inside it, for slicing a large file into worker-sized ranges.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "paths": {"type": "string", "description": "File path, directory or glob pattern (e.g., \"src/**/*.rs\")"},
-                            "exclude_annotations": {"type": "boolean", "default": false, "description": "Omit annotation spans from the list (still counted)"}
+                            "exclude_annotations": {"type": "boolean", "default": false, "description": "Omit annotation spans from the list (still counted)"},
+                            "lines": {"type": "string", "description": "Keep only spans whose line range falls entirely inside A-B (1-indexed, inclusive), e.g. \"4367-8214\""},
+                            "format": {"type": "string", "enum": ["report", "batch"], "default": "report", "description": "\"batch\" returns ready-made op stubs ({file, hash, op:\"keep\", lines, text}) instead of the full report"}
                         },
                         "required": ["paths"]
                     }),
                 },
                 Tool {
                     name: "comments_apply",
-                    description: "Apply a batch of comment edits: ops [{file, span:[start,end], hash, op:\"delete\"} | {..., op:\"replace\", text}]. Each op is guarded by the hash comments_list reported: a moved/changed span is REFUSED, not misapplied. Also refused: spans that are not exactly comments, annotation spans (unless allow_annotations), replacement text that is not only comments, and any file whose code would change. Dry-run unless apply=true; a write returns one run_id, undo with the revert tool.",
+                    description: "Apply a batch of comment edits, resolved by `hash` alone: ops [{file, hash, op:\"delete\"} | {file, hash, op:\"replace\", text}]. A comments_list --format batch stub is already a valid op with op:\"keep\" -- comments_apply ignores those, so the array from comments_list can be submitted unmodified except for the ops actually changed. Refused, never misapplied: an unknown hash (no span in the file currently has it), a span that is not exactly comments, an annotation span (unless allow_annotations), replacement text that is not only comments, overlapping ops, and any file whose code would change. Because resolution is by hash rather than position, two batches built against different byte offsets of the same file still resolve correctly regardless of application order. Dry-run unless apply=true; a write returns one run_id, undo with the revert tool.",
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -442,12 +444,20 @@ impl ToolRegistry {
             "list" => {
                 let paths = str_arg("paths")
                     .ok_or_else(|| anyhow!("comments_list: 'paths' is required"))?;
+                let lines = str_arg("lines")
+                    .map(|s| comments::parse_line_range(&s))
+                    .transpose()?;
                 let report = comments::list(&comments::ListArgs {
                     paths: vec![PathBuf::from(paths)],
                     exclude: Vec::new(),
                     exclude_annotations: bool_arg("exclude_annotations"),
+                    lines,
                 })?;
-                Ok(serde_json::to_string_pretty(&report)?)
+                if str_arg("format").as_deref() == Some("batch") {
+                    Ok(serde_json::to_string_pretty(&comments::to_batch(&report))?)
+                } else {
+                    Ok(serde_json::to_string_pretty(&report)?)
+                }
             }
             "apply" => {
                 let ops = arguments

@@ -1868,12 +1868,25 @@ enum CommentsCommand {
     #[command(after_help = "EXAMPLES:
     rs-hack comments list --paths 'src/**/*.rs' --format json
     rs-hack comments list --paths src/runner.rs --exclude-annotations --format json
+    rs-hack comments list --paths src/runner.rs --format batch --lines 4367-8214
 
 OUTPUT (json): {files_scanned, span_count, annotation_span_count, annotation_line_count,
     parse_errors, spans: [{file, span:[start,end], lines:[first,last], kind, text, hash,
     attached_item: {node_type, name, visibility} | null, in_body, annotation}]}
     kind is line | block | doc | inner-doc. Consecutive own-line comments of one kind merge
-    into one span; runs split where the annotation flag flips. span/hash feed `comments apply`.")]
+    into one span; runs split where the annotation flag flips. `hash` is the sole key
+    `comments apply` resolves an op by -- unique per file, never re-derive it by hand.
+
+OUTPUT (batch): a JSON array of ready-made op stubs, one per non-annotation span:
+    [{file, hash, op: \"keep\", lines:[first,last], text}, ...]
+    Copy the array verbatim into an apply batch and flip `op` on the entries you're changing
+    (`\"delete\"`, or `\"replace\"` with a new `text`) -- never hand-type a span or a hash.
+    `apply` ignores a `\"keep\"` op and treats `lines`/`text` on anything but `replace` as
+    read-only context.
+
+--lines A-B keeps only spans whose line range falls entirely inside [A, B] (1-indexed,
+    inclusive). Works with every --format; use it to slice a large file into worker-sized
+    ranges without hand-filtering with jq.")]
     List {
         /// Files, directories or glob patterns
         #[arg(short, long, num_args = 1.., required = true)]
@@ -1882,18 +1895,30 @@ OUTPUT (json): {files_scanned, span_count, annotation_span_count, annotation_lin
         /// Omit annotation (@yah:/@arch:) spans from `spans` (still counted)
         #[arg(long)]
         exclude_annotations: bool,
+
+        /// Keep only spans whose line range falls entirely inside A-B (1-indexed, inclusive)
+        #[arg(long, value_name = "A-B")]
+        lines: Option<String>,
     },
 
     /// Apply a hash-guarded batch of comment deletes/replacements (dry-run by default)
-    #[command(after_help = "BATCH (a file path, `-` for stdin, or inline JSON):
-    [{\"file\": \"src/a.rs\", \"span\": [120, 188], \"hash\": \"<from list>\", \"op\": \"delete\"},
-     {\"file\": \"src/a.rs\", \"span\": [300, 340], \"hash\": \"<from list>\", \"op\": \"replace\",
+    #[command(after_help = "BATCH (a file path, `-` for stdin, or inline JSON) -- resolved by
+`hash` alone, never by position:
+    [{\"file\": \"src/a.rs\", \"hash\": \"<from list>\", \"op\": \"delete\"},
+     {\"file\": \"src/a.rs\", \"hash\": \"<from list>\", \"op\": \"replace\",
       \"text\": \"// shorter\"}]
 
-REFUSED (reported, never applied): a span whose current text no longer matches its hash; a
-span that is not exactly comments; an annotation span without --allow-annotations; overlapping
-ops; replacement text that is not only comments; any file whose code would change (the
-`comments verify` gate runs before every write). Exit status 1 if any op was refused.
+A `comments list --format batch` stub is already a valid op with `op: \"keep\"` -- `apply`
+ignores those, so the whole array from `list --format batch` can be submitted unmodified
+except for the ops you actually changed.
+
+REFUSED (reported, never applied): an unknown hash (no span in the file currently has it,
+names the hash and file); a span that is not exactly comments; an annotation span without
+--allow-annotations; overlapping ops; replacement text that is not only comments; any file
+whose code would change (the `comments verify` gate runs before every write). Exit status 1
+if any op was refused. Because resolution is by hash, two batches computed against different
+byte offsets of the same file (e.g. from different `--lines` slices, applied in either order)
+both still resolve correctly -- there is no bottom-up ordering requirement.
 
 One run_id per batch: undo with `rs-hack revert <run_id>`, check with
 `rs-hack comments verify --run-id <run_id>`.")]
@@ -1946,13 +1971,18 @@ fn run_comments(
         CommentsCommand::List {
             paths,
             exclude_annotations,
+            lines,
         } => {
+            let lines = lines.as_deref().map(comments::parse_line_range).transpose()?;
             let report = comments::list(&comments::ListArgs {
                 paths,
                 exclude: exclude.to_vec(),
                 exclude_annotations,
+                lines,
             })?;
-            if json {
+            if format == "batch" {
+                println!("{}", serde_json::to_string_pretty(&comments::to_batch(&report))?);
+            } else if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 comments::render_list(&report);
