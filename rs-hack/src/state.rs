@@ -215,6 +215,17 @@ pub fn restore_from_nodes(file_path: &Path, nodes: &[BackupNode], _state_dir: &P
         return Ok(());
     }
 
+    // Whole-file backups (`comments apply`) restore byte-for-byte; re-emitting through the
+    // AST editor would drop the very comments being restored.
+    if let Some(file_backup) = nodes
+        .iter()
+        .find(|n| n.node_type == crate::commands::comments::FILE_BACKUP_NODE_TYPE)
+    {
+        fs::write(file_path, &file_backup.original_content)
+            .with_context(|| format!("Failed to write restored file: {}", file_path.display()))?;
+        return Ok(());
+    }
+
     // Read current file content
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file for revert: {}", file_path.display()))?;

@@ -281,6 +281,46 @@ impl ToolRegistry {
                         "required": ["path"]
                     }),
                 },
+                // ============================================================
+                // COMMENT TOOLS (3)
+                // ============================================================
+                Tool {
+                    name: "comments_list",
+                    description: "List every comment span (line `//`, block `/* */`, doc `///`/`/**`, inner-doc `//!`/`/*!`), including inside fn bodies. Each span: {file, span:[start,end] byte range, lines:[first,last], kind, text, hash, attached_item:{node_type,name,visibility}|null, in_body, annotation}. `annotation` is true for spans holding @yah:/@arch: (incl. wrapped continuation lines). Feed span+hash to comments_apply.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "string", "description": "File path, directory or glob pattern (e.g., \"src/**/*.rs\")"},
+                            "exclude_annotations": {"type": "boolean", "default": false, "description": "Omit annotation spans from the list (still counted)"}
+                        },
+                        "required": ["paths"]
+                    }),
+                },
+                Tool {
+                    name: "comments_apply",
+                    description: "Apply a batch of comment edits: ops [{file, span:[start,end], hash, op:\"delete\"} | {..., op:\"replace\", text}]. Each op is guarded by the hash comments_list reported: a moved/changed span is REFUSED, not misapplied. Also refused: spans that are not exactly comments, annotation spans (unless allow_annotations), replacement text that is not only comments, and any file whose code would change. Dry-run unless apply=true; a write returns one run_id, undo with the revert tool.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "ops": {"type": "array", "items": {"type": "object"}, "description": "The batch of ops"},
+                            "apply": {"type": "boolean", "default": false, "description": "Write the changes (default dry-run)"},
+                            "allow_annotations": {"type": "boolean", "default": false, "description": "Permit ops on @yah:/@arch: annotation spans"}
+                        },
+                        "required": ["ops"]
+                    }),
+                },
+                Tool {
+                    name: "comments_verify",
+                    description: "Check code is unchanged ignoring comments, whitespace and #[doc] attrs. Pass before (file path or git revision) + after (file), or run_id of a comments_apply run. Returns {equal, files:[{file, equal, difference:{before_item, before_line, after_item, after_line}|null, error}]}; the difference names the first differing item.",
+                    input_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "before": {"type": "string", "description": "Before: file path, or a git revision whose copy of `after` is compared"},
+                            "after": {"type": "string", "description": "After: current file path"},
+                            "run_id": {"type": "string", "description": "A comments_apply run id (instead of before/after)"}
+                        }
+                    }),
+                },
             ],
         }
     }
@@ -296,6 +336,9 @@ impl ToolRegistry {
         // Returns serialized JSON; bypasses argv → CLI → stdout marshalling.
         if name == "find" {
             return Self::call_find_inproc(&arguments);
+        }
+        if let Some(sub) = name.strip_prefix("comments_") {
+            return Self::call_comments_inproc(sub, &arguments);
         }
 
         // Map tool name to rs-hack command and build arguments
@@ -382,6 +425,59 @@ impl ToolRegistry {
 
         let result = run(&args)?;
         Ok(serde_json::to_string_pretty(&result)?)
+    }
+
+    /// In-process `comments_{list,apply,verify}`; always returns the JSON report. A refused op
+    /// or a failed verify is data in that report, not a tool error.
+    fn call_comments_inproc(sub: &str, arguments: &Value) -> Result<String> {
+        use std::path::PathBuf;
+
+        use rs_hack::commands::comments;
+        use rs_hack::state::get_state_dir;
+
+        let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(String::from);
+        let bool_arg = |k: &str| arguments.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+
+        match sub {
+            "list" => {
+                let paths = str_arg("paths")
+                    .ok_or_else(|| anyhow!("comments_list: 'paths' is required"))?;
+                let report = comments::list(&comments::ListArgs {
+                    paths: vec![PathBuf::from(paths)],
+                    exclude: Vec::new(),
+                    exclude_annotations: bool_arg("exclude_annotations"),
+                })?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+            "apply" => {
+                let ops = arguments
+                    .get("ops")
+                    .ok_or_else(|| anyhow!("comments_apply: 'ops' is required"))?;
+                let report = comments::apply(&comments::ApplyArgs {
+                    ops: comments::parse_batch(&ops.to_string())?,
+                    apply: bool_arg("apply"),
+                    allow_annotations: bool_arg("allow_annotations"),
+                    state_dir: get_state_dir(false)?,
+                    command_line: format!("mcp comments_apply {ops}"),
+                })?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+            "verify" => {
+                let args = match (str_arg("before"), str_arg("after"), str_arg("run_id")) {
+                    (Some(before), Some(after), None) => comments::VerifyArgs::Files {
+                        before,
+                        after: PathBuf::from(after),
+                    },
+                    (None, None, Some(run_id)) => comments::VerifyArgs::RunId {
+                        run_id,
+                        state_dir: get_state_dir(false)?,
+                    },
+                    _ => return Err(anyhow!("comments_verify: pass before+after, or run_id")),
+                };
+                Ok(serde_json::to_string_pretty(&comments::verify(&args)?)?)
+            }
+            other => Err(anyhow!("unknown tool: comments_{other}")),
+        }
     }
 
     fn build_command(&self, tool_name: &str, arguments: &Value) -> Result<(String, Vec<String>)> {
@@ -915,5 +1011,61 @@ impl ToolRegistry {
         if self.get_bool(arguments, "apply") {
             args.push("--apply".to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> String {
+        format!(
+            "{}/../rs-hack/tests/fixtures/comments/all_kinds.rs",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    #[test]
+    fn comments_tools_are_registered_and_dispatch_in_process() {
+        let reg = ToolRegistry::new();
+        for name in ["comments_list", "comments_apply", "comments_verify"] {
+            assert!(reg.list().iter().any(|t| t.name == name), "{name} missing");
+        }
+
+        let listed: Value = serde_json::from_str(
+            &reg.call("comments_list", json!({"paths": fixture()}))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(listed["annotation_span_count"], 1);
+        let span = listed["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["text"].as_str().unwrap().contains("body comment one"))
+            .unwrap()
+            .clone();
+
+        // Dry-run apply through MCP never writes and reports the op as accepted.
+        let applied: Value = serde_json::from_str(
+            &reg.call(
+                "comments_apply",
+                json!({"ops": [{"file": span["file"], "span": span["span"], "hash": span["hash"], "op": "delete"}]}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(applied["dry_run"], true);
+        assert_eq!(applied["accepted"].as_array().unwrap().len(), 1);
+
+        let verified: Value = serde_json::from_str(
+            &reg.call(
+                "comments_verify",
+                json!({"before": fixture(), "after": fixture()}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(verified["equal"], true);
     }
 }

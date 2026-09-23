@@ -4,6 +4,7 @@
 //! yah, tests) can drive the same logic without shelling out. The CLI in `main.rs` is a thin
 //! clap → struct → `run()` translator that adds rendering on top.
 
+pub mod comments;
 pub mod doc_coverage;
 pub mod find;
 pub mod match_audit;

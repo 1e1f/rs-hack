@@ -1290,6 +1290,10 @@ NOTES:
         apply: bool,
     },
 
+    /// List, edit and verify comment spans (line, block, doc, inner-doc; fn bodies included)
+    #[command(subcommand)]
+    Comments(CommentsCommand),
+
     /// Show history of rs-hack runs
     History {
         /// Number of recent runs to show
@@ -1858,10 +1862,166 @@ fn show_target_hints(
     Ok(())
 }
 
+#[derive(Subcommand)]
+enum CommentsCommand {
+    /// List every comment span with its byte span, kind, attached item and annotation flag
+    #[command(after_help = "EXAMPLES:
+    rs-hack comments list --paths 'src/**/*.rs' --format json
+    rs-hack comments list --paths src/runner.rs --exclude-annotations --format json
+
+OUTPUT (json): {files_scanned, span_count, annotation_span_count, annotation_line_count,
+    parse_errors, spans: [{file, span:[start,end], lines:[first,last], kind, text, hash,
+    attached_item: {node_type, name, visibility} | null, in_body, annotation}]}
+    kind is line | block | doc | inner-doc. Consecutive own-line comments of one kind merge
+    into one span; runs split where the annotation flag flips. span/hash feed `comments apply`.")]
+    List {
+        /// Files, directories or glob patterns
+        #[arg(short, long, num_args = 1.., required = true)]
+        paths: Vec<PathBuf>,
+
+        /// Omit annotation (@yah:/@arch:) spans from `spans` (still counted)
+        #[arg(long)]
+        exclude_annotations: bool,
+    },
+
+    /// Apply a hash-guarded batch of comment deletes/replacements (dry-run by default)
+    #[command(after_help = "BATCH (a file path, `-` for stdin, or inline JSON):
+    [{\"file\": \"src/a.rs\", \"span\": [120, 188], \"hash\": \"<from list>\", \"op\": \"delete\"},
+     {\"file\": \"src/a.rs\", \"span\": [300, 340], \"hash\": \"<from list>\", \"op\": \"replace\",
+      \"text\": \"// shorter\"}]
+
+REFUSED (reported, never applied): a span whose current text no longer matches its hash; a
+span that is not exactly comments; an annotation span without --allow-annotations; overlapping
+ops; replacement text that is not only comments; any file whose code would change (the
+`comments verify` gate runs before every write). Exit status 1 if any op was refused.
+
+One run_id per batch: undo with `rs-hack revert <run_id>`, check with
+`rs-hack comments verify --run-id <run_id>`.")]
+    Apply {
+        /// Batch JSON: path, `-` for stdin, or the JSON text itself
+        #[arg(short, long)]
+        batch: String,
+
+        /// Write the changes (default is dry-run)
+        #[arg(long)]
+        apply: bool,
+
+        /// Permit ops on spans holding @yah:/@arch: annotations
+        #[arg(long)]
+        allow_annotations: bool,
+    },
+
+    /// Exit 0 iff code is unchanged ignoring comments, whitespace and #[doc] attributes
+    #[command(after_help = "EXAMPLES:
+    rs-hack comments verify --before old.rs --after src/a.rs
+    rs-hack comments verify --before HEAD --after src/a.rs      # git revision
+    rs-hack comments verify --run-id 3f2a9c1
+
+Exit 1 names the first differing item (e.g. `fn old_name` vs `fn new_name`).")]
+    Verify {
+        /// Before: a file path, or a git revision whose copy of --after is compared
+        #[arg(long, requires = "after", conflicts_with = "run_id")]
+        before: Option<String>,
+
+        /// After: the current file
+        #[arg(long, requires = "before")]
+        after: Option<PathBuf>,
+
+        /// Verify every file a `comments apply` run modified against its backup
+        #[arg(long, required_unless_present = "before")]
+        run_id: Option<String>,
+    },
+}
+
+fn run_comments(
+    cmd: CommentsCommand,
+    format: &str,
+    local_state: bool,
+    exclude: &[String],
+) -> Result<()> {
+    use rs_hack::commands::comments;
+
+    let json = format == "json";
+    match cmd {
+        CommentsCommand::List {
+            paths,
+            exclude_annotations,
+        } => {
+            let report = comments::list(&comments::ListArgs {
+                paths,
+                exclude: exclude.to_vec(),
+                exclude_annotations,
+            })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                comments::render_list(&report);
+            }
+        }
+        CommentsCommand::Apply {
+            batch,
+            apply,
+            allow_annotations,
+        } => {
+            let text = if batch == "-" {
+                std::io::read_to_string(std::io::stdin()).context("Failed to read batch stdin")?
+            } else if batch.trim_start().starts_with(['[', '{']) {
+                batch
+            } else {
+                std::fs::read_to_string(&batch)
+                    .with_context(|| format!("Failed to read batch file {batch}"))?
+            };
+            let report = comments::apply(&comments::ApplyArgs {
+                ops: comments::parse_batch(&text)?,
+                apply,
+                allow_annotations,
+                state_dir: get_state_dir(local_state)?,
+                command_line: std::env::args().collect::<Vec<_>>().join(" "),
+            })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                comments::render_apply(&report);
+            }
+            if !report.refused.is_empty() {
+                std::process::exit(1);
+            }
+        }
+        CommentsCommand::Verify {
+            before,
+            after,
+            run_id,
+        } => {
+            let args = match (before, after, run_id) {
+                (Some(before), Some(after), None) => comments::VerifyArgs::Files { before, after },
+                (None, None, Some(run_id)) => comments::VerifyArgs::RunId {
+                    run_id,
+                    state_dir: get_state_dir(local_state)?,
+                },
+                _ => anyhow::bail!("pass either --before and --after, or --run-id"),
+            };
+            let report = comments::verify(&args)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                comments::render_verify(&report);
+            }
+            if !report.equal {
+                std::process::exit(1);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Comments(cmd) => {
+            run_comments(cmd, &cli.format, cli.local_state, &cli.exclude)?;
+        }
+
         Commands::AddStructField {
             paths,
             struct_name,
