@@ -5,6 +5,26 @@ All notable changes to rs-hack will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-09-22
+
+### Added
+
+- **`comments` command** (`list` / `apply` / `verify`): enumerate every comment
+  span (line, block, doc, inner-doc, fn bodies included) with byte span, hash,
+  attached item and an `@yah:`/`@arch:` annotation flag; apply a hash-guarded
+  batch of deletes/replacements (dry-run by default, revertible via
+  `rs-hack revert <run_id>`); and verify that code is unchanged once comments
+  are ignored. Exposed as `comments_*` MCP tools, dispatched in-process.
+
+### Fixed
+
+- `find --context N` off-by-one that dropped context lines for matches near
+  the top of a file.
+
+### Changed
+
+- Workspace moved to Rust edition 2024.
+
 ## [0.5.5] - 2026-05-01
 
 ### ⚠️ Breaking (CLI / scripts only — lib API is fully additive)
